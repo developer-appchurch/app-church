@@ -1,0 +1,195 @@
+export type AttendanceStatus = 'green' | 'yellow' | 'red' | 'black';
+
+export type UserRole =
+  | 'Membro'
+  | 'Líder em Treinamento'
+  | 'Líder de Célula'
+  | 'Líder de Setor'
+  | 'Pastor'
+  | 'Supervisor'
+  | 'Administrador'
+  | 'Anfitrião'
+  | 'Intercessor'
+  | 'Secretário';
+
+/**
+ * Tabela de Funções (Roles)
+ */
+export interface Role {
+  id: string; // e.g. 'role-membro', 'role-lider-celula'
+  name: UserRole;
+  slug: string;
+  description: string;
+  hierarchyLevel: number;
+  badgeColor?: string;
+  createdAt?: string;
+}
+
+/**
+ * Tabela de Permissões (Permissions)
+ */
+export interface Permission {
+  id: string;
+  code: string; // e.g. 'cell:view', 'cell:manage', 'track:update'
+  name: string;
+  module: 'Célula' | 'Membros' | 'Frequência' | 'Trilho' | 'Relatórios' | 'Feed' | 'Admin';
+  description: string;
+}
+
+/**
+ * Relação Função <-> Permissão
+ */
+export interface RolePermission {
+  roleId: string;
+  permissionId: string;
+}
+
+/**
+ * Tabela de Etapas do Trilho de Liderança (Track Steps)
+ */
+export interface TrackStep {
+  id: number;
+  stepNumber: number;
+  title: string;
+  description: string;
+  required: boolean;
+}
+
+/**
+ * Progresso específico de uma etapa do trilho para um membro
+ */
+export interface MemberTrackStepRecord {
+  id?: string;
+  memberId: string;
+  cellId: string;
+  stepId: number;
+  completed: boolean;
+  completedAt?: string;
+  notes?: string;
+  validatedBy?: string;
+}
+
+export interface Church {
+  id: string; // e.g. 'church-sobral', 'church-jaibaras'
+  name: string; // e.g. 'Paz Church Sobral', 'Paz Church Jaibaras'
+  slug: string;
+  city: string;
+  state: string;
+  logoUrl?: string;
+  primaryColor?: string;
+}
+
+export interface UserProfile {
+  id: string;
+  churchId: string;
+  churchName: string;
+  name: string;
+  login: string;
+  role: UserRole;
+  roleId?: string;
+  permissions?: string[];
+  sector: string;
+  currentCellId: string;
+  email: string;
+  phone?: string;
+  avatarUrl?: string;
+  isPrivileged?: boolean; // Can post church-wide general notices (Líder de Setor, Pastor, etc.)
+}
+
+export interface CellGroup {
+  id: string;
+  churchId: string;
+  name: string;
+  leaderName: string;
+  sectorName: string;
+  address: string;
+  meetingDay: string;
+  meetingTime: string;
+  memberCount: number;
+}
+
+export interface CellMember {
+  id: string;
+  churchId: string;
+  cellId: string; // Pertence à Célula
+  name: string;
+  roleId?: string; // Tabela de Funções
+  role: UserRole;
+  permissions?: string[]; // Permissões herdadas e/ou customizadas
+  neighborhood: string;
+  birthday: string; // "dd/MM"
+  birthDateFull?: string;
+  phone?: string;
+  attendanceStatus: AttendanceStatus;
+  attendancePercentage: number;
+  avatarUrl?: string;
+  notes?: string;
+  trackProgress?: {
+    currentStepId: number;
+    completedStepsCount: number;
+    totalStepsCount: number;
+    percentage: number;
+  };
+}
+
+export interface LeadershipTrackStep {
+  id: number;
+  title: string;
+  description: string;
+  completed: boolean;
+  completedAt?: string;
+}
+
+export interface LeadershipTrackProgress {
+  memberId: string;
+  currentStepId: number;
+  steps: LeadershipTrackStep[];
+}
+
+export interface PostComment {
+  id: string;
+  postId: string;
+  authorName: string;
+  authorRole: string;
+  authorAvatar?: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface FeedPost {
+  id: string;
+  churchId: string; // Strictly isolates posts per church
+  cellId: string;
+  cellName: string;
+  authorName: string;
+  authorRole: string;
+  authorAvatar?: string;
+  createdAt: string;
+  caption: string;
+  imageUrl?: string;
+  likes: number;
+  likedByCurrentUser: boolean;
+  comments: PostComment[];
+  category?: 'Célula' | 'Comunhão' | 'Batismo' | 'Testemunho' | 'Liderança' | 'Jejum & Oração';
+}
+
+export interface ChurchAnnouncement {
+  id: string;
+  churchId: string; // Strictly isolates announcements per church
+  title: string;
+  content: string;
+  imageUrl?: string;
+  authorName: string;
+  authorRole: string;
+  authorAvatar?: string;
+  eventDate?: string;
+  eventTime?: string;
+  location?: string;
+  category: 'Geral' | 'Conferência' | 'Encontro com Deus' | 'Culto Especial' | 'Treinamento' | 'Social';
+  isImportant?: boolean;
+  createdAt: string;
+  confirmedAttendeesCount?: number;
+  isConfirmedByCurrentUser?: boolean;
+}
+
+export type ActiveScreen = 'login' | 'feed' | 'my_cell' | 'leadership_track' | 'meetings' | 'reports';
