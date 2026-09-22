@@ -490,6 +490,90 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     <div id="screen-my-cell" className="bg-[#e9eff6] min-h-screen pb-16 font-sans">
       {/* Top Banner / Breadcrumb & Controls - Exact structure of user screenshot */}
       <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-4 pb-2">
+        {/* Seletor Hierárquico Contextual:
+            Aparece a partir do penúltimo nível da estrutura (Líder de Setor) até Pastores/Supervisores.
+            - Líder de Setor: acesso apenas às células vinculadas ao seu setor.
+            - Pastor/Supervisor/Admin: organizado com filtro de Setor + Célula para não ficar uma lista imensa.
+            - Membros ou Líderes de Célula: não veem esse seletor, mantendo a tela perfeitamente limpa.
+        */}
+        {canAccessCellSelector && cells && cells.length > 1 && (
+          <div className="mb-3 px-3.5 py-2.5 bg-white rounded-2xl border border-slate-200/90 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-slate-100 text-[#04213d] flex items-center justify-center shrink-0">
+                <Network size={16} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-slate-800">
+                    {isSectorLeaderOnly ? 'Seu Setor de Células' : 'Navegação Hierárquica'}
+                  </span>
+                  <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-2 py-0.5 rounded-md">
+                    {currentUser?.role || 'Liderança'}
+                  </span>
+                  {isSectorLeaderOnly && currentUser?.sector && (
+                    <span className="text-[10px] bg-sky-50 text-sky-800 font-bold px-2 py-0.5 rounded-md border border-sky-200/60">
+                      {currentUser.sector}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 truncate">
+                  {isSectorLeaderOnly
+                    ? `Visualizando células sob sua coordenação (${accessibleCells.length} disponíveis)`
+                    : 'Filtrado por setor para rápida alternância sem poluir a tela'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {/* Para Pastores/Supervisores/Admin: Seletor de Setor para evitar listas imensas de dezenas de células */}
+              {!isSectorLeaderOnly && availableSectors.length > 1 && (
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                  <Layers size={13} className="text-slate-500 shrink-0" />
+                  <span className="text-[11px] font-semibold text-slate-600 shrink-0">Setor:</span>
+                  <select
+                    value={selectedSectorFilter}
+                    onChange={(e) => {
+                      const newSec = e.target.value;
+                      setSelectedSectorFilter(newSec);
+                      const cellsInSec = newSec === 'todos' ? cells : cells.filter(c => (c.sectorName || 'Geral') === newSec);
+                      if (cellsInSec.length > 0 && !cellsInSec.some(c => c.id === cell.id)) {
+                        onSelectCell?.(cellsInSec[0].id);
+                      }
+                    }}
+                    className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                  >
+                    <option value="todos">Todos os Setores ({cells.length})</option>
+                    {availableSectors.map((sec) => {
+                      const count = cells.filter(c => (c.sectorName || 'Geral') === sec).length;
+                      return (
+                        <option key={sec} value={sec}>
+                          {sec} ({count})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {/* Seletor de Célula */}
+              <div className="flex items-center gap-1.5 bg-sky-50/70 border border-sky-200 rounded-xl px-2.5 py-1.5">
+                <span className="text-[11px] font-bold text-sky-950 shrink-0">Célula:</span>
+                <select
+                  value={cell.id}
+                  onChange={(e) => onSelectCell?.(e.target.value)}
+                  className="text-xs font-extrabold text-[#04213d] bg-transparent focus:outline-none cursor-pointer max-w-[200px] truncate"
+                >
+                  {accessibleCells.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {!isSectorLeaderOnly && c.sectorName ? `(${c.sectorName})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl shadow-xs border border-slate-200/80 mb-3">
           <div>
             <div className="flex items-center gap-2">
