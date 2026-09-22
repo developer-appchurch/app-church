@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Image from 'next/image';
 import {
   Home,
   Users,
@@ -13,6 +14,9 @@ import {
   MapPin,
   HeartHandshake,
   Church as ChurchIcon,
+  Building2,
+  Layers,
+  Network,
 } from 'lucide-react';
 import { ActiveScreen, UserProfile, CellGroup } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
@@ -36,6 +40,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentCell,
   onLogout,
 }) => {
+  const isSystemAdmin =
+    user?.isSystemAdmin === true ||
+    user?.role === 'Administrador' ||
+    user?.login === 'admin';
+
   const menuItems = [
     {
       id: 'feed' as ActiveScreen,
@@ -68,6 +77,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sublabel: 'Lançar presença e secretaria',
       icon: FileText,
     },
+    {
+      id: 'hierarchy_units' as ActiveScreen,
+      label: 'Níveis Organizacionais',
+      sublabel: 'Cadastro por nível (Área, Setor, Célula)',
+      icon: Layers,
+      badge: 'Estrutura',
+    },
+    {
+      id: 'member_pool' as ActiveScreen,
+      label: 'Pool de Membros',
+      sublabel: 'Banco geral & vínculo de membros',
+      icon: Users,
+    },
+    {
+      id: 'church_overview' as ActiveScreen,
+      label: 'Visão Geral da Igreja',
+      sublabel: 'Organograma & árvore hierárquica',
+      icon: Network,
+    },
+    ...(isSystemAdmin
+      ? [
+          {
+            id: 'register_church' as ActiveScreen,
+            label: 'Cadastrar Igreja',
+            sublabel: 'Nova congregação & hierarquia',
+            icon: Building2,
+            badge: 'Admin',
+          },
+        ]
+      : []),
   ];
 
   const handleLogoutClick = () => {
@@ -119,14 +158,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* User Profile Card in Drawer */}
           <div className="flex items-center gap-3 pt-1">
-            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full border-2 border-sky-400 overflow-hidden bg-slate-700 shrink-0">
-              <img
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full border-2 border-sky-400 overflow-hidden bg-slate-700 shrink-0 relative">
+              <Image
                 src={
                   user.avatarUrl ||
                   'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150'
                 }
                 alt={user.name}
+                width={48}
+                height={48}
                 className="w-full h-full object-cover"
+                unoptimized
                 referrerPolicy="no-referrer"
               />
             </div>

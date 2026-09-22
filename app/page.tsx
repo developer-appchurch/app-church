@@ -22,13 +22,18 @@ import { MeetingsCalendarView } from '../components/MeetingsCalendarView';
 import { WeeklyReportView } from '../components/WeeklyReportView';
 import { LeadershipTrackModal } from '../components/LeadershipTrackModal';
 import { ConnectionBadge } from '../components/ConnectionBadge';
+import { RegisterChurchView } from '../components/RegisterChurchView';
+import { HierarchicalUnitsView } from '../components/HierarchicalUnitsView';
+import { MemberPoolView } from '../components/MemberPoolView';
+import { ChurchHierarchyOverviewView } from '../components/ChurchHierarchyOverviewView';
+import { Plus, AlertCircle, Layers, X, CheckCircle2, Loader2 } from 'lucide-react';
 
 export default function Home() {
   // Requirement 1: Tela inicial do aplicativo sempre será Login
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
-  // Requirement 2: Após o login, a tela Home é o Feed de Notícias
-  const [activeScreen, setActiveScreen] = useState<ActiveScreen>('feed');
+  // Tela inicial após login direcionada para Minha Célula
+  const [activeScreen, setActiveScreen] = useState<ActiveScreen>('my_cell');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
   // Logged in user profile (contains churchId, churchName, role, sector, etc.)
@@ -55,6 +60,10 @@ export default function Home() {
     isCloud: false,
     message: 'Supabase Database Ativo',
   });
+
+  // Contexto da igreja selecionada para estruturação hierárquica
+  const [targetChurchContext, setTargetChurchContext] = useState<{ id: string; name: string } | null>(null);
+  const [hierarchyLevelIndex, setHierarchyLevelIndex] = useState<number>(0);
 
   // Load church data isolated by churchId
   const loadChurchData = useCallback(async (churchId: string, initialCellId?: string) => {
@@ -174,6 +183,11 @@ export default function Home() {
     setPosts((prev) => [created, ...prev]);
   };
 
+  const handleDeletePost = async (postId: string) => {
+    const updated = await AppChurchService.deleteFeedPost(postId);
+    setPosts(updated.filter((p) => p.churchId === user?.churchId));
+  };
+
   // Announcement Actions
   const handleCreateAnnouncement = async (
     newAnnouncementData: Omit<
@@ -194,12 +208,12 @@ export default function Home() {
   const currentCell: CellGroup =
     cells.find((c) => c.id === selectedCellId) ||
     cells[0] || {
-      id: 'cell-default',
-      churchId: user?.churchId || 'church-sobral',
-      name: 'Adonai',
-      leaderName: user?.name || 'Líder',
-      sectorName: user?.sector || 'Setor Adonai',
-      address: 'Rua Sumaré, 245 - Junco',
+      id: 'cell-pending',
+      churchId: user?.churchId || 'church-default',
+      name: cells.length === 0 ? 'Nenhuma Célula Cadastrada' : 'Adonai',
+      leaderName: user?.name || 'Pastor Titular',
+      sectorName: cells.length === 0 ? 'Pendente' : 'Setor Geral',
+      address: cells.length === 0 ? 'Pendente de cadastro' : 'Rua Sumaré, 245 - Junco',
       meetingDay: 'Quinta-feira',
       meetingTime: '19:30',
       memberCount: members.length,
@@ -241,6 +255,38 @@ export default function Home() {
 
       {/* Main Dynamic View */}
       <main className="flex-1">
+        {/* Banner Direcionando para o Cadastro dos Níveis Organizacionais antes das Células */}
+        {cells.length === 0 && (
+          <div className="max-w-5xl mx-auto px-4 pt-4">
+            <div className="bg-sky-50 border border-sky-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-sky-100 text-sky-950 rounded-xl shrink-0 mt-0.5">
+                  <Layers size={24} />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-sky-950">
+                    Estruturação da Hierarquia Organizacional
+                  </h3>
+                  <p className="text-xs sm:text-sm text-sky-900 mt-1 max-w-2xl leading-relaxed">
+                    Sua igreja ainda não possui células cadastradas. Cadastre primeiro os níveis superiores da denominação (iniciando pelo 1º nível) antes de criar as células correspondentes.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setHierarchyLevelIndex(0);
+                  setActiveScreen('hierarchy_units');
+                }}
+                className="px-5 py-3 bg-[#052447] hover:bg-[#073366] text-white rounded-xl text-xs sm:text-sm font-bold shadow-md transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
+              >
+                <Layers size={16} />
+                <span>Cadastrar Níveis Organizacionais</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {activeScreen === 'feed' && (
           <FeedView
             posts={posts}
@@ -250,6 +296,7 @@ export default function Home() {
             churchName={user.churchName}
             onLikePost={handleLikePost}
             onAddComment={handleAddComment}
+            onDeletePost={handleDeletePost}
             onCreatePost={handleCreatePost}
             onCreateAnnouncement={handleCreateAnnouncement}
             onToggleRSVP={handleToggleRSVP}
@@ -282,6 +329,58 @@ export default function Home() {
         {activeScreen === 'reports' && (
           <WeeklyReportView currentCell={currentCell} members={members} />
         )}
+
+        {activeScreen === 'hierarchy_units' && user && (
+          <HierarchicalUnitsView
+            user={user}
+            targetChurchId={targetChurchContext?.id || user.churchId}
+            targetChurchName={targetChurchContext?.name || user.churchName}
+            initialLevelIndex={hierarchyLevelIndex}
+            onNavigateOverview={() => setActiveScreen('church_overview')}
+            onNavigatePool={() => setActiveScreen('member_pool')}
+          />
+        )}
+
+        {activeScreen === 'member_pool' && user && (
+          <MemberPoolView
+            user={user}
+            onNavigateUnits={() => setActiveScreen('hierarchy_units')}
+            onNavigateOverview={() => setActiveScreen('church_overview')}
+          />
+        )}
+
+        {activeScreen === 'church_overview' && user && (
+          <ChurchHierarchyOverviewView
+            user={user}
+            onNavigateAddUnit={(levelIdx) => {
+              setHierarchyLevelIndex(levelIdx);
+              setActiveScreen('hierarchy_units');
+            }}
+            onNavigatePool={() => setActiveScreen('member_pool')}
+          />
+        )}
+
+        {activeScreen === 'register_church' &&
+          (user?.isSystemAdmin || user?.role === 'Administrador' || user?.login === 'admin') && (
+            <RegisterChurchView
+              onBack={() => setActiveScreen('feed')}
+              onSuccessLogin={handleLoginSuccess}
+              isLoggedIn={true}
+              onNavigateUnits={(church) => {
+                if (church) {
+                  setTargetChurchContext({ id: church.churchId, name: church.churchName });
+                }
+                setHierarchyLevelIndex(0);
+                setActiveScreen('hierarchy_units');
+              }}
+              onNavigateOverview={(church) => {
+                if (church) {
+                  setTargetChurchContext({ id: church.churchId, name: church.churchName });
+                }
+                setActiveScreen('church_overview');
+              }}
+            />
+          )}
       </main>
 
       {/* Modal: Trilho de Liderança do Membro */}

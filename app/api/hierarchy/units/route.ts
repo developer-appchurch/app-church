@@ -1,0 +1,370 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { OrganizationalUnit, CreateUnitInput } from '@/types';
+import crypto from 'crypto';
+
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const churchId = searchParams.get('churchId');
+    const levelTypeId = searchParams.get('levelTypeId');
+
+    if (!churchId) {
+      return NextResponse.json({ error: 'Parâmetro churchId é obrigatório.' }, { status: 400 });
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+    }
+
+    // 1. Buscar níveis da igreja
+    const { data: levels } = await supabase
+      .from('nivel_tipo')
+      .select('id, nome, ordem')
+      .eq('igreja_id', churchId)
+      .order('ordem', { ascending: true });
+
+    const levelsMap = new Map<string, { nome: string; ordem: number }>();
+    (levels || []).forEach((lvl: any) => {
+      levelsMap.set(lvl.id, { nome: lvl.nome, ordem: lvl.ordem });
+    });
+
+    // 2. Buscar unidades
+    let unitsQuery = supabase
+      .from('unidades')
+      .select('id, igreja_id, nivel_tipo_id, pai_id, nome, ativo, criado_em')
+      .eq('igreja_id', churchId)
+      .eq('ativo', true)
+      .order('nome', { ascending: true });
+
+    if (levelTypeId) {
+      unitsQuery = unitsQuery.eq('nivel_tipo_id', levelTypeId);
+    }
+
+    const { data: unitsData, error: unitsError } = await unitsQuery;
+    if (unitsError) {
+      console.error('Erro ao buscar unidades:', unitsError);
+      return NextResponse.json({ error: unitsError.message }, { status: 500 });
+    }
+
+    if (!unitsData || unitsData.length === 0) {
+      return NextResponse.json({ success: true, units: [] });
+    }
+
+    // Mapeamento de nomes de todas as unidades para obter nome do pai
+    const unitNameMap = new Map<string, string>();
+    const { data: allUnitsForNames } = await supabase
+      .from('unidades')
+      .select('id, nome')
+      .eq('igreja_id', churchId);
+    (allUnitsForNames || []).forEach((u: any) => unitNameMap.set(u.id, u.nome));
+
+    // 3. Buscar detalhes de células (para folhas)
+    const unitIds = unitsData.map((u: any) => u.id);
+    const { data: celulasData } = await supabase
+      .from('celulas')
+      .select('*')
+      .in('unidade_id', unitIds);
+
+    const celulaMap = new Map<string, any>();
+    (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
+
+    // 4. Buscar líderes vinculados em unidade_lideres
+    const { data: lideresData } = await supabase
+      .from('unidade_lideres')
+      .select('unidade_id, pessoa_id, papel, members(id, nome, funcao, url_avatar, telefone)')
+      .in('unidade_id', unitIds)
+      .eq('ativo', true);
+
+    const leadersMap = new Map<string, any[]>();
+    (lideresData || []).forEach((l: any) => {
+      const existing = leadersMap.get(l.unidade_id) || [];
+      const member = l.members;
+      existing.push({
+        id: l.pessoa_id,
+        name: member?.nome || 'Líder',
+        role: l.papel || member?.funcao || 'Líder',
+        avatarUrl: member?.url_avatar,
+        phone: member?.telefone,
+      });
+      leadersMap.set(l.unidade_id, existing);
+    });
+
+    // 5. Contagem de membros por célula
+    const { data: memberCounts } = await supabase
+      .from('members')
+      .select('celula_id')
+      .eq('igreja_id', churchId)
+      .not('celula_id', 'is', null);
+
+    const countMap = new Map<string, number>();
+    (memberCounts || []).forEach((m: any) => {
+      if (m.celula_id) {
+        countMap.set(m.celula_id, (countMap.get(m.celula_id) || 0) + 1);
+      }
+    });
+
+    // 6. Formata retorno
+    const formattedUnits: OrganizationalUnit[] = unitsData.map((u: any) => {
+      const lvl = levelsMap.get(u.nivel_tipo_id) || { nome: 'Unidade', ordem: 99 };
+      const celDetails = celulaMap.get(u.id);
+      const unitLeaders = leadersMap.get(u.id) || [];
+      const memberCount = countMap.get(u.id) || 0;
+
+      return {
+        id: u.id,
+        churchId: u.igreja_id,
+        levelTypeId: u.nivel_tipo_id,
+        levelTypeName: lvl.nome,
+        levelOrder: lvl.ordem,
+        name: u.nome,
+        parentId: u.pai_id || null,
+        parentName: u.pai_id ? unitNameMap.get(u.pai_id) || 'Unidade Superior' : undefined,
+        isActive: u.ativo !== false,
+        leaders: unitLeaders,
+        meetingDay: celDetails?.dia_semana,
+        meetingTime: celDetails?.horario,
+        neighborhood: celDetails?.bairro,
+        address: celDetails?.endereco,
+        latitude: celDetails?.latitude ? Number(celDetails.latitude) : undefined,
+        longitude: celDetails?.longitude ? Number(celDetails.longitude) : undefined,
+        memberCount,
+        createdAt: u.criado_em,
+      };
+    });
+
+    return NextResponse.json({
+      success: true,
+      units: formattedUnits,
+    });
+  } catch (err: any) {
+    console.error('Erro na rota /api/hierarchy/units GET:', err);
+    return NextResponse.json({ error: err?.message || 'Erro interno.' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const input: CreateUnitInput = await req.json();
+
+    if (!input.churchId) {
+      return NextResponse.json({ error: 'Identificador da igreja (churchId) é obrigatório.' }, { status: 400 });
+    }
+    if (!input.levelTypeId) {
+      return NextResponse.json({ error: 'O tipo de nível (levelTypeId) é obrigatório.' }, { status: 400 });
+    }
+    if (!input.name?.trim()) {
+      return NextResponse.json({ error: 'O nome da unidade é obrigatório.' }, { status: 400 });
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+    }
+
+    // 1. Obter níveis da igreja ordenados para validar hierarquia
+    const { data: levels, error: levelsErr } = await supabase
+      .from('nivel_tipo')
+      .select('id, nome, ordem')
+      .eq('igreja_id', input.churchId)
+      .order('ordem', { ascending: true });
+
+    if (levelsErr || !levels || levels.length === 0) {
+      return NextResponse.json({ error: 'Níveis organizacionais não encontrados para esta igreja.' }, { status: 400 });
+    }
+
+    const currentLevelIndex = levels.findIndex((l: any) => l.id === input.levelTypeId);
+    if (currentLevelIndex === -1) {
+      return NextResponse.json({ error: 'Nível organizacional inválido para esta igreja.' }, { status: 400 });
+    }
+
+    const currentLevel = levels[currentLevelIndex];
+    const isRootLevel = currentLevelIndex === 0;
+    const isLeafLevel = currentLevelIndex === levels.length - 1;
+
+    // 2. Se NÃO for o nível raiz (mais alto), é obrigatório ter pai_id válido
+    if (!isRootLevel) {
+      if (!input.parentId) {
+        const parentLevel = levels[currentLevelIndex - 1];
+        return NextResponse.json(
+          {
+            error: `A unidade pai é obrigatória. Selecione um(a) ${parentLevel.nome} para vincular este(a) ${currentLevel.nome}.`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Valida se o pai_id existe e pertence à mesma igreja
+      const { data: parentCheck, error: parentErr } = await supabase
+        .from('unidades')
+        .select('id, nome, nivel_tipo_id')
+        .eq('id', input.parentId)
+        .eq('igreja_id', input.churchId)
+        .maybeSingle();
+
+      if (parentErr || !parentCheck) {
+        return NextResponse.json(
+          { error: 'Unidade pai selecionada não foi encontrada no banco de dados.' },
+          { status: 400 }
+        );
+      }
+    }
+
+    const unitId = generateUUID();
+
+    // 3. Inserir na tabela unidades
+    const unitPayload = {
+      id: unitId,
+      igreja_id: input.churchId,
+      nivel_tipo_id: input.levelTypeId,
+      pai_id: isRootLevel ? null : (input.parentId && input.parentId.trim() !== '' ? input.parentId.trim() : null),
+      nome: input.name.trim(),
+      ativo: true,
+    };
+
+    const { error: insertUnitErr } = await supabase.from('unidades').insert([unitPayload]);
+    if (insertUnitErr) {
+      console.error('Erro ao inserir unidade:', insertUnitErr);
+      return NextResponse.json({ error: `Falha ao criar unidade: ${insertUnitErr.message}` }, { status: 500 });
+    }
+
+    // 4. Se for nível folha (Célula), insere em celulas e em cells (retrocompatibilidade)
+    if (isLeafLevel) {
+      const celulaPayload = {
+        unidade_id: unitId,
+        bairro: input.neighborhood?.trim() || 'Centro',
+        endereco: input.address?.trim() || '',
+        dia_semana: input.meetingDay?.trim() || 'Quarta-feira',
+        horario: input.meetingTime?.trim() || '19:30',
+        latitude: input.latitude || null,
+        longitude: input.longitude || null,
+        quantidade_membros: 0,
+      };
+
+      const { error: celulaErr } = await supabase.from('celulas').insert([celulaPayload]);
+      if (celulaErr) {
+        console.warn('Aviso ao inserir em celulas:', celulaErr.message);
+      }
+
+      // Buscar nome do setor/pai para popular tabela legada cells
+      let parentName = 'Geral';
+      if (input.parentId) {
+        const { data: pUnit } = await supabase
+          .from('unidades')
+          .select('nome')
+          .eq('id', input.parentId)
+          .maybeSingle();
+        if (pUnit?.nome) parentName = pUnit.nome;
+      }
+
+      // Buscar nome do primeiro líder se houver
+      let firstLeaderName = 'Líder Responsável';
+      if (input.leaderNames && input.leaderNames.length > 0) {
+        firstLeaderName = input.leaderNames.join(' & ');
+      } else if (input.leaderMemberIds && input.leaderMemberIds.length > 0) {
+        const { data: lMember } = await supabase
+          .from('members')
+          .select('nome')
+          .eq('id', input.leaderMemberIds[0])
+          .maybeSingle();
+        if (lMember?.nome) firstLeaderName = lMember.nome;
+      }
+
+      // Inserir na tabela cells para views do feed, relatórios e reuniões
+      const legacyCellPayload = {
+        id: unitId,
+        igreja_id: input.churchId,
+        nome: input.name.trim(),
+        nome_lider: firstLeaderName,
+        nome_setor: parentName,
+        endereco: input.address?.trim() || `${input.neighborhood?.trim() || 'Centro'}`,
+        dia_reuniao: input.meetingDay?.trim() || 'Quarta-feira',
+        horario_reuniao: input.meetingTime?.trim() || '19:30',
+      };
+      await supabase.from('cells').insert([legacyCellPayload]);
+    }
+
+    // 5. Inserir múltiplos líderes na tabela unidade_lideres
+    const leadersAssigned: any[] = [];
+    if (input.leaderMemberIds && input.leaderMemberIds.length > 0) {
+      const leaderRows = input.leaderMemberIds.map((mId) => ({
+        unidade_id: unitId,
+        pessoa_id: mId,
+        papel: 'Líder',
+        ativo: true,
+      }));
+
+      const { error: leaderErr } = await supabase.from('unidade_lideres').insert(leaderRows);
+      if (leaderErr) {
+        console.warn('Aviso ao inserir unidade_lideres:', leaderErr.message);
+      }
+
+      // Se for célula, atualiza celula_id dos líderes que não possuíam célula vinculada
+      if (isLeafLevel) {
+        for (const mId of input.leaderMemberIds) {
+          await supabase
+            .from('members')
+            .update({ celula_id: unitId })
+            .eq('id', mId);
+        }
+      }
+
+      // Buscar dados para retorno
+      const { data: membersInfo } = await supabase
+        .from('members')
+        .select('id, nome, funcao, url_avatar, telefone')
+        .in('id', input.leaderMemberIds);
+
+      (membersInfo || []).forEach((m: any) => {
+        leadersAssigned.push({
+          id: m.id,
+          name: m.nome,
+          role: m.funcao || 'Líder',
+          avatarUrl: m.url_avatar,
+          phone: m.telefone,
+        });
+      });
+    }
+
+    // 6. Retorno da unidade criada
+    const createdUnit: OrganizationalUnit = {
+      id: unitId,
+      churchId: input.churchId,
+      levelTypeId: input.levelTypeId,
+      levelTypeName: currentLevel.nome,
+      levelOrder: currentLevel.ordem,
+      name: input.name.trim(),
+      parentId: isRootLevel ? null : input.parentId,
+      isActive: true,
+      leaders: leadersAssigned,
+      meetingDay: input.meetingDay,
+      meetingTime: input.meetingTime,
+      neighborhood: input.neighborhood,
+      address: input.address,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      memberCount: isLeafLevel ? leadersAssigned.length : 0,
+      createdAt: new Date().toISOString(),
+    };
+
+    return NextResponse.json({
+      success: true,
+      unit: createdUnit,
+    });
+  } catch (err: any) {
+    console.error('Erro na rota /api/hierarchy/units POST:', err);
+    return NextResponse.json({ error: err?.message || 'Erro interno ao criar unidade.' }, { status: 500 });
+  }
+}

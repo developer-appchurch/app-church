@@ -35,17 +35,14 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
     try {
       const user = await AppChurchService.login(login, password);
-      if (!user) {
-        setError('Login ou senha incorretos. Utilize uma conta válida.');
-        setIsLoading(false);
-        return;
-      }
-
       setIsLoading(false);
       onLoginSuccess(user);
     } catch (err: any) {
       console.warn('Login exception:', err);
-      setError('Erro ao processar autenticação. Tente novamente.');
+      setError(
+        err?.message ||
+          'Login ou senha incorretos. Apenas membros cadastrados com login e senha válidos podem acessar.'
+      );
       setIsLoading(false);
     }
   };

@@ -73,6 +73,7 @@ export interface Church {
   id: string; // e.g. 'church-sobral', 'church-jaibaras'
   name: string; // e.g. 'Paz Church Sobral', 'Paz Church Jaibaras'
   slug: string;
+  cnpj?: string;
   city: string;
   state: string;
   logoUrl?: string;
@@ -94,6 +95,7 @@ export interface UserProfile {
   phone?: string;
   avatarUrl?: string;
   isPrivileged?: boolean; // Can post church-wide general notices (Líder de Setor, Pastor, etc.)
+  isSystemAdmin?: boolean; // Administrador do Sistema com acesso a cadastros de congregações
 }
 
 export interface CellGroup {
@@ -113,6 +115,8 @@ export interface CellMember {
   churchId: string;
   cellId: string; // Pertence à Célula
   name: string;
+  login?: string; // Login exclusivo para autenticação na aplicação
+  password?: string; // Senha para acesso à aplicação
   roleId?: string; // Tabela de Funções
   role: UserRole;
   permissions?: string[]; // Permissões herdadas e/ou customizadas
@@ -120,6 +124,7 @@ export interface CellMember {
   birthday: string; // "dd/MM"
   birthDateFull?: string;
   phone?: string;
+  email?: string;
   attendanceStatus: AttendanceStatus;
   attendancePercentage: number;
   avatarUrl?: string;
@@ -192,4 +197,96 @@ export interface ChurchAnnouncement {
   isConfirmedByCurrentUser?: boolean;
 }
 
-export type ActiveScreen = 'login' | 'feed' | 'my_cell' | 'leadership_track' | 'meetings' | 'reports';
+export type ActiveScreen =
+  | 'login'
+  | 'feed'
+  | 'my_cell'
+  | 'leadership_track'
+  | 'meetings'
+  | 'reports'
+  | 'register_church'
+  | 'hierarchy_units'
+  | 'member_pool'
+  | 'church_overview';
+
+export interface HierarchicalLevelInput {
+  id?: string;
+  name: string;
+  order: number;
+}
+
+export interface ChurchHierarchicalLevel {
+  id: string;
+  churchId: string;
+  name: string;
+  order: number;
+  isRoot: boolean;
+  isLeaf: boolean;
+}
+
+export interface UnitLeader {
+  id: string;
+  name: string;
+  role?: string;
+  avatarUrl?: string;
+  phone?: string;
+}
+
+export interface OrganizationalUnit {
+  id: string;
+  churchId: string;
+  levelTypeId: string;
+  levelTypeName: string;
+  levelOrder: number;
+  name: string;
+  parentId: string | null;
+  parentName?: string;
+  isActive: boolean;
+  leaders: UnitLeader[];
+  meetingDay?: string;
+  meetingTime?: string;
+  neighborhood?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  memberCount: number;
+  createdAt?: string;
+}
+
+export interface CreateUnitInput {
+  churchId: string;
+  levelTypeId: string;
+  name: string;
+  parentId: string | null;
+  leaderMemberIds?: string[];
+  leaderNames?: string[];
+  // Specific to leaf / cell level:
+  neighborhood?: string;
+  address?: string;
+  meetingDay?: string;
+  meetingTime?: string;
+  latitude?: number;
+  longitude?: number;
+}
+
+export interface RegisterChurchInput {
+  name: string;
+  cnpj?: string;
+  city: string;
+  state: string;
+  logoUrl?: string;
+  levels: HierarchicalLevelInput[];
+  pastorName: string;
+  pastorPhone?: string;
+  pastorEmail?: string;
+  pastorLogin: string;
+  pastorPassword: string;
+}
+
+export interface RegisterChurchResult {
+  church: Church;
+  pastor: UserProfile;
+  levels: HierarchicalLevelInput[];
+  seedCell?: CellGroup;
+  initialPasswordGenerated?: string;
+}

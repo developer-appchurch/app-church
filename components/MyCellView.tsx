@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { CellMember, CellGroup, AttendanceStatus, UserRole } from '../types';
+import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile } from '../types';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
+import { AppChurchService } from '../lib/supabase';
 import {
   Search,
   Plus,
@@ -12,14 +13,23 @@ import {
   UserCheck,
   AlertCircle,
   ChevronDown,
+  Lock,
+  User,
+  Loader2,
+  RefreshCw,
+  Network,
+  Layers,
 } from 'lucide-react';
 
 interface MyCellViewProps {
   members: CellMember[];
   cell: CellGroup;
   churchName: string;
+  currentUser?: UserProfile;
+  cells?: CellGroup[];
+  onSelectCell?: (cellId: string) => void;
   onOpenLeadershipTrack: (member: CellMember) => void;
-  onAddMember: (newMember: Omit<CellMember, 'id'>) => void;
+  onAddMember: (newMember: Omit<CellMember, 'id'>) => Promise<void> | void;
   onUpdateAttendance: (
     memberId: string,
     newStatus: AttendanceStatus,
@@ -31,6 +41,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   members,
   cell,
   churchName,
+  currentUser,
+  cells = [],
+  onSelectCell,
   onOpenLeadershipTrack,
   onAddMember,
   onUpdateAttendance,
@@ -46,11 +59,291 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
   // New member form state
   const [newName, setNewName] = useState('');
+  const [newLogin, setNewLogin] = useState('');
+  const [isLoginManuallyEdited, setIsLoginManuallyEdited] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('Membro');
   const [newNeighborhood, setNewNeighborhood] = useState('');
   const [newBirthday, setNewBirthday] = useState('');
+  const [birthdayError, setBirthdayError] = useState('');
   const [newPhone, setNewPhone] = useState('');
-  const [newStatus, setNewStatus] = useState<AttendanceStatus>('green');
+  const [newStatus] = useState<AttendanceStatus>('green');
+
+  // Login uniqueness validation state
+  const [loginDuplicateError, setLoginDuplicateError] = useState('');
+  const [isCheckingLogin, setIsCheckingLogin] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // -------------------------------------------------------------
+  // CONTROLE DO SELETOR HIERÁRQUICO CONTEXTUAL
+  // Apenas a partir do penúltimo nível da estrutura da igreja:
+  // Líder de Setor (penúltimo nível) -> Acesso às células do seu setor
+  // Pastor / Supervisor / Administrador -> Acesso organizado por setores
+  // -------------------------------------------------------------
+  const canAccessCellSelector = useMemo(() => {
+    if (!currentUser) return false;
+    const privilegedRoles: UserRole[] = [
+      'Líder de Setor',
+      'Supervisor',
+      'Pastor',
+      'Administrador',
+    ];
+    return (
+      privilegedRoles.includes(currentUser.role) ||
+      !!currentUser.isPrivileged ||
+      !!currentUser.isSystemAdmin
+    );
+  }, [currentUser]);
+
+  // Se o usuário é exclusivamente Líder de Setor (penúltimo nível)
+  const isSectorLeaderOnly = useMemo(() => {
+    if (!currentUser) return false;
+    return (
+      currentUser.role === 'Líder de Setor' &&
+      !currentUser.isSystemAdmin &&
+      currentUser.role !== 'Pastor' &&
+      currentUser.role !== 'Supervisor'
+    );
+  }, [currentUser]);
+
+  // Filtro de Setor para Pastores/Supervisores (evita lista gigantesca e desordenada)
+  const [selectedSectorFilter, setSelectedSectorFilter] = useState<string>('todos');
+
+  // Lista de todos os setores únicos identificados
+  const availableSectors = useMemo(() => {
+    if (!cells || cells.length === 0) return [];
+    const set = new Set<string>();
+    cells.forEach((c) => {
+      const sec = c.sectorName?.trim();
+      set.add(sec || 'Geral');
+    });
+    return Array.from(set).sort();
+  }, [cells]);
+
+  // Células acessíveis baseadas no nível e permissão do usuário
+  const accessibleCells = useMemo(() => {
+    if (!cells || cells.length === 0) return [cell];
+
+    // Para Líder de Setor: filtrar apenas células vinculadas ao seu setor
+    if (isSectorLeaderOnly) {
+      const userSector = currentUser?.sector?.trim().toLowerCase();
+      const filtered = cells.filter((c) => {
+        const sec = (c.sectorName || 'Geral').trim().toLowerCase();
+        return userSector ? sec === userSector || sec.includes(userSector) || userSector.includes(sec) : true;
+      });
+      return filtered.length > 0 ? filtered : cells;
+    }
+
+    // Para Pastor / Supervisor: filtrar de acordo com o setor selecionado para não ficar uma lista imensa
+    if (selectedSectorFilter !== 'todos') {
+      const filtered = cells.filter((c) => (c.sectorName || 'Geral') === selectedSectorFilter);
+      return filtered.length > 0 ? filtered : cells;
+    }
+
+    return cells;
+  }, [cells, cell, isSectorLeaderOnly, currentUser?.sector, selectedSectorFilter]);
+
+  /**
+   * Gera sugestão de login a partir do nome:
+   * 1. Pega até a segunda palavra do nome (ex: "Mateus Ribeiro" -> "mateus.ribeiro").
+   * 2. Se a segunda palavra tiver 3 ou menos letras (<= 3, como "da", "de", "dos", "do"),
+   *    coloca a terceira palavra (ex: "João da Silva" -> "joao.da.silva").
+   */
+  const generateLoginSuggestion = (name: string) => {
+    const clean = name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, '')
+      .trim();
+
+    const words = clean.split(/\s+/).filter(Boolean);
+    if (words.length === 0) return '';
+    if (words.length === 1) return words[0];
+
+    // Se a 2ª palavra tiver 3 ou menos letras e houver 3ª palavra, inclui a 3ª palavra
+    if (words[1].length <= 3 && words[2]) {
+      return `${words[0]}.${words[1]}.${words[2]}`;
+    }
+
+    return `${words[0]}.${words[1]}`;
+  };
+
+  /**
+   * Valida se uma string dd/MM corresponde a uma data real do calendário.
+   * Impede datas inexistentes como 12/33, 31/04, 32/01, etc.
+   */
+  const validateBirthday = (value: string): { valid: boolean; error?: string } => {
+    if (!value || value.trim() === '') {
+      return { valid: true };
+    }
+    const clean = value.trim();
+    const parts = clean.split('/');
+    if (parts.length !== 2 || parts[0].length === 0 || parts[1].length === 0) {
+      return { valid: false, error: 'Formato incompleto. Use o padrão dd/MM (ex: 25/08).' };
+    }
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+
+    if (isNaN(day) || isNaN(month)) {
+      return { valid: false, error: 'Data deve conter apenas números válidos (dd/MM).' };
+    }
+
+    if (month < 1 || month > 12) {
+      return {
+        valid: false,
+        error: `Mês inexistente (${month}). O calendário possui meses de 01 a 12.`,
+      };
+    }
+
+    const maxDaysPerMonth: Record<number, number> = {
+      1: 31,
+      2: 29, // Aceita 29 para permitir aniversários em ano bissexto
+      3: 31,
+      4: 30,
+      5: 31,
+      6: 30,
+      7: 31,
+      8: 31,
+      9: 30,
+      10: 31,
+      11: 30,
+      12: 31,
+    };
+
+    const maxDays = maxDaysPerMonth[month];
+    if (day < 1 || day > maxDays) {
+      return {
+        valid: false,
+        error: `Dia inexistente (${day}). O mês ${String(month).padStart(2, '0')} possui até ${maxDays} dias.`,
+      };
+    }
+
+    return { valid: true };
+  };
+
+  /**
+   * Formatação automática e validação de data no campo de aniversário (dd/MM)
+   */
+  const handleBirthdayChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const digits = raw.replace(/\D/g, '').slice(0, 4);
+
+    let formatted = '';
+    if (!digits) {
+      formatted = '';
+    } else if (digits.length <= 2) {
+      if (raw.endsWith('/') && digits.length === 2) {
+        formatted = `${digits}/`;
+      } else {
+        formatted = digits;
+      }
+    } else {
+      formatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}`;
+    }
+
+    setNewBirthday(formatted);
+
+    // Validação em tempo real se completou 5 caracteres (dd/MM)
+    if (formatted.length === 5) {
+      const result = validateBirthday(formatted);
+      if (!result.valid) {
+        setBirthdayError(result.error || 'Data de aniversário inexistente.');
+      } else {
+        setBirthdayError('');
+      }
+    } else {
+      setBirthdayError('');
+    }
+  };
+
+  /**
+   * Regerar login automaticamente a partir do nome
+   */
+  const handleRegenerateLogin = async () => {
+    if (!newName.trim()) {
+      setFormError('Por favor, informe o nome completo primeiro para gerar ou regerar o login.');
+      return;
+    }
+    setFormError('');
+
+    const base = generateLoginSuggestion(newName);
+    let candidate = base;
+
+    // Se o login atual já é igual ao base, tenta variação com primeiro e último nome ou sufixo numérico
+    if (newLogin === base) {
+      const clean = newName
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, '')
+        .trim();
+      const parts = clean.split(/\s+/).filter(Boolean);
+      if (parts.length > 2) {
+        candidate = `${parts[0]}.${parts[parts.length - 1]}`;
+      } else {
+        const rand = Math.floor(10 + Math.random() * 89);
+        candidate = `${base}${rand}`;
+      }
+    } else if (newLogin.length > 0) {
+      const rand = Math.floor(10 + Math.random() * 89);
+      candidate = `${base}${rand}`;
+    }
+
+    setNewLogin(candidate);
+    setIsLoginManuallyEdited(false);
+    await handleValidateLogin(candidate);
+  };
+
+  const handleValidateLogin = async (loginToTest: string) => {
+    const candidate = loginToTest.trim().toLowerCase();
+    if (!candidate) {
+      setLoginDuplicateError('');
+      return;
+    }
+    setIsCheckingLogin(true);
+    try {
+      const check = await AppChurchService.isLoginAvailable(candidate);
+      if (!check.available) {
+        setLoginDuplicateError(check.error || `O login "${candidate}" já está em uso por outro membro.`);
+      } else {
+        setLoginDuplicateError('');
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsCheckingLogin(false);
+    }
+  };
+
+  const handleOpenAddModal = () => {
+    setNewName('');
+    setNewLogin('');
+    setIsLoginManuallyEdited(false);
+    setNewPassword('');
+    setNewNeighborhood('');
+    setNewBirthday('');
+    setBirthdayError('');
+    setNewPhone('');
+    setFormError('');
+    setLoginDuplicateError('');
+    setIsAddModalOpen(true);
+  };
+
+  const handleCloseAddModal = () => {
+    setIsAddModalOpen(false);
+    setNewName('');
+    setNewLogin('');
+    setIsLoginManuallyEdited(false);
+    setNewPassword('');
+    setNewNeighborhood('');
+    setNewBirthday('');
+    setBirthdayError('');
+    setNewPhone('');
+    setFormError('');
+    setLoginDuplicateError('');
+  };
 
   // Filter members by current cell and query
   const filteredMembers = useMemo(() => {
@@ -84,28 +377,85 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     };
   }, [members, cell.id]);
 
-  const handleCreateMember = (e: React.FormEvent) => {
+  const handleCreateMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim()) return;
+    setFormError('');
 
-    onAddMember({
-      name: newName.trim(),
-      role: newRole,
-      neighborhood: newNeighborhood.trim() || 'Centro',
-      birthday: newBirthday.trim() || '01/01',
-      attendanceStatus: newStatus,
-      attendancePercentage:
-        newStatus === 'green' ? 100 : newStatus === 'yellow' ? 75 : newStatus === 'red' ? 50 : 20,
-      cellId: cell.id,
-      churchId: cell.churchId,
-      phone: newPhone.trim(),
-    });
+    if (!newName.trim()) {
+      setFormError('Por favor, informe o nome completo do membro.');
+      return;
+    }
 
-    setNewName('');
-    setNewNeighborhood('');
-    setNewBirthday('');
-    setNewPhone('');
-    setIsAddModalOpen(false);
+    // Validação estrita de aniversário: impede datas que não existam (ex: 12/33)
+    if (newBirthday.trim()) {
+      const birthCheck = validateBirthday(newBirthday);
+      if (!birthCheck.valid) {
+        setBirthdayError(birthCheck.error || 'Data de aniversário inexistente.');
+        setFormError(birthCheck.error || 'Data de aniversário inexistente. Por favor informe uma data válida (dd/MM).');
+        return;
+      }
+    }
+
+    const effectiveLogin = (
+      newLogin.trim() || generateLoginSuggestion(newName)
+    ).toLowerCase();
+
+    // 1. Checagem estrita de unicidade de login
+    setIsCheckingLogin(true);
+    setIsSubmitting(true);
+    try {
+      const check = await AppChurchService.isLoginAvailable(effectiveLogin);
+      if (!check.available) {
+        const errMsg =
+          check.error ||
+          `O login "${effectiveLogin}" já está em uso por outro membro. Por favor, escolha outro.`;
+        setLoginDuplicateError(errMsg);
+        setFormError(errMsg);
+        setIsCheckingLogin(false);
+        setIsSubmitting(false);
+        return;
+      }
+    } catch (err: any) {
+      console.warn('Erro ao verificar disponibilidade de login:', err);
+    } finally {
+      setIsCheckingLogin(false);
+    }
+
+    try {
+      await onAddMember({
+        name: newName.trim(),
+        login: effectiveLogin,
+        password: newPassword.trim() || '123456',
+        role: newRole,
+        neighborhood: newNeighborhood.trim(), // Deixa em branco caso o usuário não informe
+        birthday: newBirthday.trim(), // Deixa em branco caso não informado
+        attendanceStatus: newStatus,
+        attendancePercentage:
+          newStatus === 'green' ? 100 : newStatus === 'yellow' ? 75 : newStatus === 'red' ? 50 : 20,
+        cellId: cell.id,
+        churchId: cell.churchId,
+        phone: newPhone.trim(),
+      });
+
+      setNewName('');
+      setNewLogin('');
+      setIsLoginManuallyEdited(false);
+      setNewPassword('');
+      setNewNeighborhood('');
+      setNewBirthday('');
+      setNewPhone('');
+      setFormError('');
+      setLoginDuplicateError('');
+      setIsAddModalOpen(false);
+    } catch (err: any) {
+      const msg = err?.message || 'Erro ao cadastrar membro.';
+      setFormError(msg);
+      if (msg.toLowerCase().includes('login')) {
+        setLoginDuplicateError(msg);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const getStatusColor = (status: AttendanceStatus) => {
@@ -174,7 +524,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             <button
               type="button"
               id="btn-cell-add-member"
-              onClick={() => setIsAddModalOpen(true)}
+              onClick={handleOpenAddModal}
               className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
             >
               <Plus size={16} />
@@ -517,7 +867,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 <h3 className="font-bold text-base">Adicionar Membro à Célula</h3>
               </div>
               <button
-                onClick={() => setIsAddModalOpen(false)}
+                onClick={handleCloseAddModal}
                 className="text-slate-300 hover:text-white p-1 rounded-lg hover:bg-white/10 transition cursor-pointer"
                 aria-label="Fechar"
               >
@@ -525,6 +875,13 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               </button>
             </div>
             <form onSubmit={handleCreateMember} className="p-4 sm:p-5 space-y-3.5 overflow-y-auto flex-1">
+              {formError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Nome Completo: *
@@ -534,10 +891,112 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   required
                   placeholder="Ex: Mateus Ribeiro"
                   value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewName(val);
+                    // Preenche o campo de login automaticamente se o usuário ainda não o editou
+                    if (!isLoginManuallyEdited) {
+                      const sugg = generateLoginSuggestion(val);
+                      setNewLogin(sugg);
+                      if (sugg) {
+                        handleValidateLogin(sugg);
+                      } else {
+                        setLoginDuplicateError('');
+                      }
+                    }
+                  }}
                   className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447]"
                 />
               </div>
+
+              {/* Login & Senha do Membro para Acesso à Aplicação */}
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                  <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-[#052447]" />
+                    Credenciais de Acesso ao App
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-medium">
+                    Regra: Login único obrigatório
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-semibold text-slate-700">
+                        Login de Acesso: *
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        {isCheckingLogin && (
+                          <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleRegenerateLogin}
+                          className="text-[11px] font-bold text-sky-800 hover:text-sky-950 bg-sky-50 hover:bg-sky-100 border border-sky-200/80 px-2 py-0.5 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                          title="Regerar sugestão de login a partir do nome"
+                        >
+                          <RefreshCw size={11} className={isCheckingLogin ? 'animate-spin' : ''} />
+                          <span>Regerar Login</span>
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="Ex: mateus.ribeiro"
+                      value={newLogin}
+                      onChange={(e) => {
+                        setIsLoginManuallyEdited(true);
+                        const val = e.target.value
+                          .toLowerCase()
+                          .replace(/[^a-z0-9.]/g, '');
+                        setNewLogin(val);
+                        handleValidateLogin(val);
+                      }}
+                      onBlur={() => handleValidateLogin(newLogin)}
+                      className={`w-full text-xs sm:text-sm p-2.5 rounded-xl border font-medium ${
+                        loginDuplicateError
+                          ? 'border-rose-400 bg-rose-50/60 text-rose-950'
+                          : 'border-slate-300 bg-white text-slate-900'
+                      } focus:outline-none focus:border-[#052447]`}
+                    />
+                    {loginDuplicateError ? (
+                      <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                        {loginDuplicateError}
+                      </p>
+                    ) : newLogin.trim() ? (
+                      <p className="mt-1 text-[11px] font-medium text-emerald-600 flex items-center gap-1">
+                        <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                        Login disponível para cadastro
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        Gerado automaticamente a partir do nome ou editável pelo usuário.
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                      <Lock className="w-3.5 h-3.5 text-slate-500" />
+                      Senha de Acesso:
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Padrão: 123456"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 bg-white focus:outline-none focus:border-[#052447]"
+                    />
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Senha para este membro entrar na aplicação.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -560,7 +1019,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Bairro:</label>
                   <input
                     type="text"
-                    placeholder="Ex: Junco, Centro..."
+                    placeholder="Opcional (ex: Junco)"
                     value={newNeighborhood}
                     onChange={(e) => setNewNeighborhood(e.target.value)}
                     className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447]"
@@ -577,9 +1036,35 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     placeholder="Ex: 25/08"
                     maxLength={5}
                     value={newBirthday}
-                    onChange={(e) => setNewBirthday(e.target.value)}
-                    className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447]"
+                    onChange={handleBirthdayChange}
+                    onBlur={() => {
+                      if (newBirthday.trim()) {
+                        const res = validateBirthday(newBirthday);
+                        if (!res.valid) {
+                          setBirthdayError(res.error || 'Data de aniversário inexistente.');
+                        } else {
+                          setBirthdayError('');
+                        }
+                      } else {
+                        setBirthdayError('');
+                      }
+                    }}
+                    className={`w-full text-xs sm:text-sm p-2.5 rounded-xl border ${
+                      birthdayError
+                        ? 'border-rose-400 bg-rose-50/50 text-rose-950 focus:border-rose-500'
+                        : 'border-slate-300 focus:border-[#052447]'
+                    } focus:outline-none`}
                   />
+                  {birthdayError ? (
+                    <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      {birthdayError}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      Informe uma data válida (ex: 25/08).
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -594,48 +1079,27 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Status Inicial de Frequência:
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewStatus('green')}
-                    className={`p-2 rounded-xl border text-xs flex items-center gap-2 font-medium cursor-pointer ${
-                      newStatus === 'green'
-                        ? 'bg-emerald-50 border-emerald-400 text-emerald-950 font-bold'
-                        : 'border-slate-200'
-                    }`}
-                  >
-                    <span className="w-3.5 h-3.5 rounded-full bg-[#16a34a]" /> Verde (Assíduo)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewStatus('yellow')}
-                    className={`p-2 rounded-xl border text-xs flex items-center gap-2 font-medium cursor-pointer ${
-                      newStatus === 'yellow'
-                        ? 'bg-amber-50 border-amber-400 text-amber-950 font-bold'
-                        : 'border-slate-200'
-                    }`}
-                  >
-                    <span className="w-3.5 h-3.5 rounded-full bg-[#facc15]" /> Amarelo (Regular)
-                  </button>
-                </div>
-              </div>
               <div className="pt-3 flex items-center justify-end gap-2 border-t border-slate-200">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={handleCloseAddModal}
                   className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#073366] rounded-xl shadow-xs cursor-pointer"
+                  disabled={isSubmitting || !!loginDuplicateError}
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#073366] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
                 >
-                  Cadastrar Membro
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Cadastrando...</span>
+                    </>
+                  ) : (
+                    <span>Cadastrar Membro</span>
+                  )}
                 </button>
               </div>
             </form>

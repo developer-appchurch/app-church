@@ -123,6 +123,21 @@ Registra exatamente quais etapas o membro já realizou:
 
 ---
 
+## 🌳 Hierarquia Flexível e Personalizada (`/supabase/migration_hierarquia_unidades.sql`)
+
+Para congregações com estruturas multiníveis (Distrito, Área, Setor, Célula, Redes, etc.), utilize o arquivo [`/supabase/migration_hierarquia_unidades.sql`](./migration_hierarquia_unidades.sql).
+
+Ele implementa:
+- `public.nivel_tipo`: Tipos de nível hierárquico próprios de cada igreja com ordens espaçadas (10, 20, 30, 40...).
+- `public.unidades`: Tabela única e recursiva (`pai_id`), com integridade composta multi-tenant `(nivel_tipo_id, igreja_id)`.
+- `public.unidade_cobertura`: Cobertura e supervisão lateral entre unidades do mesmo nível.
+- `public.celulas`: Extensão 1:1 para atributos específicos de reunião de células.
+- `public.unidade_lideres`: Normalização N:N de múltiplos líderes por unidade com papéis específicos (`Líder`, `Co-Líder`, `Líder em Treinamento`, etc.).
+- Triggers anti-ciclo para impedir que uma unidade seja ancestral dela mesma.
+- View de compatibilidade retroativa `public.vw_cells_legacy`.
+
+---
+
 ## 🚀 Como Aplicar no Supabase
 
 1. Acesse o seu projeto no [Supabase Dashboard](https://supabase.com/dashboard).
