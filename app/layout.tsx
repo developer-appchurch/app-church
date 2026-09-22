@@ -1,4 +1,5 @@
 import type {Metadata, Viewport} from 'next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import './globals.css'; // Global styles
 
 export const metadata: Metadata = {
@@ -26,7 +27,10 @@ export const viewport: Viewport = {
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
     <html lang="pt-BR">
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        {children}
+        <SpeedInsights />
+      </body>
     </html>
   );
 }
