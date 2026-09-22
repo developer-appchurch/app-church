@@ -37,6 +37,28 @@ interface MyCellViewProps {
   ) => void;
 }
 
+/**
+ * Gera uma variação de login para alternar sugestões
+ */
+function getLoginCandidateVariation(name: string, currentLogin: string, base: string): string {
+  if (currentLogin === base) {
+    const clean = name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s]/g, '')
+      .trim();
+    const parts = clean.split(/\s+/).filter(Boolean);
+    if (parts.length > 2) {
+      return `${parts[0]}.${parts[parts.length - 1]}`;
+    }
+    const seed = Math.floor(Date.now() % 90 + 10);
+    return `${base}${seed}`;
+  }
+  const seed = Math.floor(Date.now() % 90 + 10);
+  return `${base}${seed}`;
+}
+
 export const MyCellView: React.FC<MyCellViewProps> = ({
   members,
   cell,
@@ -267,27 +289,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setFormError('');
 
     const base = generateLoginSuggestion(newName);
-    let candidate = base;
-
-    // Se o login atual já é igual ao base, tenta variação com primeiro e último nome ou sufixo numérico
-    if (newLogin === base) {
-      const clean = newName
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9\s]/g, '')
-        .trim();
-      const parts = clean.split(/\s+/).filter(Boolean);
-      if (parts.length > 2) {
-        candidate = `${parts[0]}.${parts[parts.length - 1]}`;
-      } else {
-        const rand = Math.floor(10 + Math.random() * 89);
-        candidate = `${base}${rand}`;
-      }
-    } else if (newLogin.length > 0) {
-      const rand = Math.floor(10 + Math.random() * 89);
-      candidate = `${base}${rand}`;
-    }
+    const candidate = getLoginCandidateVariation(newName, newLogin, base);
 
     setNewLogin(candidate);
     setIsLoginManuallyEdited(false);
