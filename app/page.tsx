@@ -308,6 +308,9 @@ export default function Home() {
             members={members}
             cell={currentCell}
             churchName={user.churchName}
+            currentUser={user}
+            cells={cells}
+            onSelectCell={setSelectedCellId}
             onOpenLeadershipTrack={(member) => setSelectedMemberForTrack(member)}
             onAddMember={handleAddMember}
             onUpdateAttendance={handleUpdateAttendance}

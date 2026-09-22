@@ -101,9 +101,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     if (!currentUser) return false;
     return (
       currentUser.role === 'Líder de Setor' &&
-      !currentUser.isSystemAdmin &&
-      currentUser.role !== 'Pastor' &&
-      currentUser.role !== 'Supervisor'
+      !currentUser.isSystemAdmin
     );
   }, [currentUser]);
 
