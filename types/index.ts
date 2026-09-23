@@ -45,10 +45,12 @@ export interface RolePermission {
 }
 
 /**
- * Tabela de Etapas do Trilho de Liderança (Track Steps)
+ * Tabela de Etapas do Trilho de Liderança (etapa_trilhos)
  */
 export interface TrackStep {
-  id: number;
+  id: number | string;
+  id_igreja?: string;
+  churchId?: string;
   stepNumber: number;
   title: string;
   description: string;
@@ -56,13 +58,13 @@ export interface TrackStep {
 }
 
 /**
- * Progresso específico de uma etapa do trilho para um membro
+ * Progresso específico de uma etapa do trilho para um membro (member_track_steps)
  */
 export interface MemberTrackStepRecord {
   id?: string;
   memberId: string;
   cellId: string;
-  stepId: number;
+  stepId: number | string;
   completed: boolean;
   completedAt?: string;
   notes?: string;
@@ -138,15 +140,19 @@ export interface CellMember {
 }
 
 export interface LeadershipTrackStep {
-  id: number;
+  id: number | string;
+  stepNumber?: number;
   title: string;
   description: string;
   completed: boolean;
   completedAt?: string;
+  notes?: string;
+  validatedBy?: string;
 }
 
 export interface LeadershipTrackProgress {
   memberId: string;
+  churchId?: string;
   currentStepId: number;
   steps: LeadershipTrackStep[];
 }

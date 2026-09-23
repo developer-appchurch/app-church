@@ -161,7 +161,29 @@ export default function Home() {
     memberId: string,
     progress: LeadershipTrackProgress
   ) => {
-    await AppChurchService.saveLeadershipProgress(memberId, progress);
+    const resolvedChurchId = selectedMemberForTrack?.churchId || user?.churchId;
+    const resolvedCellId = selectedMemberForTrack?.cellId || currentCell?.id;
+    await AppChurchService.saveLeadershipProgress(memberId, progress, resolvedChurchId, resolvedCellId);
+
+    const completedCount = progress.steps.filter((s) => s.completed).length;
+    const totalCount = progress.steps.length;
+    const percentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+
+    setMembers((prev) =>
+      prev.map((m) =>
+        m.id === memberId
+          ? {
+              ...m,
+              trackProgress: {
+                currentStepId: progress.currentStepId,
+                completedStepsCount: completedCount,
+                totalStepsCount: totalCount,
+                percentage,
+              },
+            }
+          : m
+      )
+    );
   };
 
   // Feed Post Actions
@@ -389,8 +411,11 @@ export default function Home() {
       {/* Modal: Trilho de Liderança do Membro */}
       {selectedMemberForTrack && (
         <LeadershipTrackModal
+          key={selectedMemberForTrack.id}
           member={selectedMemberForTrack}
-          cellName={currentCell.name}
+          churchId={selectedMemberForTrack.churchId || targetChurchContext?.id || user.churchId}
+          churchName={targetChurchContext?.name || user.churchName}
+          cellName={currentCell?.name || 'Célula'}
           onClose={() => setSelectedMemberForTrack(null)}
           onSaveProgress={handleSaveLeadershipProgress}
         />

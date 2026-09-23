@@ -1,8 +1,9 @@
 'use client';
 
-import React from 'react';
-import { CellMember, CellGroup } from '../types';
-import { LEADERSHIP_STAGES } from '../data/initialData';
+import React, { useState, useEffect } from 'react';
+import { CellMember, CellGroup, TrackStep } from '../types';
+import { INITIAL_TRACK_STEPS } from '../data/initialData';
+import { AppChurchService } from '../lib/supabase';
 import { ChevronRight } from 'lucide-react';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 
@@ -17,7 +18,26 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
   currentCell,
   onOpenMemberTrack,
 }) => {
+  const [stages, setStages] = useState<TrackStep[]>(INITIAL_TRACK_STEPS);
   const cellMembers = members.filter((m) => m.cellId === currentCell.id);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadStages() {
+      try {
+        const steps = await AppChurchService.getTrackSteps(currentCell.churchId);
+        if (isMounted && steps && steps.length > 0) {
+          setStages(steps);
+        }
+      } catch (e) {
+        console.warn('Erro ao carregar etapas do trilho:', e);
+      }
+    }
+    loadStages();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentCell.churchId]);
 
   return (
     <div id="screen-leadership-track" className="bg-[#e9eff6] min-h-screen pb-20 font-sans select-none">
@@ -36,7 +56,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                 Trilho de Liderança • Célula {currentCell.name}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Acompanhe o crescimento e amadurecimento espiritual de cada discípulo da célula.
+                Acompanhe o crescimento e amadurecimento espiritual de cada discípulo da célula conforme as etapas cadastradas para sua congregação.
               </p>
             </div>
           </div>
@@ -44,7 +64,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
 
         {/* Steps Grid */}
         <div className="space-y-4">
-          {LEADERSHIP_STAGES.map((stage, idx) => {
+          {stages.map((stage, idx) => {
             return (
               <div
                 key={stage.id}
@@ -53,7 +73,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                 <div className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100">
                   <div className="flex items-start gap-3.5">
                     <div className="w-9 h-9 rounded-xl bg-sky-50 text-[#052447] font-bold text-sm flex items-center justify-center border border-sky-100 shrink-0">
-                      {stage.id}
+                      {stage.stepNumber || idx + 1}
                     </div>
                     <div>
                       <h3 className="text-base font-bold text-[#052447]">{stage.title}</h3>
@@ -62,7 +82,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold text-slate-600 bg-slate-100 px-3 py-1 rounded-full">
-                      Etapa {idx + 1} de {LEADERSHIP_STAGES.length}
+                      Etapa {idx + 1} de {stages.length}
                     </span>
                   </div>
                 </div>

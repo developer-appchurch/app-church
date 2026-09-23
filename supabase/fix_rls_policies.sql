@@ -62,12 +62,15 @@ BEGIN
         CREATE POLICY "Acesso total publico member_permissions" ON public.member_permissions FOR ALL USING (true) WITH CHECK (true);
     END IF;
 
-    -- Track Steps
-    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'track_steps' AND table_schema = 'public') THEN
-        ALTER TABLE public.track_steps ENABLE ROW LEVEL SECURITY;
-        DROP POLICY IF EXISTS "Acesso total publico track_steps" ON public.track_steps;
-        CREATE POLICY "Acesso total publico track_steps" ON public.track_steps FOR ALL USING (true) WITH CHECK (true);
+    -- Etapa Trilhos
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'etapa_trilhos' AND table_schema = 'public') THEN
+        ALTER TABLE public.etapa_trilhos ENABLE ROW LEVEL SECURITY;
+        DROP POLICY IF EXISTS "Acesso total publico etapa_trilhos" ON public.etapa_trilhos;
+        CREATE POLICY "Acesso total publico etapa_trilhos" ON public.etapa_trilhos FOR ALL USING (true) WITH CHECK (true);
     END IF;
+
+    -- Remove view ou tabela legada track_steps se ainda existir
+    DROP VIEW IF EXISTS public.track_steps CASCADE;
 
     -- Member Track Steps
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'member_track_steps' AND table_schema = 'public') THEN

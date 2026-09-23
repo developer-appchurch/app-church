@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
-import { CellMember, LeadershipTrackProgress } from '../types';
-import { LEADERSHIP_STAGES } from '../data/initialData';
+import React, { useState, useEffect } from 'react';
+import { CellMember, LeadershipTrackProgress, LeadershipTrackStep } from '../types';
+import { AppChurchService } from '../lib/supabase';
 import {
   CheckCircle2,
   Circle,
@@ -14,11 +14,16 @@ import {
   User,
   Phone,
   Check,
+  Building2,
+  Loader2,
+  FileText,
 } from 'lucide-react';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 
 interface LeadershipTrackModalProps {
   member: CellMember | null;
+  churchId?: string;
+  churchName?: string;
   cellName: string;
   onClose: () => void;
   onSaveProgress?: (memberId: string, progress: LeadershipTrackProgress) => void;
@@ -26,40 +31,63 @@ interface LeadershipTrackModalProps {
 
 export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   member,
+  churchId,
+  churchName,
   cellName,
   onClose,
   onSaveProgress,
 }) => {
-  // Build initial track with state initializer
-  const [track, setTrack] = useState<LeadershipTrackProgress>(() => ({
-    memberId: member?.id || '',
-    currentStepId: member?.role === 'Líder em Treinamento' ? 5 : 2,
-    steps: LEADERSHIP_STAGES.map((stage) => {
-      const isPast =
-        member?.role === 'Líder em Treinamento'
-          ? stage.id <= 4
-          : member?.role === 'Líder de Setor' || member?.role === 'Líder de Célula'
-          ? true
-          : stage.id <= 1;
-      return {
-        id: stage.id,
-        title: stage.title,
-        description: stage.description,
-        completed: isPast,
-        completedAt: isPast ? '10/02/2024' : undefined,
-      };
-    }),
-  }));
-
+  const [track, setTrack] = useState<LeadershipTrackProgress | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'track' | 'notes'>('track');
   const [memberNotes, setMemberNotes] = useState(member?.notes || '');
   const [savedAlert, setSavedAlert] = useState(false);
+  const [expandedStepNoteId, setExpandedStepNoteId] = useState<number | string | null>(null);
+
+  // Carrega as etapas vinculadas à igreja específica e o status real do membro da tabela member_track_steps
+  useEffect(() => {
+    if (!member) return;
+
+    const memberId = member.id;
+    const memberChurchId = member.churchId;
+    const memberNotesVal = member.notes;
+
+    let isMounted = true;
+
+    async function loadMemberTrack() {
+      try {
+        const resolvedChurchId = memberChurchId || churchId;
+        const progress = await AppChurchService.getLeadershipProgress(memberId, resolvedChurchId);
+        if (isMounted) {
+          if (progress) {
+            setTrack(progress);
+          }
+          setMemberNotes(memberNotesVal || '');
+        }
+      } catch (err) {
+        console.error('Erro ao carregar etapas do trilho do membro:', err);
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    loadMemberTrack();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [member, churchId]);
 
   if (!member) return null;
 
-  const toggleStep = (stepId: number) => {
+  const toggleStep = (stepId: number | string) => {
+    if (!track) return;
+
     const updatedSteps = track.steps.map((s) => {
-      if (s.id === stepId) {
+      if (String(s.id) === String(stepId)) {
         const nextCompleted = !s.completed;
         return {
           ...s,
@@ -70,9 +98,14 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
       return s;
     });
 
-    const highestCompleted = updatedSteps.filter((s) => s.completed).map((s) => s.id);
+    const completedIndices = updatedSteps
+      .map((s, idx) => (s.completed ? idx : -1))
+      .filter((idx) => idx !== -1);
+
     const nextCurrent =
-      highestCompleted.length > 0 ? Math.min(Math.max(...highestCompleted) + 1, 6) : 1;
+      completedIndices.length > 0
+        ? Math.min(Math.max(...completedIndices) + 2, updatedSteps.length)
+        : 1;
 
     setTrack({
       ...track,
@@ -81,27 +114,56 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
     });
   };
 
-  const handleSave = () => {
-    if (onSaveProgress) {
-      onSaveProgress(member.id, track);
-    }
-    setSavedAlert(true);
-    setTimeout(() => {
-      setSavedAlert(false);
-      onClose();
-    }, 800);
+  const handleStepNoteChange = (stepId: number | string, noteText: string) => {
+    if (!track) return;
+    setTrack({
+      ...track,
+      steps: track.steps.map((s) =>
+        String(s.id) === String(stepId) ? { ...s, notes: noteText } : s
+      ),
+    });
   };
 
-  const completedCount = track.steps.filter((s) => s.completed).length;
-  const percentageCompleted = Math.round((completedCount / track.steps.length) * 100);
+  const handleSave = async () => {
+    if (!track || !member) return;
+
+    setIsSaving(true);
+    try {
+      const resolvedChurchId = member.churchId || churchId;
+      await AppChurchService.saveLeadershipProgress(
+        member.id,
+        track,
+        resolvedChurchId,
+        member.cellId
+      );
+
+      if (onSaveProgress) {
+        onSaveProgress(member.id, track);
+      }
+
+      setSavedAlert(true);
+      setTimeout(() => {
+        setSavedAlert(false);
+        onClose();
+      }, 900);
+    } catch (err) {
+      console.error('Erro ao salvar progresso do trilho:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const completedCount = track?.steps.filter((s) => s.completed).length || 0;
+  const totalCount = track?.steps.length || 0;
+  const percentageCompleted = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   return (
     <div
       id="leadership-track-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 select-none"
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col max-h-[90vh] border border-slate-200"
+        className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col max-h-[92vh] border border-slate-200"
         role="dialog"
         aria-modal="true"
       >
@@ -116,6 +178,11 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                 <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-sky-300 bg-sky-950/60 px-2 py-0.5 rounded">
                   Trilho de Liderança
                 </span>
+                {churchName && (
+                  <span className="text-[11px] sm:text-xs text-sky-200 flex items-center gap-1 font-medium bg-white/10 px-2 py-0.5 rounded">
+                    <Building2 size={11} /> {churchName}
+                  </span>
+                )}
                 <span className="text-[11px] sm:text-xs text-slate-300 truncate">Célula {cellName}</span>
               </div>
               <h2 className="text-lg sm:text-2xl font-bold mt-1 text-white truncate">{member.name}</h2>
@@ -146,7 +213,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
         {/* Progress Summary Bar */}
         <div className="bg-slate-50 border-b border-slate-200 px-4 sm:px-6 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-2 shrink-0">
           <div className="flex items-center gap-2 sm:gap-3">
-            <div className="text-xs font-semibold text-slate-600">Progresso Geral:</div>
+            <div className="text-xs font-semibold text-slate-600">Progresso no Trilho:</div>
             <div className="w-24 sm:w-44 bg-slate-200 rounded-full h-2.5 overflow-hidden">
               <div
                 className="bg-[#052447] h-full rounded-full transition-all duration-500"
@@ -156,13 +223,12 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
             <span className="text-xs font-bold text-[#052447]">{percentageCompleted}%</span>
           </div>
           <div className="text-xs text-slate-500">
-            <strong className="text-slate-700">{completedCount}</strong> de {track.steps.length}{' '}
-            etapas
+            <strong className="text-slate-700">{completedCount}</strong> de {totalCount} etapas concluídas
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-slate-200 px-6 bg-white">
+        <div className="flex border-b border-slate-200 px-6 bg-white shrink-0">
           <button
             onClick={() => setActiveTab('track')}
             className={`py-3 text-sm font-semibold border-b-2 flex items-center gap-2 transition cursor-pointer ${
@@ -171,7 +237,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <Award size={16} /> Etapas do Trilho
+            <Award size={16} /> Etapas do Trilho (etapa_trilhos)
           </button>
           <button
             onClick={() => setActiveTab('notes')}
@@ -186,62 +252,123 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
         </div>
 
         {/* Content Area */}
-        <div className="p-6 overflow-y-auto space-y-4 flex-1">
-          {activeTab === 'track' ? (
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
+          {isLoading ? (
+            <div className="py-16 flex flex-col items-center justify-center text-slate-400 gap-3">
+              <Loader2 className="w-8 h-8 animate-spin text-[#052447]" />
+              <p className="text-sm font-medium text-slate-600">
+                Carregando etapas do trilho da congregação...
+              </p>
+            </div>
+          ) : activeTab === 'track' ? (
             <div className="space-y-3">
-              <div className="text-xs text-slate-500 mb-2 font-medium">
-                Clique nas etapas para marcar como concluída e registrar o avanço espiritual do
-                membro:
+              <div className="text-xs text-slate-500 mb-2 font-medium flex items-center justify-between">
+                <span>
+                  Etapas cadastradas para esta igreja. Clique na etapa para marcar a conclusão do membro:
+                </span>
               </div>
-              {track.steps.map((step, index) => {
+
+              {track?.steps.map((step, index) => {
+                const isCurrent = !step.completed && index + 1 === track.currentStepId;
+                const isExpanded = expandedStepNoteId === step.id;
+
                 return (
                   <div
                     key={step.id}
-                    onClick={() => toggleStep(step.id)}
-                    className={`flex items-start gap-3.5 p-3.5 rounded-xl border transition cursor-pointer select-none ${
+                    className={`rounded-xl border transition select-none ${
                       step.completed
                         ? 'bg-emerald-50/70 border-emerald-200 text-slate-800 hover:bg-emerald-100/60'
+                        : isCurrent
+                        ? 'bg-sky-50/50 border-sky-200 hover:border-sky-300'
                         : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                     }`}
                   >
-                    <button
-                      type="button"
-                      className="mt-0.5 text-emerald-600 focus:outline-none cursor-pointer"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleStep(step.id);
-                      }}
+                    <div
+                      onClick={() => toggleStep(step.id)}
+                      className="p-3.5 flex items-start gap-3.5 cursor-pointer"
                     >
-                      {step.completed ? (
-                        <CheckCircle2 className="w-6 h-6 text-emerald-600 fill-emerald-100" />
-                      ) : (
-                        <Circle className="w-6 h-6 text-slate-300 hover:text-slate-400" />
-                      )}
-                    </button>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <h4
-                          className={`text-sm font-bold ${
-                            step.completed ? 'text-emerald-950' : 'text-slate-800'
-                          }`}
-                        >
-                          {step.title}
-                        </h4>
-                        {step.completed && step.completedAt && (
-                          <span className="text-[11px] font-medium text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full flex items-center gap-1">
-                            <Check size={11} /> {step.completedAt}
-                          </span>
+                      <button
+                        type="button"
+                        className="mt-0.5 text-emerald-600 focus:outline-none cursor-pointer shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleStep(step.id);
+                        }}
+                        aria-label={step.completed ? 'Marcar como não concluída' : 'Marcar como concluída'}
+                      >
+                        {step.completed ? (
+                          <CheckCircle2 className="w-6 h-6 text-emerald-600 fill-emerald-100" />
+                        ) : (
+                          <Circle className="w-6 h-6 text-slate-300 hover:text-slate-400" />
                         )}
-                        {!step.completed && index + 1 === track.currentStepId && (
-                          <span className="text-[11px] font-semibold text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">
-                            Em Andamento
-                          </span>
+                      </button>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <h4
+                            className={`text-sm font-bold ${
+                              step.completed ? 'text-emerald-950' : 'text-slate-800'
+                            }`}
+                          >
+                            {step.title}
+                          </h4>
+
+                          <div className="flex items-center gap-2">
+                            {step.completed && (
+                              <span className="text-[11px] font-medium text-emerald-700 bg-emerald-100/90 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                <Check size={11} /> Concluída{step.completedAt ? ` em ${step.completedAt}` : ''}
+                              </span>
+                            )}
+                            {isCurrent && (
+                              <span className="text-[11px] font-semibold text-sky-700 bg-sky-100 px-2 py-0.5 rounded-full">
+                                Em Andamento
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedStepNoteId(isExpanded ? null : step.id);
+                              }}
+                              className={`p-1 rounded text-slate-400 hover:text-slate-600 transition ${
+                                step.notes ? 'text-sky-700 bg-sky-100' : ''
+                              }`}
+                              title="Adicionar anotação para esta etapa"
+                            >
+                              <FileText size={14} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {step.description && (
+                          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                            {step.description}
+                          </p>
+                        )}
+
+                        {step.validatedBy && (
+                          <div className="text-[11px] text-slate-400 mt-1">
+                            Validado por: <span className="text-slate-600 font-medium">{step.validatedBy}</span>
+                          </div>
                         )}
                       </div>
-                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                        {step.description}
-                      </p>
                     </div>
+
+                    {/* Campo expansível de anotação na etapa */}
+                    {isExpanded && (
+                      <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-100 bg-white/70">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Observações específicas desta etapa (member_track_steps.observacoes):
+                        </label>
+                        <input
+                          type="text"
+                          value={step.notes || ''}
+                          onChange={(e) => handleStepNoteChange(step.id, e.target.value)}
+                          placeholder="Ex: Concluiu com louvor, batizado pelo Pr. Paulo..."
+                          className="w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800"
+                        />
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -250,7 +377,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Anotações de Discipulado e Cuidado Pastoral:
+                  Anotações Gerais de Discipulado e Acompanhamento:
                 </label>
                 <textarea
                   value={memberNotes}
@@ -274,35 +401,47 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                   <span>Frequência Média Registrada:</span>
                   <span className="font-bold text-slate-900">{member.attendancePercentage}%</span>
                 </div>
+                <div className="flex items-center justify-between">
+                  <span>Congregação / Igreja:</span>
+                  <span className="font-medium text-slate-900">{churchName || 'Igreja Local'}</span>
+                </div>
               </div>
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
+        <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between shrink-0">
           <div className="text-xs text-slate-500">
             {savedAlert ? (
               <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                <Check size={14} /> Progresso do membro salvo com sucesso!
+                <Check size={14} /> Progresso gravado com sucesso em member_track_steps!
               </span>
             ) : (
-              'As alterações ficam salvas no Supabase da Célula.'
+              'Os dados do membro ficam salvos na tabela member_track_steps.'
             )}
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 rounded-lg hover:bg-slate-200 transition cursor-pointer"
+              disabled={isSaving}
+              className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 rounded-lg hover:bg-slate-200 transition cursor-pointer disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               id="btn-save-leadership-track"
               onClick={handleSave}
-              className="px-5 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              disabled={isSaving || isLoading}
+              className="px-5 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
             >
-              Salvar Trilho
+              {isSaving ? (
+                <>
+                  <Loader2 size={13} className="animate-spin" /> Salvando...
+                </>
+              ) : (
+                'Salvar Trilho'
+              )}
             </button>
           </div>
         </div>

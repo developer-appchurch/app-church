@@ -7,6 +7,7 @@ import {
   FeedPost,
   ChurchAnnouncement,
   LeadershipTrackProgress,
+  LeadershipTrackStep,
   AttendanceStatus,
   Role,
   Permission,
@@ -1717,53 +1718,67 @@ export const AppChurchService = {
   },
 
   /**
-   * Get Leadership Track Progress for a member
+   * Get Leadership Track Progress for a member, matching specific church steps (etapa_trilhos)
+   * and member's progress in member_track_steps
    */
-  async getLeadershipProgress(memberId: string): Promise<LeadershipTrackProgress | null> {
+  async getLeadershipProgress(memberId: string, churchId?: string): Promise<LeadershipTrackProgress | null> {
+    const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+    const targetMember = allMembers.find((m) => m.id === memberId);
+    const resolvedChurchId = churchId || targetMember?.churchId || CHURCH_UUIDS.SOBRAL;
+
+    // Busca o catálogo de etapas vinculado à igreja específica (ou global)
+    const churchSteps = await this.getTrackSteps(resolvedChurchId);
+
     if (supabase) {
       try {
-        const { data, error } = await supabase
+        const { data: trackSummary } = await supabase
           .from('leadership_tracks')
           .select('*')
           .eq('membro_id', memberId)
-          .single();
+          .maybeSingle();
 
-        if (!error && data) {
-          const { data: stepsData } = await supabase
-            .from('member_track_steps')
-            .select('*')
-            .eq('membro_id', memberId)
-            .order('etapa_id', { ascending: true });
+        const { data: stepsData, error: stepsError } = await supabase
+          .from('member_track_steps')
+          .select('*')
+          .eq('membro_id', memberId)
+          .order('etapa_id', { ascending: true });
 
-          const defaultSteps = INITIAL_TRACK_STEPS.map((s) => ({
-            id: s.id,
-            title: s.title,
-            description: s.description,
-            completed: false,
-            completedAt: undefined as string | undefined,
-            notes: undefined as string | undefined,
-            validatedBy: undefined as string | undefined,
-          }));
+        if (!stepsError && stepsData) {
+          // Mapeia registros da tabela member_track_steps por etapa_id
+          const completedMap = new Map<string, any>();
+          stepsData.forEach((st: any) => {
+            completedMap.set(String(st.etapa_id), st);
+          });
 
-          if (stepsData && stepsData.length > 0) {
-            stepsData.forEach((st: any) => {
-              const idx = defaultSteps.findIndex((s) => s.id === st.etapa_id);
-              if (idx !== -1) {
-                defaultSteps[idx] = {
-                  ...defaultSteps[idx],
-                  completed: Boolean(st.concluida),
-                  completedAt: st.concluida_em,
-                  notes: st.observacoes,
-                  validatedBy: st.validado_por,
-                };
-              }
-            });
-          }
+          const steps: LeadershipTrackStep[] = churchSteps.map((s, index) => {
+            const memberStep = completedMap.get(String(s.id));
+            const isCompleted = memberStep ? Boolean(memberStep.concluida) : false;
+            return {
+              id: s.id,
+              stepNumber: s.stepNumber || index + 1,
+              title: s.title,
+              description: s.description,
+              completed: isCompleted,
+              completedAt: isCompleted ? (memberStep?.concluida_em || undefined) : undefined,
+              notes: memberStep?.observacoes || undefined,
+              validatedBy: memberStep?.validado_por || undefined,
+            };
+          });
+
+          const highestCompletedIdx = steps
+            .map((s, i) => (s.completed ? i : -1))
+            .filter((i) => i !== -1);
+          const currentStep =
+            trackSummary?.etapa_atual_id ||
+            (highestCompletedIdx.length > 0
+              ? Math.min(Math.max(...highestCompletedIdx) + 2, steps.length)
+              : 1);
 
           return {
-            memberId: data.membro_id,
-            currentStepId: data.etapa_atual_id || 1,
-            steps: defaultSteps,
+            memberId,
+            churchId: resolvedChurchId,
+            currentStepId: currentStep,
+            steps,
           };
         }
       } catch (e) {
@@ -1772,30 +1787,54 @@ export const AppChurchService = {
     }
 
     const allTracks = loadFromStorage(STORAGE_KEYS.TRACKS, INITIAL_LEADERSHIP_PROGRESS);
-    return allTracks[memberId] || null;
+    const cached = allTracks[memberId];
+    if (cached && cached.steps && cached.steps.length > 0) {
+      return {
+        ...cached,
+        churchId: resolvedChurchId,
+      };
+    }
+
+    return {
+      memberId,
+      churchId: resolvedChurchId,
+      currentStepId: 1,
+      steps: churchSteps.map((s, index) => ({
+        id: s.id,
+        stepNumber: s.stepNumber || index + 1,
+        title: s.title,
+        description: s.description,
+        completed: false,
+      })),
+    };
   },
 
   /**
-   * Save Leadership Track Progress to Supabase + local cache
+   * Save Leadership Track Progress to Supabase (member_track_steps + leadership_tracks) + local cache
    */
-  async saveLeadershipProgress(memberId: string, progress: LeadershipTrackProgress): Promise<void> {
+  async saveLeadershipProgress(
+    memberId: string,
+    progress: LeadershipTrackProgress,
+    churchId?: string,
+    cellId?: string
+  ): Promise<void> {
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     const targetMember = allMembers.find((m) => m.id === memberId);
-    const churchId = targetMember?.churchId || CHURCH_UUIDS.SOBRAL;
-    const cellId = targetMember?.cellId || CELL_UUIDS.ADONAI;
+    const resolvedChurchId = churchId || targetMember?.churchId || CHURCH_UUIDS.SOBRAL;
+    const resolvedCellId = cellId || targetMember?.cellId || CELL_UUIDS.ADONAI;
 
     if (supabase) {
       try {
         const completedCount = progress.steps.filter((s) => s.completed).length;
         const totalCount = progress.steps.length || 6;
-        const pct = Math.round((completedCount / totalCount) * 100);
+        const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
         // Upsert summary row into leadership_tracks with igreja_id and celula_id
         await supabase.from('leadership_tracks').upsert(
           {
             membro_id: memberId,
-            igreja_id: churchId,
-            celula_id: cellId,
+            igreja_id: resolvedChurchId,
+            celula_id: resolvedCellId,
             etapa_atual_id: progress.currentStepId,
             quantidade_etapas_concluidas: completedCount,
             quantidade_total_etapas: totalCount,
@@ -1810,10 +1849,12 @@ export const AppChurchService = {
         if (progress.steps && progress.steps.length > 0) {
           const stepRows = progress.steps.map((st) => ({
             membro_id: memberId,
-            celula_id: cellId,
+            celula_id: resolvedCellId,
             etapa_id: st.id,
-            concluida: st.completed,
-            concluida_em: st.completedAt || null,
+            concluida: Boolean(st.completed),
+            concluida_em: st.completed ? (st.completedAt || new Date().toLocaleDateString('pt-BR')) : null,
+            observacoes: st.notes || null,
+            validado_por: st.validatedBy || null,
             atualizado_em: new Date().toISOString(),
           }));
 
@@ -1831,6 +1872,25 @@ export const AppChurchService = {
       ...allTracks,
       [memberId]: progress,
     });
+
+    // Atualiza resumo no membro local
+    const completedCount = progress.steps.filter((s) => s.completed).length;
+    const totalCount = progress.steps.length || 6;
+    const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
+    const updatedMembers = allMembers.map((m) =>
+      m.id === memberId
+        ? {
+            ...m,
+            trackProgress: {
+              currentStepId: progress.currentStepId,
+              completedStepsCount: completedCount,
+              totalStepsCount: totalCount,
+              percentage: pct,
+            },
+          }
+        : m
+    );
+    saveToStorage(STORAGE_KEYS.MEMBERS, updatedMembers);
   },
 
   /**
@@ -1912,26 +1972,34 @@ export const AppChurchService = {
   },
 
   /**
-   * Track Steps catalog
+   * Catálogo de Etapas do Trilho (etapa_trilhos) filtradas por id_igreja
    */
-  async getTrackSteps(): Promise<TrackStep[]> {
+  async getTrackSteps(churchId?: string): Promise<TrackStep[]> {
     if (supabase) {
       try {
-        const { data, error } = await supabase
-          .from('track_steps')
-          .select('*')
-          .order('numero_etapa');
+        let query = supabase.from('etapa_trilhos').select('*');
+        if (churchId) {
+          query = query.or(`id_igreja.eq.${churchId},id_igreja.is.null`);
+        }
+        const { data, error } = await query.order('numero_etapa', { ascending: true });
+
         if (!error && data && data.length > 0) {
-          return data.map((ts: any) => ({
+          // Se tiver etapas específicas da igreja, prioriza elas; senão usa as globais
+          const churchSpecific = churchId ? data.filter((ts: any) => ts.id_igreja === churchId) : [];
+          const sourceList = churchSpecific.length > 0 ? churchSpecific : data;
+
+          return sourceList.map((ts: any) => ({
             id: ts.id,
+            id_igreja: ts.id_igreja,
+            churchId: ts.id_igreja,
             stepNumber: ts.numero_etapa,
             title: ts.titulo,
-            description: ts.descricao,
-            required: ts.obrigatoria,
+            description: ts.descricao || '',
+            required: ts.obrigatoria ?? true,
           }));
         }
       } catch (e) {
-        console.warn('Fallback para track_steps locais', e);
+        console.warn('Fallback para etapa_trilhos locais', e);
       }
     }
     return INITIAL_TRACK_STEPS;

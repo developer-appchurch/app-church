@@ -27,7 +27,7 @@ Este documento e o arquivo [`/supabase/schema.sql`](./schema.sql) contêm o scri
             | N:1                                | 1:N                                 | N:1
 +-----------v------------+                       |                                     v
 |      permissions       |                       |                       +-------------+-------------+
-| (Tabela de Permissões) |                       +---------------------->|        track_steps        |
+| (Tabela de Permissões) |                       +---------------------->|       etapa_trilhos       |
 +------------------------+                                               |     (Tabela de Trilho)    |
                                                                          +---------------------------+
 ```
@@ -89,30 +89,34 @@ Membros que pertencem a uma célula, com função ministerial e permissões:
 #### Permissões Específicas do Membro (`public.member_permissions`)
 - Permite conceder ou revogar permissões extras para um membro específico além da sua função padrão.
 
-### 5. Tabela de Trilho de Liderança (`public.track_steps`)
-Catálogo oficial das etapas do Trilho:
-- `id` (PK INTEGER: 1 a 6)
-- `step_number` (INTEGER)
-- `title` (TEXT)
+### 5. Tabela de Trilho de Liderança (`public.etapa_trilhos`)
+Catálogo de etapas do Trilho vinculadas a cada congregação/igreja:
+- `id` (SERIAL PRIMARY KEY)
+- `id_igreja` (UUID REFERENCES `churches.id` ON DELETE CASCADE) - *Permite que cada igreja cadastre e personalize seu próprio trilho de liderança*
+- `numero_etapa` (INTEGER)
+- `titulo` (TEXT)
   1. *Integração & Boas-Vindas*
   2. *Batismo nas Águas*
   3. *Encontro com Deus*
   4. *Pós-Encontro & Maturidade*
   5. *Escola de Líderes / CTL*
   6. *Líder em Treinamento & Envio*
-- `description` (TEXT)
-- `required` (BOOLEAN)
+- `descricao` (TEXT)
+- `obrigatoria` (BOOLEAN)
 
 #### Etapas Concluídas pelo Membro (`public.member_track_steps`)
 Registra exatamente quais etapas o membro já realizou:
 - `id` (UUID PK)
-- `member_id` (FK `members.id`)
-- `cell_id` (FK `cells.id`)
-- `step_id` (FK `track_steps.id`)
-- `completed` (BOOLEAN)
-- `completed_at` (TEXT / DATE)
-- `notes` (TEXT)
-- `validated_by` (TEXT)
+- `membro_id` (FK `members.id`)
+- `celula_id` (FK `cells.id`)
+- `etapa_id` (FK `etapa_trilhos.id`)
+- `concluida` (BOOLEAN)
+- `concluida_em` (TEXT / DATE)
+- `observacoes` (TEXT)
+- `validado_por` (TEXT)
+
+#### Script de Migração para Etapa Trilhos:
+Execute [`/supabase/migration_etapa_trilhos.sql`](./migration_etapa_trilhos.sql) no SQL Editor do Supabase para migrar a tabela `track_steps` existente para `etapa_trilhos` e adicionar a coluna `id_igreja`.
 
 #### Resumo de Trilho (`public.leadership_tracks`)
 - `member_id` (PK FK `members.id`)

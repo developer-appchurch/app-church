@@ -9,7 +9,7 @@
 -- 4. Tabela de Permissões (permissions) + Mapeamento (role_permissions) com IDs UUID
 -- 5. Tabela de Células (cells) - Vínculo por igreja_id UUID
 -- 6. Tabela de Membros (members) - Vínculo obrigatório a igreja_id e celula_id UUID
--- 7. Tabela de Trilho de Liderança (track_steps) + Progresso (member_track_steps & leadership_tracks)
+-- 7. Tabela de Trilho de Liderança (etapa_trilhos) + Progresso (member_track_steps & leadership_tracks)
 -- 8. Tabelas de Comunhão (feed_posts & post_comments & announcements) com IDs UUID
 -- 9. Views Relacionais e RLS (Row Level Security)
 -- 10. Seed inicial com UUIDs determinísticos
@@ -148,12 +148,13 @@ CREATE TABLE IF NOT EXISTS public.member_permissions (
 CREATE INDEX IF NOT EXISTS idx_member_permissions_membro ON public.member_permissions(membro_id);
 
 -- ==============================================================================
--- 6. TABELA DE TRILHO DE LIDERANÇA (TRACK_STEPS & MEMBER_TRACK_STEPS)
+-- 6. TABELA DE TRILHO DE LIDERANÇA (ETAPA_TRILHOS & MEMBER_TRACK_STEPS)
 -- ==============================================================================
 
--- Catálogo oficial das etapas do Trilho
-CREATE TABLE IF NOT EXISTS public.track_steps (
-    id INTEGER PRIMARY KEY, -- 1 a 6
+-- Catálogo de etapas do Trilho vinculadas a cada congregação/igreja
+CREATE TABLE IF NOT EXISTS public.etapa_trilhos (
+    id SERIAL PRIMARY KEY,
+    id_igreja UUID REFERENCES public.churches(id) ON DELETE CASCADE,
     numero_etapa INTEGER NOT NULL,
     titulo TEXT NOT NULL,
     descricao TEXT,
@@ -161,12 +162,18 @@ CREATE TABLE IF NOT EXISTS public.track_steps (
     criado_em TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_etapa_trilhos_igreja ON public.etapa_trilhos(id_igreja);
+CREATE INDEX IF NOT EXISTS idx_etapa_trilhos_numero ON public.etapa_trilhos(numero_etapa);
+
+-- Remove view legada caso exista
+DROP VIEW IF EXISTS public.track_steps CASCADE;
+
 -- Registro individual de cada etapa realizada pelo Membro
 CREATE TABLE IF NOT EXISTS public.member_track_steps (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     membro_id UUID NOT NULL REFERENCES public.members(id) ON DELETE CASCADE,
     celula_id UUID NOT NULL REFERENCES public.cells(id) ON DELETE CASCADE,
-    etapa_id INTEGER NOT NULL REFERENCES public.track_steps(id) ON DELETE CASCADE,
+    etapa_id INTEGER NOT NULL REFERENCES public.etapa_trilhos(id) ON DELETE CASCADE,
     concluida BOOLEAN NOT NULL DEFAULT false,
     concluida_em TEXT, -- Data de conclusão (dd/MM/AAAA)
     observacoes TEXT,
@@ -314,7 +321,7 @@ SELECT
     mts.validado_por
 FROM public.members m
 JOIN public.cells c ON c.id = m.celula_id
-CROSS JOIN public.track_steps ts
+CROSS JOIN public.etapa_trilhos ts
 LEFT JOIN public.member_track_steps mts ON mts.membro_id = m.id AND mts.etapa_id = ts.id
 ORDER BY m.nome, ts.numero_etapa;
 
@@ -328,7 +335,7 @@ ALTER TABLE public.permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.member_permissions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.track_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.etapa_trilhos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.member_track_steps ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.leadership_tracks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.feed_posts ENABLE ROW LEVEL SECURITY;
@@ -344,8 +351,8 @@ DROP POLICY IF EXISTS "Leitura pública de permissões" ON public.permissions;
 DROP POLICY IF EXISTS "Acesso a permissões" ON public.permissions;
 DROP POLICY IF EXISTS "Leitura pública de permissões por função" ON public.role_permissions;
 DROP POLICY IF EXISTS "Acesso a permissões por função" ON public.role_permissions;
-DROP POLICY IF EXISTS "Leitura pública do catálogo de trilho" ON public.track_steps;
-DROP POLICY IF EXISTS "Acesso ao catálogo de trilho" ON public.track_steps;
+DROP POLICY IF EXISTS "Leitura pública do catálogo de trilho" ON public.etapa_trilhos;
+DROP POLICY IF EXISTS "Acesso ao catálogo de trilho" ON public.etapa_trilhos;
 DROP POLICY IF EXISTS "Acesso a células por igreja" ON public.cells;
 DROP POLICY IF EXISTS "Acesso a membros por célula/igreja" ON public.members;
 DROP POLICY IF EXISTS "Acesso a permissões de membros" ON public.member_permissions;
@@ -359,7 +366,7 @@ CREATE POLICY "Acesso a igrejas" ON public.churches FOR ALL USING (true) WITH CH
 CREATE POLICY "Acesso a funções" ON public.roles FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Acesso a permissões" ON public.permissions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Acesso a permissões por função" ON public.role_permissions FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Acesso ao catálogo de trilho" ON public.track_steps FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Acesso ao catálogo de trilho" ON public.etapa_trilhos FOR ALL USING (true) WITH CHECK (true);
 
 CREATE POLICY "Acesso a células por igreja" ON public.cells FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Acesso a membros por célula/igreja" ON public.members FOR ALL USING (true) WITH CHECK (true);
@@ -462,16 +469,16 @@ VALUES
     ('b2000000-0000-0000-0000-000000000009', 'c3000000-0000-0000-0000-000000000011')
 ON CONFLICT (funcao_id, permissao_id) DO NOTHING;
 
--- 10.5 Catálogo Oficial das 6 Etapas do Trilho
-INSERT INTO public.track_steps (id, numero_etapa, titulo, descricao, obrigatoria)
+-- 10.5 Catálogo Oficial das Etapas do Trilho por Igreja (etapa_trilhos)
+INSERT INTO public.etapa_trilhos (id, id_igreja, numero_etapa, titulo, descricao, obrigatoria)
 VALUES
-    (1, 1, 'Integração & Boas-Vindas', 'Recepção na célula, cadastro de dados e consolidação inicial do novo membro.', true),
-    (2, 2, 'Batismo nas Águas', 'Profissão pública de fé e testemunho cristão perante a congregação.', true),
-    (3, 3, 'Encontro com Deus', 'Fim de semana de cura interior, libertação e renovação no Espírito Santo.', true),
-    (4, 4, 'Pós-Encontro & Maturidade', 'Aprofundamento na oração, disciplina do jejum e leitura bíblica diária.', true),
-    (5, 5, 'Escola de Líderes / CTL', 'Curso de Treinamento de Líderes: capacitação bíblica e prática para liderança celular.', true),
-    (6, 6, 'Líder em Treinamento & Envio', 'Prática de ministração, pastoreio de vidas e multiplicação frutífera de célula.', true)
-ON CONFLICT (id) DO UPDATE SET titulo = EXCLUDED.titulo, descricao = EXCLUDED.descricao;
+    (1, 'a1000000-0000-0000-0000-000000000001', 1, '1. Integração & Boas-Vindas', 'Recepção na célula, cadastro de dados e consolidação inicial do novo membro.', true),
+    (2, 'a1000000-0000-0000-0000-000000000001', 2, '2. Batismo nas Águas', 'Profissão pública de fé e testemunho cristão perante a congregação.', true),
+    (3, 'a1000000-0000-0000-0000-000000000001', 3, '3. Encontro com Deus', 'Fim de semana de cura interior, libertação e renovação no Espírito Santo.', true),
+    (4, 'a1000000-0000-0000-0000-000000000001', 4, '4. Pós-Encontro & Maturidade', 'Aprofundamento na oração, disciplina do jejum e leitura bíblica diária.', true),
+    (5, 'a1000000-0000-0000-0000-000000000001', 5, '5. Escola de Líderes / CTL', 'Curso de Treinamento de Líderes: capacitação bíblica e prática para liderança celular.', true),
+    (6, 'a1000000-0000-0000-0000-000000000001', 6, '6. Líder em Treinamento & Envio', 'Prática de ministração, pastoreio de vidas e multiplicação frutífera de célula.', true)
+ON CONFLICT (id) DO UPDATE SET titulo = EXCLUDED.titulo, descricao = EXCLUDED.descricao, id_igreja = EXCLUDED.id_igreja;
 
 -- 10.6 Tabela de Células (Sobral e Jaibaras com UUID)
 INSERT INTO public.cells (id, igreja_id, nome, nome_lider, nome_setor, endereco, dia_reuniao, horario_reuniao, quantidade_membros)
