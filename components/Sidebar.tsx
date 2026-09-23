@@ -134,7 +134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="shrink-0 bg-[#04213d] text-white p-4 sm:p-5 relative overflow-hidden">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
-              <AppChurchLogo variant="light" className="h-10 sm:h-11 w-24 sm:w-28" />
+              <AppChurchLogo variant="light" className="h-10 sm:h-11 w-28 sm:w-32" />
             </div>
             <button
               id="btn-sidebar-close"

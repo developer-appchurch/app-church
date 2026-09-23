@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" width="500" height="300" style="background:transparent;">
+  <g fill="#ffffff" text-anchor="middle">
+    <!-- Linha 1: app -->
+    <text x="250" y="118" font-family="-apple-system, BlinkMacSystemFont, Plus Jakarta Sans, Outfit, Arial, sans-serif" font-size="124" font-weight="900" letter-spacing="-5.5">app</text>
+    <!-- Linha 2: Church -->
+    <text x="250" y="244" font-family="-apple-system, BlinkMacSystemFont, Plus Jakarta Sans, Outfit, Arial, sans-serif" font-size="132" font-weight="900" letter-spacing="-6">Church</text>
+  </g>
+</svg>
