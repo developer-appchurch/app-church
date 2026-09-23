@@ -1211,6 +1211,7 @@ export const AppChurchService = {
             avatarUrl: m.url_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
             notes: m.observacoes || '',
           }));
+          saveToStorage(STORAGE_KEYS.MEMBERS, members);
           return members;
         }
       } catch (e) {
@@ -1227,6 +1228,7 @@ export const AppChurchService = {
 
   /**
    * Verifica se um login já está em uso na tabela de membros (regra de login único)
+   * Garante privacidade e segurança: NUNCA expõe o nome ou dados do membro associado ao login existente.
    */
   async isLoginAvailable(
     login: string,
@@ -1235,29 +1237,45 @@ export const AppChurchService = {
     const cleanLogin = login.trim().toLowerCase();
     if (!cleanLogin) return { available: false, error: 'O login não pode ser vazio.' };
 
+    // Bloqueia logins de sistema reservados
+    if (['admin', 'administrator', 'root', 'sistema', 'suporte'].includes(cleanLogin)) {
+      return {
+        available: false,
+        error: 'Este login já está em uso. Por favor, escolha outro login.',
+      };
+    }
+
     if (supabase) {
       try {
         let query = supabase
           .from('members')
-          .select('id, nome, login')
+          .select('id, login')
           .ilike('login', cleanLogin);
         if (excludeMemberId) {
           query = query.neq('id', excludeMemberId);
         }
         const { data, error } = await query.limit(1);
-        if (!error && data && data.length > 0) {
-          return {
-            available: false,
-            error: `O login "${cleanLogin}" já está cadastrado para o membro "${data[0].nome}". Por favor, escolha outro login.`,
-          };
+
+        // Se a consulta ao banco Supabase foi executada com sucesso
+        if (!error) {
+          if (data && data.length > 0) {
+            // Login já cadastrado no banco: NÃO expõe o nome do membro por motivos de segurança e privacidade
+            return {
+              available: false,
+              error: 'Este login já está em uso. Por favor, escolha outro login.',
+            };
+          }
+          // Login não existe no banco Supabase: disponível para uso imediato!
+          return { available: true };
         }
       } catch (err) {
         console.warn('Erro ao verificar disponibilidade de login no Supabase:', err);
       }
     }
 
-    // Verificação também no armazenamento local (offline/fallback)
-    const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+    // Apenas se o Supabase não estiver configurado ou falhar (modo offline):
+    // Verificação no armazenamento local utilizando apenas membros reais em cache (sem mock seed)
+    const allMembers = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, []);
     const duplicateLocal = allMembers.find(
       (m) =>
         m.id !== excludeMemberId &&
@@ -1267,7 +1285,7 @@ export const AppChurchService = {
     if (duplicateLocal) {
       return {
         available: false,
-        error: `O login "${cleanLogin}" já está cadastrado para o membro "${duplicateLocal.name}". Por favor, escolha outro login.`,
+        error: 'Este login já está em uso. Por favor, escolha outro login.',
       };
     }
 
@@ -1295,7 +1313,7 @@ export const AppChurchService = {
     // 1. Regra de Negócio Estrita: NÃO PODE REPETIR LOGIN
     const availability = await this.isLoginAvailable(cleanLogin);
     if (!availability.available) {
-      throw new Error(availability.error || `O login "${cleanLogin}" já está em uso por outro membro.`);
+      throw new Error(availability.error || `O login "${cleanLogin}" já está em uso.`);
     }
 
     // Normaliza celula_id para null se for string vazia ou inexistente (PostgreSQL uuid)
@@ -1308,6 +1326,20 @@ export const AppChurchService = {
 
     // Map roleId to a valid UUID if not already formatted
     let roleId = newMember.roleId;
+    if (supabase && (!roleId || !roleId.includes('-') || roleId.startsWith('role-'))) {
+      try {
+        const { data: dbRoles } = await supabase.from('roles').select('id, nome, slug');
+        if (dbRoles && dbRoles.length > 0) {
+          const matched = dbRoles.find(
+            (r: any) =>
+              r.nome?.toLowerCase() === newMember.role.toLowerCase() ||
+              r.slug?.toLowerCase() === newMember.role.toLowerCase() ||
+              newMember.role.toLowerCase().includes(r.nome?.toLowerCase())
+          );
+          if (matched) roleId = matched.id;
+        }
+      } catch {}
+    }
     if (!roleId || !roleId.includes('-') || roleId.startsWith('role-')) {
       const matchedRole = INITIAL_ROLES.find((r) => r.name === newMember.role);
       roleId = matchedRole ? matchedRole.id : ROLE_UUIDS.MEMBRO;
@@ -2211,6 +2243,7 @@ export const AppChurchService = {
 
   /**
    * Roles (Tabela de Funções - Roles)
+   * Ordenado do menor para o maior nível de hierarquia
    */
   async getRoles(): Promise<Role[]> {
     if (supabase) {
@@ -2218,7 +2251,8 @@ export const AppChurchService = {
         const { data, error } = await supabase
           .from('roles')
           .select('*')
-          .order('nivel_hierarquia', { ascending: false });
+          .order('nivel_hierarquia', { ascending: true })
+          .order('nome', { ascending: true });
         if (!error && data && data.length > 0) {
           return data.map((r: any) => ({
             id: r.id,
@@ -2233,7 +2267,7 @@ export const AppChurchService = {
         console.warn('Fallback para roles locais', e);
       }
     }
-    return INITIAL_ROLES;
+    return [...INITIAL_ROLES].sort((a, b) => a.hierarchyLevel - b.hierarchyLevel || a.name.localeCompare(b.name));
   },
 
   /**

@@ -2,15 +2,22 @@ export type AttendanceStatus = 'green' | 'yellow' | 'red' | 'black';
 
 export type UserRole =
   | 'Membro'
+  | 'Discipulador'
+  | 'Discipulador em Treinamento'
   | 'Líder em Treinamento'
   | 'Líder de Célula'
   | 'Líder de Setor'
+  | 'Líder de Área'
+  | 'Líder de Rede'
+  | 'Líder de Distrito'
   | 'Pastor'
+  | 'Pastor(a)'
   | 'Supervisor'
   | 'Administrador'
   | 'Anfitrião'
   | 'Intercessor'
-  | 'Secretário';
+  | 'Secretário'
+  | (string & {});
 
 /**
  * Tabela de Funções (Roles)

@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile, Role } from '../types';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 import { AppChurchService } from '../lib/supabase';
 import {
@@ -96,6 +96,84 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [isCheckingLogin, setIsCheckingLogin] = useState(false);
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Roles obtidas diretamente da tabela roles do Supabase
+  const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
+
+  // Carrega as roles do banco de dados na inicialização
+  useEffect(() => {
+    let isMounted = true;
+    async function loadRoles() {
+      try {
+        const roles = await AppChurchService.getRoles();
+        if (isMounted && roles && roles.length > 0) {
+          // Ordena rigorosamente do menor para o maior nível de hierarquia
+          const sorted = [...roles].sort(
+            (a, b) => a.hierarchyLevel - b.hierarchyLevel || a.name.localeCompare(b.name)
+          );
+          setAvailableRoles(sorted);
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar roles no MyCellView:', err);
+      }
+    }
+    loadRoles();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Nível de hierarquia do usuário logado
+  const userHierarchyLevel = useMemo(() => {
+    if (!currentUser) return 1;
+    // Administrador possui autoridade máxima para cadastrar qualquer função
+    if (currentUser.isSystemAdmin || currentUser.role === 'Administrador') {
+      return 999;
+    }
+
+    if (availableRoles.length > 0) {
+      const matched = availableRoles.find(
+        (r) =>
+          (currentUser.roleId && r.id === currentUser.roleId) ||
+          r.name?.toLowerCase() === currentUser.role?.toLowerCase() ||
+          r.slug?.toLowerCase() === currentUser.role?.toLowerCase() ||
+          (currentUser.role &&
+            (r.name?.toLowerCase().includes(currentUser.role.toLowerCase()) ||
+              currentUser.role.toLowerCase().includes(r.name?.toLowerCase())))
+      );
+      if (matched) {
+        return matched.hierarchyLevel;
+      }
+    }
+
+    // Fallback caso a lista do banco ainda esteja carregando
+    const roleLower = (currentUser.role || '').toLowerCase();
+    if (roleLower.includes('pastor')) return 7;
+    if (roleLower.includes('distrito')) return 6;
+    if (roleLower.includes('rede')) return 5;
+    if (roleLower.includes('área') || roleLower.includes('area')) return 4;
+    if (roleLower.includes('setor')) return 3;
+    if (roleLower.includes('célula') || roleLower.includes('celula')) return 2;
+    return 1;
+  }, [currentUser, availableRoles]);
+
+  // Lista de funções disponíveis para cadastro:
+  // "o usuário só pode cadastrar alguém do seu nível de hierarquia para baixo (igual ou inferior)"
+  // "mostre em ordem de nivel_hierarquia de menor para o maior"
+  const assignableRoles = useMemo(() => {
+    if (availableRoles.length === 0) return [];
+    return availableRoles
+      .filter((r) => r.hierarchyLevel <= userHierarchyLevel)
+      .sort((a, b) => a.hierarchyLevel - b.hierarchyLevel || a.name.localeCompare(b.name));
+  }, [availableRoles, userHierarchyLevel]);
+
+  // Papel efetivo garantindo que sempre pertença à lista permitida
+  const effectiveRole = useMemo(() => {
+    if (assignableRoles.length === 0) return newRole;
+    return assignableRoles.some((r) => r.name === newRole)
+      ? newRole
+      : (assignableRoles[0].name as UserRole);
+  }, [assignableRoles, newRole]);
 
   // -------------------------------------------------------------
   // CONTROLE DO SELETOR HIERÁRQUICO CONTEXTUAL
@@ -306,7 +384,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     try {
       const check = await AppChurchService.isLoginAvailable(candidate);
       if (!check.available) {
-        setLoginDuplicateError(check.error || `O login "${candidate}" já está em uso por outro membro.`);
+        setLoginDuplicateError(check.error || 'Este login já está em uso. Por favor, escolha outro login.');
       } else {
         setLoginDuplicateError('');
       }
@@ -328,6 +406,11 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setNewPhone('');
     setFormError('');
     setLoginDuplicateError('');
+    if (assignableRoles.length > 0) {
+      setNewRole(assignableRoles[0].name as UserRole);
+    } else {
+      setNewRole('Membro');
+    }
     setIsAddModalOpen(true);
   };
 
@@ -408,7 +491,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       if (!check.available) {
         const errMsg =
           check.error ||
-          `O login "${effectiveLogin}" já está em uso por outro membro. Por favor, escolha outro.`;
+          'Este login já está em uso. Por favor, escolha outro login.';
         setLoginDuplicateError(errMsg);
         setFormError(errMsg);
         setIsCheckingLogin(false);
@@ -421,12 +504,21 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       setIsCheckingLogin(false);
     }
 
+    // Validação estrita de nível de hierarquia
+    const targetRoleObj = availableRoles.find((r) => r.name === effectiveRole);
+    if (targetRoleObj && targetRoleObj.hierarchyLevel > userHierarchyLevel) {
+      setFormError('Você só pode cadastrar membros com nível de hierarquia igual ou inferior à sua função.');
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       await onAddMember({
         name: newName.trim(),
         login: effectiveLogin,
         password: newPassword.trim() || '123456',
-        role: newRole,
+        role: effectiveRole,
+        roleId: targetRoleObj?.id,
         neighborhood: newNeighborhood.trim(), // Deixa em branco caso o usuário não informe
         birthday: newBirthday.trim(), // Deixa em branco caso não informado
         attendanceStatus: newStatus,
@@ -1113,16 +1205,19 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     Função no Grupo:
                   </label>
                   <select
-                    value={newRole}
+                    value={effectiveRole}
                     onChange={(e) => setNewRole(e.target.value as UserRole)}
                     className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] cursor-pointer"
                   >
-                    <option value="Membro">Membro</option>
-                    <option value="Líder em Treinamento">Líder em Treinamento</option>
-                    <option value="Anfitrião">Anfitrião</option>
-                    <option value="Intercessor">Intercessor</option>
-                    <option value="Secretário">Secretário</option>
-                    <option value="Líder de Célula">Líder de Célula</option>
+                    {assignableRoles.length > 0 ? (
+                      assignableRoles.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="Membro">Membro</option>
+                    )}
                   </select>
                 </div>
                 <div>
