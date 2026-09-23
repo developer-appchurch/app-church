@@ -8,33 +8,27 @@ interface LogoProps {
 }
 
 export const AppChurchLogo: React.FC<LogoProps> = ({
-  className = 'h-12',
+  className = 'h-14',
   variant = 'light',
 }) => {
-  let logoSrc = '/logo-oficial-appchurch.png';
-  if (variant === 'dark') {
-    logoSrc = '/logo-oficial-appchurch-dark.png';
-  } else if (variant === 'official') {
-    logoSrc = '/logo-oficial-appchurch-black.png';
-  }
+  const isDark = variant === 'dark' || variant === 'official';
+  const logoSrc = isDark ? '/appchurch-logo-dark.svg' : '/assets/AppChurch Svg.svg';
 
   return (
-    <div className={`inline-flex items-center justify-center select-none relative ${className}`}>
+    <div
+      className={`inline-flex items-center justify-center select-none relative ${className}`}
+    >
       <Image
         src={logoSrc}
-        alt="Logo Oficial App Church"
-        width={220}
-        height={130}
+        alt="AppChurch Logo"
+        width={289}
+        height={166}
         priority
         unoptimized
-        className="w-full h-full object-contain max-h-full"
+        className="w-full h-full max-h-full object-contain drop-shadow-xs"
         referrerPolicy="no-referrer"
         draggable={false}
       />
     </div>
   );
 };
-
-
-
-

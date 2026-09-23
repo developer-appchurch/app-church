@@ -59,7 +59,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       {/* Top Section with Generic Platform Logo */}
       <div className="w-full max-w-md pt-12 pb-6 px-6 flex flex-col items-center justify-center z-10 text-center">
         <div className="transform transition-transform hover:scale-105 duration-300">
-          <AppChurchLogo variant="light" className="h-24" />
+          <AppChurchLogo variant="light" className="h-[75px]" />
         </div>
       </div>
 
