@@ -11,9 +11,6 @@ import {
   LogOut,
   X,
   ChevronRight,
-  MapPin,
-  HeartHandshake,
-  Church as ChurchIcon,
   Building2,
   Layers,
   Network,
@@ -150,12 +147,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
 
-          {/* Church Badge - Showing the user's specific church */}
-          <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-sky-950/80 border border-sky-400/30 text-[11px] font-semibold text-sky-200">
-            <ChurchIcon size={12} className="text-sky-300 shrink-0" />
-            <span className="truncate">{user.churchName}</span>
-          </div>
-
           {/* User Profile Card in Drawer */}
           <div className="flex items-center gap-3 pt-1">
             <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full border-2 border-sky-400 overflow-hidden bg-slate-700 shrink-0 relative">
@@ -175,35 +166,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <div className="min-w-0 flex-1">
               <h3 className="font-bold text-white text-sm sm:text-base truncate">{user.name}</h3>
               <p className="text-xs text-sky-200 font-medium truncate">{user.role}</p>
-              {currentCell && (
-                <div className="inline-flex items-center gap-1 text-[11px] text-sky-300 font-semibold mt-0.5 truncate">
-                  <MapPin size={11} className="shrink-0" /> Célula {currentCell.name}
-                </div>
-              )}
             </div>
           </div>
         </div>
 
         {/* Scrollable Middle Body */}
-        <div className="flex-1 overflow-y-auto min-h-0 divide-y divide-slate-100">
-          {/* Quick Cell Info Bar */}
-          {currentCell && (
-            <div className="bg-sky-50 px-4 sm:px-5 py-2.5 flex items-center justify-between text-xs text-sky-900">
-              <span className="font-medium flex items-center gap-1.5 truncate pr-2">
-                <HeartHandshake size={14} className="text-sky-700 shrink-0" />
-                {currentCell.meetingDay} às {currentCell.meetingTime}
-              </span>
-              <span className="font-bold bg-sky-200/60 text-sky-950 px-2 py-0.5 rounded-full text-[10px] shrink-0">
-                {currentCell.memberCount} vidas
-              </span>
-            </div>
-          )}
-
+        <div className="flex-1 overflow-y-auto min-h-0">
           {/* Nav Links */}
           <nav className="p-3 space-y-1">
-            <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Navegação
-            </div>
             {menuItems.map((item) => {
               const isActive = activeScreen === item.id;
               const Icon = item.icon;
