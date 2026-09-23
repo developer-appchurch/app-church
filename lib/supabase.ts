@@ -624,26 +624,64 @@ export const AppChurchService = {
           }
         }
 
-        // 3. Cadastrar Pastor em 'members' (celula_id nulo aguardando 1ª célula)
-        let { error: pastorErr } = await supabase.from('members').insert([
-          {
-            id: pastorId,
-            igreja_id: churchId,
-            celula_id: null,
-            funcao_id: 'b2000000-0000-0000-0000-000000000001', // Pastor
-            funcao: 'Pastor',
-            nome: input.pastorName.trim(),
-            login: cleanPastorLogin,
-            senha_hash: cleanPastorPass,
-            telefone: input.pastorPhone?.trim() || null,
-            email: input.pastorEmail?.trim() || null,
-            bairro: 'Centro',
-            status_frequencia: 'green',
-            percentual_frequencia: 100,
-            url_avatar: pastorProfile.avatarUrl,
-            observacoes: 'Pastor Titular cadastrado no registro da igreja (aguardando 1ª célula)',
-          },
-        ]);
+        // 3. Resolver ID da Role de Pastor no Supabase para evitar violação de FK
+        let resolvedRoleId = 'b2000000-0000-0000-0000-000000000001';
+        try {
+          const { data: matchedRoles } = await supabase
+            .from('roles')
+            .select('id, nome, slug')
+            .or('slug.eq.pastor,slug.eq.PASTOR,nome.ilike.%pastor%')
+            .limit(1);
+
+          if (matchedRoles && matchedRoles.length > 0) {
+            resolvedRoleId = matchedRoles[0].id;
+          } else {
+            const { data: anyRole } = await supabase.from('roles').select('id').limit(1);
+            if (anyRole && anyRole.length > 0) {
+              resolvedRoleId = anyRole[0].id;
+            }
+          }
+        } catch (rErr) {
+          console.warn('Aviso ao resolver role do pastor no cliente direto:', rErr);
+        }
+
+        const pastorPayload: any = {
+          id: pastorId,
+          igreja_id: churchId,
+          celula_id: null,
+          funcao_id: resolvedRoleId,
+          funcao: 'Pastor',
+          nome: input.pastorName.trim(),
+          login: cleanPastorLogin,
+          senha_hash: cleanPastorPass,
+          telefone: input.pastorPhone?.trim() || null,
+          email: input.pastorEmail?.trim() || null,
+          bairro: 'Centro',
+          status_frequencia: 'green',
+          percentual_frequencia: 100,
+          url_avatar: pastorProfile.avatarUrl,
+          observacoes: 'Pastor Titular cadastrado no registro da igreja (aguardando 1ª célula)',
+        };
+
+        let { error: pastorErr } = await supabase.from('members').insert([pastorPayload]);
+
+        // Auto-recuperação se FK falhar
+        if (pastorErr && (pastorErr.message?.includes('members_funcao_id_fkey') || pastorErr.message?.includes('funcao_id'))) {
+          try {
+            const { data: validRoles } = await supabase.from('roles').select('id, nome, slug');
+            if (validRoles && validRoles.length > 0) {
+              const matched =
+                validRoles.find(
+                  (r: any) =>
+                    r.slug?.toLowerCase().includes('pastor') ||
+                    r.nome?.toLowerCase().includes('pastor')
+                ) || validRoles[0];
+              pastorPayload.funcao_id = matched.id;
+              const retryRes = await supabase.from('members').insert([pastorPayload]);
+              pastorErr = retryRes.error;
+            }
+          } catch {}
+        }
 
         if (pastorErr) {
           // Rollback
@@ -1149,7 +1187,7 @@ export const AppChurchService = {
     };
 
     if (supabase) {
-      const { error: insertError } = await supabase.from('members').insert({
+      const payload: any = {
         id: newId,
         igreja_id: validChurchId,
         celula_id: validCellId,
@@ -1165,7 +1203,29 @@ export const AppChurchService = {
         percentual_frequencia: newMember.attendancePercentage ?? 100,
         url_avatar: newMember.avatarUrl || null,
         observacoes: newMember.notes || null,
-      });
+      };
+
+      let { error: insertError } = await supabase.from('members').insert(payload);
+
+      // Auto-recuperação caso o banco não reconheça o UUID de funcao_id
+      if (insertError && (insertError.message?.includes('members_funcao_id_fkey') || insertError.message?.includes('funcao_id'))) {
+        try {
+          const { data: dbRoles } = await supabase.from('roles').select('id, nome, slug');
+          if (dbRoles && dbRoles.length > 0) {
+            const roleSlug = newMember.role.toLowerCase();
+            const matched = dbRoles.find(
+              (r: any) =>
+                r.slug?.toLowerCase() === roleSlug ||
+                r.nome?.toLowerCase() === roleSlug ||
+                newMember.role.toLowerCase().includes(r.nome?.toLowerCase())
+            ) || dbRoles[0];
+            payload.funcao_id = matched.id;
+            created.roleId = matched.id;
+            const retryRes = await supabase.from('members').insert(payload);
+            insertError = retryRes.error;
+          }
+        } catch {}
+      }
 
       if (insertError) {
         if (

@@ -190,14 +190,52 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Cadastrar Pastor Titular com login e senha na tabela 'members'
+    // 3. Resolver ID da Role de Pastor no Supabase para evitar violação de FK (members_funcao_id_fkey)
+    let resolvedRoleId: string | null = 'b2000000-0000-0000-0000-000000000001';
+    try {
+      const { data: matchedRoles } = await supabase
+        .from('roles')
+        .select('id, nome, slug')
+        .or('slug.eq.pastor,slug.eq.PASTOR,nome.ilike.%pastor%')
+        .limit(1);
+
+      if (matchedRoles && matchedRoles.length > 0) {
+        resolvedRoleId = matchedRoles[0].id;
+      } else {
+        // Tenta registrar as roles padrão caso a tabela roles não tenha sido populada
+        const defaultPastorRole = {
+          id: 'b2000000-0000-0000-0000-000000000001',
+          nome: 'Pastor',
+          slug: 'pastor',
+          descricao: 'Liderança pastoral e supervisão geral',
+          nivel_hierarquia: 10,
+          cor_distintivo: '#0284c7',
+        };
+        const { error: seedRoleErr } = await supabase.from('roles').insert([defaultPastorRole]);
+        if (!seedRoleErr) {
+          resolvedRoleId = defaultPastorRole.id;
+        } else {
+          // Busca qualquer role existente no banco
+          const { data: anyRole } = await supabase.from('roles').select('id').limit(1);
+          if (anyRole && anyRole.length > 0) {
+            resolvedRoleId = anyRole[0].id;
+          }
+        }
+      }
+    } catch (roleErr) {
+      console.warn('Aviso ao resolver role do pastor:', roleErr);
+    }
+
+    pastorProfile.roleId = resolvedRoleId || 'b2000000-0000-0000-0000-000000000001';
+
+    // 4. Cadastrar Pastor Titular com login e senha na tabela 'members'
     // Conforme especificação: celula_id fica pendente (null) até o cadastro da primeira célula da igreja.
     // Tabelas 'cells', 'unidades' e 'celulas' NÃO são populadas automaticamente aqui.
     const pastorMemberPayload: any = {
       id: pastorId,
       igreja_id: churchId,
       celula_id: null,
-      funcao_id: 'b2000000-0000-0000-0000-000000000001',
+      funcao_id: resolvedRoleId,
       funcao: 'Pastor',
       nome: input.pastorName.trim(),
       login: cleanPastorLogin,
@@ -214,6 +252,28 @@ export async function POST(req: NextRequest) {
 
     let { error: pastorErr } = await supabase.from('members').insert([pastorMemberPayload]);
     let seedCellCreated: CellGroup | undefined = undefined;
+
+    // Se violou FK em funcao_id, tenta auto-recuperação buscando a role real do banco
+    if (pastorErr && (pastorErr.message?.includes('members_funcao_id_fkey') || pastorErr.message?.includes('funcao_id'))) {
+      console.warn('Auto-recuperação: erro de FK em funcao_id. Buscando roles válidas no banco...');
+      try {
+        const { data: validRoles } = await supabase.from('roles').select('id, nome, slug');
+        if (validRoles && validRoles.length > 0) {
+          const matched =
+            validRoles.find(
+              (r: any) =>
+                r.slug?.toLowerCase().includes('pastor') ||
+                r.nome?.toLowerCase().includes('pastor')
+            ) || validRoles[0];
+          pastorMemberPayload.funcao_id = matched.id;
+          pastorProfile.roleId = matched.id;
+          const retryRes = await supabase.from('members').insert([pastorMemberPayload]);
+          pastorErr = retryRes.error;
+        }
+      } catch (fkRecoveryErr) {
+        console.warn('Falha na recuperação de FK de funcao_id:', fkRecoveryErr);
+      }
+    }
 
     // Se o banco ainda mantiver a restrição NOT NULL em 'celula_id', realiza auto-recuperação resiliente
     if (pastorErr && pastorErr.message?.includes('not-null') && pastorErr.message?.includes('celula_id')) {
