@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { HierarchicalLevelInput, RegisterChurchInput, UserProfile } from '../types';
 import { AppChurchService } from '../lib/supabase';
+import { optimizeImageToWebP, IMAGE_PRESETS, formatFileSize } from '../lib/imageOptimizer';
 
 interface RegisterChurchViewProps {
   onBack?: () => void;
@@ -160,6 +161,8 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
   const [stateUf, setStateUf] = useState('');
   const [logoUrl, setLogoUrl] = useState('');
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [isOptimizingLogo, setIsOptimizingLogo] = useState(false);
+  const [logoStats, setLogoStats] = useState<{ size: string; reduction: string } | null>(null);
 
   // Níveis Hierárquicos
   const [levels, setLevels] = useState<HierarchicalLevelInput[]>([
@@ -210,17 +213,33 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
     setPastorPassword(pass);
   };
 
-  // Upload do Logotipo (Drag & Drop / Input file)
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload do Logotipo (Drag & Drop / Input file) com conversão automática para WebP leve
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    e.target.value = '';
+    setIsOptimizingLogo(true);
+    try {
+      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.LOGO);
+      setLogoPreview(result.dataUrl);
+      setLogoUrl(result.dataUrl);
+      setLogoStats({
+        size: formatFileSize(result.optimizedSize),
+        reduction: result.reductionLabel,
+      });
+    } catch (err) {
+      console.warn('Fallback ao ler logotipo:', err);
       const reader = new FileReader();
       reader.onload = (event) => {
         const result = event.target?.result as string;
         setLogoPreview(result);
         setLogoUrl(result);
+        setLogoStats(null);
       };
       reader.readAsDataURL(file);
+    } finally {
+      setIsOptimizingLogo(false);
     }
   };
 
@@ -716,11 +735,25 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
                     </div>
 
                     <div className="flex-1 text-center sm:text-left space-y-1">
-                      <div className="text-xs font-bold text-slate-800">
-                        {logoPreview ? 'Logotipo carregado' : 'Carregue a marca da igreja'}
+                      <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                        <span className="text-xs font-bold text-slate-800">
+                          {logoPreview ? 'Logotipo carregado' : 'Carregue a marca da igreja'}
+                        </span>
+                        {isOptimizingLogo && (
+                          <span className="text-[11px] text-sky-700 font-semibold flex items-center gap-1 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200 animate-pulse">
+                            <Loader2 size={12} className="animate-spin text-sky-600" />
+                            Otimizando para WebP...
+                          </span>
+                        )}
+                        {logoStats && logoPreview && !isOptimizingLogo && (
+                          <span className="text-[11px] text-emerald-700 font-medium bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                            <Sparkles size={11} className="text-emerald-600" />
+                            WebP Leve: {logoStats.size} ({logoStats.reduction})
+                          </span>
+                        )}
                       </div>
                       <p className="text-[11px] text-slate-500">
-                        Formatos recomendados: PNG, JPG ou SVG (fundo transparente)
+                        Convertido automaticamente para WebP leve mantendo fundo transparente
                       </p>
                       <div className="flex items-center justify-center sm:justify-start gap-2 pt-1">
                         <label
@@ -743,6 +776,7 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
                             onClick={() => {
                               setLogoPreview(null);
                               setLogoUrl('');
+                              setLogoStats(null);
                             }}
                             className="px-2.5 py-1.5 text-xs text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
                           >

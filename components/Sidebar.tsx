@@ -17,7 +17,10 @@ import {
   Camera,
   Upload,
   Check,
+  Sparkles,
+  Loader2,
 } from 'lucide-react';
+import { optimizeImageToWebP, IMAGE_PRESETS, formatFileSize } from '../lib/imageOptimizer';
 import { ActiveScreen, UserProfile, CellGroup } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService } from '../lib/supabase';
@@ -56,20 +59,37 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState(user?.avatarUrl || '');
+  const [isOptimizingAvatar, setIsOptimizingAvatar] = useState(false);
+  const [avatarStats, setAvatarStats] = useState<{ size: string; reduction: string } | null>(null);
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const [avatarSuccess, setAvatarSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    e.target.value = '';
+    setIsOptimizingAvatar(true);
+    try {
+      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.AVATAR);
+      setAvatarPreview(result.dataUrl);
+      setAvatarStats({
+        size: formatFileSize(result.optimizedSize),
+        reduction: result.reductionLabel,
+      });
+    } catch (err) {
+      console.warn('Fallback ao ler avatar:', err);
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === 'string') {
           setAvatarPreview(reader.result);
+          setAvatarStats(null);
         }
       };
       reader.readAsDataURL(file);
+    } finally {
+      setIsOptimizingAvatar(false);
     }
   };
 
@@ -389,17 +409,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onChange={handleFileSelected}
                 />
 
+                {isOptimizingAvatar && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-50 text-sky-800 border border-sky-200 text-xs font-semibold animate-pulse mt-1">
+                    <Loader2 size={14} className="animate-spin text-sky-600" />
+                    <span>Otimizando para WebP leve...</span>
+                  </div>
+                )}
+
+                {avatarStats && !isOptimizingAvatar && (
+                  <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold mt-1 shadow-2xs">
+                    <Sparkles size={12} className="text-emerald-600" />
+                    <span>WebP Otimizado: {avatarStats.size} ({avatarStats.reduction})</span>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   id="btn-select-device-photo"
                   onClick={() => fileInputRef.current?.click()}
-                  className="mt-1 inline-flex items-center gap-2 px-4 py-2 bg-sky-50 hover:bg-sky-100 text-sky-950 border border-sky-300 text-xs font-bold rounded-xl transition cursor-pointer active:scale-95 shadow-2xs"
+                  disabled={isOptimizingAvatar}
+                  className="mt-1 inline-flex items-center gap-2 px-4 py-2 bg-sky-50 hover:bg-sky-100 text-sky-950 border border-sky-300 text-xs font-bold rounded-xl transition cursor-pointer active:scale-95 shadow-2xs disabled:opacity-50"
                 >
-                  <Upload size={15} />
+                  {isOptimizingAvatar ? (
+                    <Loader2 size={15} className="animate-spin text-sky-700" />
+                  ) : (
+                    <Upload size={15} />
+                  )}
                   Escolher do Computador ou Celular
                 </button>
                 <p className="text-[11px] text-slate-400 text-center">
-                  Formatos aceitos: JPG, PNG, WEBP (fotos da câmera ou galeria)
+                  Formatos aceitos: JPG, PNG, WEBP (fotos salvas em WebP ultraleve)
                 </p>
               </div>
 
@@ -415,7 +454,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <button
                         key={idx}
                         type="button"
-                        onClick={() => setAvatarPreview(avatar)}
+                        onClick={() => {
+                          setAvatarPreview(avatar);
+                          setAvatarStats(null);
+                        }}
                         className={`w-full aspect-square rounded-full overflow-hidden border-2 transition p-0.5 cursor-pointer relative ${
                           isSelected
                             ? 'border-sky-600 ring-2 ring-sky-300 scale-105'

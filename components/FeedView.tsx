@@ -16,7 +16,9 @@ import {
   Send,
   Sparkles,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
+import { optimizeImageToWebP, IMAGE_PRESETS, formatFileSize } from '../lib/imageOptimizer';
 
 interface FeedViewProps {
   posts: FeedPost[];
@@ -52,6 +54,12 @@ export const FeedView: React.FC<FeedViewProps> = ({
   // Feed post state
   const [newPostCaption, setNewPostCaption] = useState('');
   const [selectedImageUrl, setSelectedImageUrl] = useState<string>('');
+  const [isOptimizingImage, setIsOptimizingImage] = useState(false);
+  const [imageStats, setImageStats] = useState<{
+    originalSize: string;
+    optimizedSize: string;
+    reductionLabel: string;
+  } | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<FeedPost['category']>('Célula');
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
@@ -90,14 +98,32 @@ export const FeedView: React.FC<FeedViewProps> = ({
     return isAuthor || isAdmin || isPastor;
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    // Reseta o input para permitir selecionar o mesmo arquivo caso deseje
+    e.target.value = '';
+
+    setIsOptimizingImage(true);
+    try {
+      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.FEED_POST);
+      setSelectedImageUrl(result.dataUrl);
+      setImageStats({
+        originalSize: formatFileSize(result.originalSize),
+        optimizedSize: formatFileSize(result.optimizedSize),
+        reductionLabel: result.reductionLabel,
+      });
+    } catch (err) {
+      console.warn('Fallback ao ler imagem para o feed:', err);
       const reader = new FileReader();
       reader.onload = () => {
         setSelectedImageUrl(reader.result as string);
+        setImageStats(null);
       };
       reader.readAsDataURL(file);
+    } finally {
+      setIsOptimizingImage(false);
     }
   };
 
@@ -121,6 +147,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
       setNewPostCaption('');
       setSelectedImageUrl('');
+      setImageStats(null);
     } finally {
       setIsSubmitting(false);
     }
@@ -201,22 +228,43 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 className="w-full bg-[#f8fafc] border border-slate-200 rounded-xl p-3 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#052447] focus:ring-1 focus:ring-[#052447]"
               />
 
+              {/* Status de Otimização WebP para Mobile */}
+              {isOptimizingImage && (
+                <div className="flex items-center gap-2.5 p-3 mt-2 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-xs animate-pulse">
+                  <Loader2 size={16} className="animate-spin text-sky-700 shrink-0" />
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-1.5">
+                    <span className="font-bold">Otimizando foto para WebP leve...</span>
+                    <span className="text-slate-500 text-[11px]">(Evita travamentos e acelera o mobile)</span>
+                  </div>
+                </div>
+              )}
+
               {/* Image Preview if selected */}
-              {selectedImageUrl && (
-                <div className="relative mt-2 rounded-xl overflow-hidden border border-slate-200 max-h-60 bg-slate-900">
+              {selectedImageUrl && !isOptimizingImage && (
+                <div className="relative mt-2 rounded-xl overflow-hidden border border-slate-200 max-h-64 bg-slate-900 shadow-sm">
                   <Image
                     src={selectedImageUrl}
                     alt="Preview do momento"
                     width={800}
                     height={400}
-                    className="w-full h-auto object-cover max-h-60"
+                    className="w-full h-auto object-cover max-h-64"
                     unoptimized
                     referrerPolicy="no-referrer"
                   />
+                  <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/75 backdrop-blur-xs text-white text-[11px] font-medium px-2.5 py-1 rounded-full border border-white/20 shadow-xs">
+                    <Sparkles size={12} className="text-amber-400" />
+                    <span className="font-semibold">WebP Otimizado</span>
+                    {imageStats && (
+                      <span className="text-emerald-300 font-semibold">• {imageStats.optimizedSize} ({imageStats.reductionLabel})</span>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    onClick={() => setSelectedImageUrl('')}
-                    className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white text-xs px-2.5 py-1 rounded-full cursor-pointer"
+                    onClick={() => {
+                      setSelectedImageUrl('');
+                      setImageStats(null);
+                    }}
+                    className="absolute top-2 right-2 bg-black/70 hover:bg-black text-white text-xs px-2.5 py-1 rounded-full cursor-pointer transition"
                   >
                     Remover foto
                   </button>
@@ -239,9 +287,14 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     type="button"
                     id="btn-upload-photo"
                     onClick={() => fileInputRef.current?.click()}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+                    disabled={isOptimizingImage}
+                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
                   >
-                    <ImageIcon size={15} className="text-sky-700" />
+                    {isOptimizingImage ? (
+                      <Loader2 size={15} className="animate-spin text-sky-700" />
+                    ) : (
+                      <ImageIcon size={15} className="text-sky-700" />
+                    )}
                     Carregar Foto
                   </button>
                   <select
