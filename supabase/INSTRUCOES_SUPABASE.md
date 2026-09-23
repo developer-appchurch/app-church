@@ -142,11 +142,48 @@ Ele implementa:
 
 ---
 
+## 🇧🇷 Migração: Padronização em Português e Consolidação de Células (`/supabase/migration_padronizacao_portugues_unidades.sql`)
+
+Para projetos já existentes que utilizam tabelas em inglês (`churches`, `roles`, `members`, `cells`, etc.), utilize o script [`/supabase/migration_padronizacao_portugues_unidades.sql`](./migration_padronizacao_portugues_unidades.sql).
+
+### Etapas da Migração:
+1. **Renomeação de tabelas para português**:
+   - `churches` ➔ `igrejas`
+   - `roles` ➔ `papeis`
+   - `permissions` ➔ `permissoes`
+   - `role_permissions` ➔ `papel_permissoes`
+   - `members` ➔ `membros`
+   - `member_permissions` ➔ `membro_permissoes`
+   - `etapa_trilhos` ➔ `etapas_trilha`
+   - `member_track_steps` ➔ `membro_etapas_trilha`
+   - `leadership_tracks` ➔ `trilhas_lideranca`
+   - `feed_posts` ➔ `postagens_feed`
+   - `post_comments` ➔ `comentarios_postagem`
+   - `announcements` ➔ `avisos`
+2. **Renomeação de colunas**:
+   - `papel_permissoes.funcao_id` ➔ `papel_id`
+   - `membros.funcao_id` ➔ `papel_id`
+   - `etapas_trilha.id_igreja` ➔ `igreja_id`
+3. **Consolidação de `cells` em `unidades` e `celulas`**:
+   - Cria o nível "Célula" em `nivel_tipo` se não existir.
+   - Migra os registros legados para `unidades` e os atributos de reunião para `celulas`.
+4. **Vínculo de líderes e setores (com revisão manual)**:
+   - Queries de revisão manual para conferir correspondências ambíguas antes de aplicar.
+5. **Reponte de chaves estrangeiras**:
+   - `membros.unidade_id`, `postagens_feed.unidade_id`, `membro_etapas_trilha.unidade_id`, `trilhas_lideranca.unidade_id`.
+6. **Remoção de tabelas legadas**:
+   - Descarte seguro de `cells` após validação.
+7. **Correção de restrições compostas**:
+   - Integridade multi-tenant em `unidades` e `nivel_tipo`.
+
+---
+
 ## 🚀 Como Aplicar no Supabase
 
 1. Acesse o seu projeto no [Supabase Dashboard](https://supabase.com/dashboard).
-2. No menu lateral esquerdo, clique em **SQL Editor**.
-3. Clique em **+ New query**.
-4. Copie todo o conteúdo do arquivo [`/supabase/schema.sql`](./schema.sql).
-5. Cole no editor e clique no botão **Run** (ou pressione `Ctrl + Enter` / `Cmd + Enter`).
-6. Todas as tabelas, índices, views (`vw_cell_members_full`, `vw_member_leadership_track`), políticas de RLS e dados iniciais de demonstração serão criados com sucesso!
+2. **Importante**: Faça backup antes de rodar migrações em produção (via Database > Backups ou clone em staging).
+3. No menu lateral esquerdo, clique em **SQL Editor**.
+4. Clique em **+ New query**.
+5. Para uma nova instalação: execute [`/supabase/schema.sql`](./schema.sql).
+6. Para migrar um banco existente: execute as etapas de [`/supabase/migration_padronizacao_portugues_unidades.sql`](./migration_padronizacao_portugues_unidades.sql).
+7. Clique no botão **Run** (ou pressione `Ctrl + Enter` / `Cmd + Enter`).
