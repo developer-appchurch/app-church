@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   Check,
   UserCheck,
+  UserPlus,
   Compass,
   Lock,
   X,
@@ -71,6 +72,14 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [newLeaderEmail, setNewLeaderEmail] = useState('');
   const [isSavingLeader, setIsSavingLeader] = useState(false);
   const [leaderAddError, setLeaderAddError] = useState('');
+
+  // Modal de Vinculação Direta de Líderes para Unidades Existentes
+  const [isBindLeaderModalOpen, setIsBindLeaderModalOpen] = useState<boolean>(false);
+  const [unitToBindLeaders, setUnitToBindLeaders] = useState<OrganizationalUnit | null>(null);
+  const [bindLeaderSelectedIds, setBindLeaderSelectedIds] = useState<string[]>([]);
+  const [bindLeaderSearchTerm, setBindLeaderSearchTerm] = useState<string>('');
+  const [isBindingLeaders, setIsBindingLeaders] = useState<boolean>(false);
+  const [bindLeaderError, setBindLeaderError] = useState<string>('');
 
   // Form states
   const [unitName, setUnitName] = useState<string>('');
@@ -187,6 +196,20 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return churchMembers.filter((m) => m.churchId === effectiveChurchId);
   }, [churchMembers, effectiveChurchId]);
 
+  // Filtro de membros da igreja para o modal de vinculação direta de líderes
+  const modalFilteredMembers = useMemo(() => {
+    if (!bindLeaderSearchTerm.trim()) return filteredChurchMembers;
+    const term = bindLeaderSearchTerm.toLowerCase();
+    return filteredChurchMembers.filter(
+      (m) =>
+        m.name.toLowerCase().includes(term) ||
+        (m.role && m.role.toLowerCase().includes(term)) ||
+        (m.phone && m.phone.includes(term)) ||
+        (m.neighborhood && m.neighborhood.toLowerCase().includes(term)) ||
+        (m.cellName && m.cellName.toLowerCase().includes(term))
+    );
+  }, [filteredChurchMembers, bindLeaderSearchTerm]);
+
   // Pai selecionado efetivo (calculado dinamicamente para evitar cascading renders)
   const effectiveParentId = useMemo(() => {
     if (isRootLevel) return '';
@@ -210,6 +233,61 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       setSelectedLeaderIds(selectedLeaderIds.filter((id) => id !== memberId));
     } else {
       setSelectedLeaderIds([...selectedLeaderIds, memberId]);
+    }
+  };
+
+  const handleOpenBindLeaderModal = (unit: OrganizationalUnit) => {
+    setUnitToBindLeaders(unit);
+    setBindLeaderSelectedIds(unit.leaders ? unit.leaders.map((l) => l.id) : []);
+    setBindLeaderSearchTerm('');
+    setBindLeaderError('');
+    setIsBindLeaderModalOpen(true);
+  };
+
+  const handleToggleBindLeader = (memberId: string) => {
+    setBindLeaderSelectedIds((prev) =>
+      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
+    );
+  };
+
+  const handleSaveUnitLeaders = async () => {
+    if (!unitToBindLeaders) return;
+    setIsBindingLeaders(true);
+    setBindLeaderError('');
+
+    try {
+      const result = await AppChurchService.updateUnitLeaders(
+        unitToBindLeaders.id,
+        effectiveChurchId,
+        bindLeaderSelectedIds
+      );
+
+      // Atualiza a lista de unidades no estado local
+      setUnits((prev) =>
+        prev.map((u) => {
+          if (u.id === unitToBindLeaders.id) {
+            return {
+              ...u,
+              leaders: result.leaders,
+            };
+          }
+          return u;
+        })
+      );
+
+      setSuccessBanner(
+        result.leaders.length > 0
+          ? `${result.leaders.length} líder(es) vinculado(s) com sucesso a "${unitToBindLeaders.name}"!`
+          : `Líderes atualizados para "${unitToBindLeaders.name}".`
+      );
+
+      setIsBindLeaderModalOpen(false);
+      setUnitToBindLeaders(null);
+    } catch (err: any) {
+      console.error('Erro ao vincular líderes:', err);
+      setBindLeaderError(err?.message || 'Falha ao vincular líderes.');
+    } finally {
+      setIsBindingLeaders(false);
     }
   };
 
@@ -239,6 +317,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
       setChurchMembers((prev) => [added, ...prev]);
       setSelectedLeaderIds((prev) => [...prev, added.id]);
+      if (unitToBindLeaders) {
+        setBindLeaderSelectedIds((prev) => [...prev, added.id]);
+      }
       setNewLeaderName('');
       setNewLeaderPhone('');
       setNewLeaderEmail('');
@@ -857,26 +938,58 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                         )}
                       </div>
 
-                      {/* Líderes */}
+                      {/* Líderes / Opção de Vincular Líderes */}
                       {unit.leaders && unit.leaders.length > 0 ? (
-                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                          <span className="text-[10px] text-slate-400 font-medium">
-                            Líder(es):
-                          </span>
-                          {unit.leaders.map((ldr) => (
-                            <span
-                              key={ldr.id}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white text-[11px] font-semibold text-slate-700 border border-slate-200"
+                        <div className="pt-2 border-t border-slate-200/70 mt-1">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                Líder(es):
+                              </span>
+                              {unit.leaders.map((ldr) => (
+                                <span
+                                  key={ldr.id}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white text-[11px] font-semibold text-slate-700 border border-slate-200 shadow-2xs"
+                                >
+                                  <UserCheck size={11} className="text-sky-700" />
+                                  <span>{ldr.name}</span>
+                                </span>
+                              ))}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenBindLeaderModal(unit)}
+                              className="text-[11px] font-bold text-sky-800 hover:text-sky-950 flex items-center gap-1 cursor-pointer bg-sky-50 hover:bg-sky-100 px-2.5 py-1 rounded-lg border border-sky-200 transition shrink-0 self-start sm:self-auto"
                             >
-                              <UserCheck size={11} className="text-sky-700" />
-                              <span>{ldr.name}</span>
-                            </span>
-                          ))}
+                              <UserCheck size={12} />
+                              <span>Alterar Líderes</span>
+                            </button>
+                          </div>
                         </div>
                       ) : (
-                        <p className="text-[10px] text-amber-700 font-medium pt-1">
-                          Nenhum líder vinculado a esta unidade.
-                        </p>
+                        <div className="pt-2">
+                          <div className="p-2.5 bg-amber-50/90 border border-amber-200/90 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0 animate-pulse" />
+                              <div>
+                                <span className="text-xs font-bold text-amber-900 block">
+                                  Sem líder vinculado
+                                </span>
+                                <span className="text-[10px] text-amber-700">
+                                  Vincule um ou mais líderes para este(a) {activeLevel.name.toLowerCase()}
+                                </span>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenBindLeaderModal(unit)}
+                              className="px-3 py-1.5 bg-[#052447] hover:bg-[#073366] text-white rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer shrink-0"
+                            >
+                              <UserPlus size={13} />
+                              <span>Vincular Líder</span>
+                            </button>
+                          </div>
+                        </div>
                       )}
 
                       {/* Dados adicionais para célula */}
@@ -1026,6 +1139,231 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Vincular Líderes a uma Unidade Organizacional Existente */}
+      {isBindLeaderModalOpen && unitToBindLeaders && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl border border-slate-200 overflow-hidden my-8 max-h-[90vh] flex flex-col">
+            {/* Header */}
+            <div className="bg-[#04213d] text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300">
+                  <UserPlus size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider bg-sky-500/20 text-sky-200 px-2 py-0.5 rounded">
+                      {activeLevel.name}
+                    </span>
+                    <span className="text-xs text-slate-300">•</span>
+                    <span className="text-xs text-slate-300">{effectiveChurchName}</span>
+                  </div>
+                  <h3 className="text-sm sm:text-base font-extrabold text-white mt-0.5">
+                    Vincular Líderes: {unitToBindLeaders.name}
+                  </h3>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBindLeaderModalOpen(false);
+                  setUnitToBindLeaders(null);
+                }}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-4 sm:p-5 overflow-y-auto flex-1 space-y-4">
+              {bindLeaderError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0" />
+                  <span>{bindLeaderError}</span>
+                </div>
+              )}
+
+              {/* Informação & Quick Add Leader */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-sky-50/70 border border-sky-100 p-3 rounded-xl">
+                <div>
+                  <p className="text-xs font-bold text-sky-950">
+                    Selecione um ou mais líderes
+                  </p>
+                  <p className="text-[11px] text-sky-800">
+                    Permite liderança individual, em dupla ou equipe de co-líderes.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLeaderAddError('');
+                    setIsAddLeaderModalOpen(true);
+                  }}
+                  className="px-2.5 py-1.5 bg-white hover:bg-sky-50 text-sky-900 border border-sky-300 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1 shadow-2xs cursor-pointer shrink-0"
+                >
+                  <Plus size={13} />
+                  <span>Novo Líder</span>
+                </button>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  type="text"
+                  value={bindLeaderSearchTerm}
+                  onChange={(e) => setBindLeaderSearchTerm(e.target.value)}
+                  placeholder="Buscar membro por nome, cargo ou telefone..."
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800"
+                />
+              </div>
+
+              {/* Contador & Selecionados */}
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-700">
+                  Membros da Igreja ({modalFilteredMembers.length}):
+                </span>
+                <span className="font-semibold text-sky-800 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
+                  {bindLeaderSelectedIds.length}{' '}
+                  {bindLeaderSelectedIds.length === 1 ? 'selecionado' : 'selecionados'}
+                </span>
+              </div>
+
+              {/* Chips dos selecionados */}
+              {bindLeaderSelectedIds.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200/80">
+                  {bindLeaderSelectedIds.map((id) => {
+                    const mem = churchMembers.find((m) => m.id === id);
+                    if (!mem) return null;
+                    return (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-sky-300 rounded-lg text-xs font-bold text-sky-950 shadow-2xs"
+                      >
+                        <UserCheck size={12} className="text-sky-700" />
+                        <span>{mem.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleToggleBindLeader(id)}
+                          className="ml-1 text-slate-400 hover:text-red-500 cursor-pointer"
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Lista de Membros */}
+              <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-xl p-1.5 bg-slate-50/50 space-y-1">
+                {modalFilteredMembers.length === 0 ? (
+                  <div className="p-6 text-center space-y-2">
+                    <p className="text-xs text-slate-500 font-medium">
+                      Nenhum membro encontrado com os critérios de busca.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLeaderAddError('');
+                        setIsAddLeaderModalOpen(true);
+                      }}
+                      className="text-xs font-bold text-sky-800 hover:text-sky-950 inline-flex items-center gap-1.5 underline cursor-pointer"
+                    >
+                      <Plus size={14} />
+                      <span>Cadastrar novo líder para esta igreja</span>
+                    </button>
+                  </div>
+                ) : (
+                  modalFilteredMembers.map((member) => {
+                    const isSelected = bindLeaderSelectedIds.includes(member.id);
+                    return (
+                      <div
+                        key={member.id}
+                        onClick={() => handleToggleBindLeader(member.id)}
+                        className={`flex items-center justify-between p-2.5 rounded-xl text-xs cursor-pointer transition select-none ${
+                          isSelected
+                            ? 'bg-sky-50 border border-sky-300 text-sky-950 font-bold shadow-2xs'
+                            : 'hover:bg-white text-slate-700 border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div
+                            className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] shrink-0 transition ${
+                              isSelected
+                                ? 'bg-[#052447] text-white border-[#052447]'
+                                : 'border-slate-300 bg-white'
+                            }`}
+                          >
+                            {isSelected && <Check size={12} strokeWidth={3} />}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-semibold text-slate-800 truncate">
+                              {member.name}
+                            </span>
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-normal">
+                              {member.phone && <span>{member.phone}</span>}
+                              {member.cellName && (
+                                <span className="truncate">• {member.cellName}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <span className="text-[10px] text-slate-600 font-medium px-2 py-0.5 rounded-md bg-slate-100 shrink-0">
+                          {member.role || 'Membro'}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+              <span className="text-xs text-slate-500 font-medium">
+                {bindLeaderSelectedIds.length === 0
+                  ? 'Nenhum líder selecionado'
+                  : `${bindLeaderSelectedIds.length} líder(es) selecionado(s)`}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsBindLeaderModalOpen(false);
+                    setUnitToBindLeaders(null);
+                  }}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 bg-white border border-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isBindingLeaders}
+                  onClick={handleSaveUnitLeaders}
+                  className="px-4 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-75"
+                >
+                  {isBindingLeaders ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} />
+                      <span>Salvar Líderes</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -20,6 +20,8 @@ import {
   ChurchHierarchicalLevel,
   OrganizationalUnit,
   CreateUnitInput,
+  UnitLeader,
+  UpdateUnitLeadersInput,
 } from '../types';
 import {
   INITIAL_CHURCHES,
@@ -846,6 +848,59 @@ export const AppChurchService = {
       return data.unit;
     }
     throw new Error('Criação de unidades requer conexão com o servidor.');
+  },
+
+  /**
+   * Vincula ou atualiza líderes de uma unidade organizacional (setor, área, célula, etc.)
+   */
+  async updateUnitLeaders(
+    unitId: string,
+    churchId: string,
+    leaderMemberIds: string[]
+  ): Promise<{ success: boolean; leaders: UnitLeader[] }> {
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/hierarchy/units', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ unitId, churchId, leaderMemberIds }),
+        });
+        const data = await res.json();
+        if (res.ok && data?.success) {
+          // Atualiza também no cache local de cells se houver célula correspondente
+          const cachedCells = loadFromStorage<CellGroup[]>(`${STORAGE_KEYS.CELLS}_${churchId}`, []);
+          if (cachedCells.length > 0) {
+            const updated = cachedCells.map((c) => {
+              if (c.id === unitId) {
+                const leaderName =
+                  (data.leaders || []).map((l: any) => l.name).join(' & ') || 'Sem Líder';
+                return { ...c, leaderName };
+              }
+              return c;
+            });
+            saveToStorage(`${STORAGE_KEYS.CELLS}_${churchId}`, updated);
+          }
+          return { success: true, leaders: data.leaders || [] };
+        }
+        throw new Error(data?.error || 'Falha ao vincular líderes.');
+      } catch (err: any) {
+        console.warn('Erro ao atualizar líderes via API, aplicando fallback local:', err);
+        // Fallback local se estiver offline ou sem Supabase:
+        const allMembers = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+        const churchMems = allMembers.filter(
+          (m) => m.churchId === churchId && leaderMemberIds.includes(m.id)
+        );
+        const leaders: UnitLeader[] = churchMems.map((m) => ({
+          id: m.id,
+          name: m.name,
+          role: m.role || 'Líder',
+          avatarUrl: m.avatarUrl,
+          phone: m.phone,
+        }));
+        return { success: true, leaders };
+      }
+    }
+    throw new Error('Atualização de líderes requer ambiente do cliente.');
   },
 
   /**
@@ -1810,6 +1865,63 @@ export const AppChurchService = {
   },
 
   /**
+   * Obtém o mapa de status das etapas do trilho para múltiplos membros
+   * Retorna: Record<memberId, Record<stepId, { completed: boolean; completedAt?: string }>>
+   */
+  async getMembersTrackStatusMap(
+    memberIds: string[],
+    churchId?: string
+  ): Promise<Record<string, Record<string, { completed: boolean; completedAt?: string }>>> {
+    const resultMap: Record<string, Record<string, { completed: boolean; completedAt?: string }>> = {};
+    if (!memberIds || memberIds.length === 0) return resultMap;
+
+    // 1. Preenche a partir do cache local / INITIAL_LEADERSHIP_PROGRESS
+    const allTracks = loadFromStorage<Record<string, LeadershipTrackProgress>>(
+      STORAGE_KEYS.TRACKS,
+      INITIAL_LEADERSHIP_PROGRESS
+    );
+
+    memberIds.forEach((mId) => {
+      resultMap[mId] = {};
+      const track = allTracks[mId];
+      if (track?.steps) {
+        track.steps.forEach((st) => {
+          resultMap[mId][String(st.id)] = {
+            completed: Boolean(st.completed),
+            completedAt: st.completedAt,
+          };
+        });
+      }
+    });
+
+    // 2. Se Supabase estiver conectado, busca registros reais de member_track_steps
+    if (supabase) {
+      try {
+        const { data: stepRows, error } = await supabase
+          .from('member_track_steps')
+          .select('membro_id, etapa_id, concluida, concluida_em')
+          .in('membro_id', memberIds);
+
+        if (!error && stepRows) {
+          stepRows.forEach((row: any) => {
+            const mId = row.membro_id;
+            const stId = String(row.etapa_id);
+            if (!resultMap[mId]) resultMap[mId] = {};
+            resultMap[mId][stId] = {
+              completed: Boolean(row.concluida),
+              completedAt: row.concluida_em,
+            };
+          });
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar member_track_steps do Supabase:', err);
+      }
+    }
+
+    return resultMap;
+  },
+
+  /**
    * Save Leadership Track Progress to Supabase (member_track_steps + leadership_tracks) + local cache
    */
   async saveLeadershipProgress(
@@ -1820,17 +1932,52 @@ export const AppChurchService = {
   ): Promise<void> {
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     const targetMember = allMembers.find((m) => m.id === memberId);
-    const resolvedChurchId = churchId || targetMember?.churchId || CHURCH_UUIDS.SOBRAL;
-    const resolvedCellId = cellId || targetMember?.cellId || CELL_UUIDS.ADONAI;
+    let resolvedChurchId = churchId || targetMember?.churchId;
+    let resolvedCellId = cellId || targetMember?.cellId;
 
     if (supabase) {
       try {
+        // Se churchId ou cellId não foram passados ou são inválidos, busca os dados reais no banco
+        if (
+          !resolvedChurchId ||
+          !resolvedCellId ||
+          resolvedChurchId.startsWith('c1000000') ||
+          resolvedCellId.startsWith('e1000000')
+        ) {
+          const { data: dbMem } = await supabase
+            .from('members')
+            .select('igreja_id, celula_id')
+            .eq('id', memberId)
+            .maybeSingle();
+
+          if (dbMem) {
+            if (dbMem.igreja_id) resolvedChurchId = dbMem.igreja_id;
+            if (dbMem.celula_id) resolvedCellId = dbMem.celula_id;
+          }
+        }
+
+        // Se cellId ainda for nulo (ex: pastor sem célula), obtém uma célula válida da igreja para satisfazer a foreign key
+        if (!resolvedCellId || resolvedCellId.startsWith('e1000000')) {
+          const { data: firstCell } = await supabase
+            .from('cells')
+            .select('id')
+            .eq('igreja_id', resolvedChurchId || '')
+            .limit(1)
+            .maybeSingle();
+          if (firstCell?.id) {
+            resolvedCellId = firstCell.id;
+          }
+        }
+
+        resolvedChurchId = resolvedChurchId || CHURCH_UUIDS.SOBRAL;
+        resolvedCellId = resolvedCellId || CELL_UUIDS.ADONAI;
+
         const completedCount = progress.steps.filter((s) => s.completed).length;
         const totalCount = progress.steps.length || 6;
         const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
         // Upsert summary row into leadership_tracks with igreja_id and celula_id
-        await supabase.from('leadership_tracks').upsert(
+        const { error: trackErr } = await supabase.from('leadership_tracks').upsert(
           {
             membro_id: memberId,
             igreja_id: resolvedChurchId,
@@ -1844,13 +1991,16 @@ export const AppChurchService = {
           },
           { onConflict: 'membro_id' }
         );
+        if (trackErr) {
+          console.error('Erro ao salvar leadership_tracks no Supabase:', trackErr);
+        }
 
         // Upsert step rows into member_track_steps with celula_id
         if (progress.steps && progress.steps.length > 0) {
           const stepRows = progress.steps.map((st) => ({
             membro_id: memberId,
             celula_id: resolvedCellId,
-            etapa_id: st.id,
+            etapa_id: typeof st.id === 'number' ? st.id : parseInt(String(st.id), 10) || 1,
             concluida: Boolean(st.completed),
             concluida_em: st.completed ? (st.completedAt || new Date().toLocaleDateString('pt-BR')) : null,
             observacoes: st.notes || null,
@@ -1858,12 +2008,15 @@ export const AppChurchService = {
             atualizado_em: new Date().toISOString(),
           }));
 
-          await supabase
+          const { error: stepsErr } = await supabase
             .from('member_track_steps')
             .upsert(stepRows, { onConflict: 'membro_id,etapa_id' });
+          if (stepsErr) {
+            console.error('Erro ao salvar member_track_steps no Supabase:', stepsErr);
+          }
         }
       } catch (e) {
-        console.warn('Erro ao salvar progresso do trilho no Supabase:', e);
+        console.error('Erro ao salvar progresso do trilho no Supabase:', e);
       }
     }
 
@@ -1891,6 +2044,169 @@ export const AppChurchService = {
         : m
     );
     saveToStorage(STORAGE_KEYS.MEMBERS, updatedMembers);
+  },
+
+  /**
+   * Conclui uma etapa do trilho para múltiplos membros em lote (grava diretamente no Supabase)
+   */
+  async batchCompleteStep(
+    memberIds: string[],
+    stepId: string | number,
+    churchId?: string,
+    validatedBy?: string
+  ): Promise<void> {
+    if (!memberIds || memberIds.length === 0) return;
+
+    const dateStr = new Date().toLocaleDateString('pt-BR');
+    const numericStepId = typeof stepId === 'number' ? stepId : parseInt(String(stepId), 10) || 1;
+
+    if (supabase) {
+      try {
+        // 1. Busca dados dos membros selecionados no Supabase
+        const { data: dbMembers, error: memErr } = await supabase
+          .from('members')
+          .select('id, celula_id, igreja_id')
+          .in('id', memberIds);
+
+        if (memErr) {
+          console.warn('Aviso ao consultar membros no Supabase para batch:', memErr);
+        }
+
+        const memberMap = new Map<string, { id: string; celula_id?: string | null; igreja_id?: string | null }>();
+        if (dbMembers) {
+          dbMembers.forEach((m: any) => memberMap.set(m.id, m));
+        }
+
+        // 2. Busca células disponíveis para fallback caso algum membro não tenha célula vinculada
+        const { data: dbCells } = await supabase.from('cells').select('id, igreja_id');
+        const fallbackCellMap = new Map<string, string>();
+        if (dbCells) {
+          dbCells.forEach((c: any) => {
+            if (c.igreja_id && !fallbackCellMap.has(c.igreja_id)) {
+              fallbackCellMap.set(c.igreja_id, c.id);
+            }
+          });
+        }
+        const defaultAnyCell = dbCells && dbCells.length > 0 ? dbCells[0].id : CELL_UUIDS.ADONAI;
+
+        // 3. Constrói as linhas para inserção/atualização na tabela member_track_steps
+        const stepRows = memberIds.map((mId) => {
+          const mem = memberMap.get(mId);
+          const resolvedChurch = churchId || mem?.igreja_id || CHURCH_UUIDS.SOBRAL;
+          let resolvedCell = mem?.celula_id;
+          if (!resolvedCell || resolvedCell.startsWith('e1000000')) {
+            resolvedCell = fallbackCellMap.get(resolvedChurch) || defaultAnyCell;
+          }
+
+          return {
+            membro_id: mId,
+            celula_id: resolvedCell,
+            etapa_id: numericStepId,
+            concluida: true,
+            concluida_em: dateStr,
+            validado_por: validatedBy || 'Líder',
+            atualizado_em: new Date().toISOString(),
+          };
+        });
+
+        // 4. Executa o upsert em lote na tabela member_track_steps
+        const { error: upsertErr } = await supabase
+          .from('member_track_steps')
+          .upsert(stepRows, { onConflict: 'membro_id,etapa_id' });
+
+        if (upsertErr) {
+          console.error('Falha ao gravar member_track_steps no Supabase:', upsertErr);
+          throw new Error(`Erro ao salvar no banco: ${upsertErr.message}`);
+        }
+
+        // 5. Atualiza o resumo de progresso em leadership_tracks para cada membro
+        for (const mId of memberIds) {
+          const mem = memberMap.get(mId);
+          const resolvedChurch = churchId || mem?.igreja_id || CHURCH_UUIDS.SOBRAL;
+          let resolvedCell = mem?.celula_id;
+          if (!resolvedCell || resolvedCell.startsWith('e1000000')) {
+            resolvedCell = fallbackCellMap.get(resolvedChurch) || defaultAnyCell;
+          }
+
+          const { data: allSteps } = await supabase
+            .from('member_track_steps')
+            .select('etapa_id, concluida')
+            .eq('membro_id', mId);
+
+          const completedCount = allSteps ? allSteps.filter((s: any) => s.concluida).length : 1;
+          const totalCount = 9;
+          const pct = Math.round((completedCount / totalCount) * 100);
+
+          await supabase
+            .from('leadership_tracks')
+            .upsert(
+              {
+                membro_id: mId,
+                igreja_id: resolvedChurch,
+                celula_id: resolvedCell,
+                etapa_atual_id: numericStepId + 1,
+                quantidade_etapas_concluidas: completedCount,
+                quantidade_total_etapas: totalCount,
+                percentual: pct,
+                status: pct === 100 ? 'concluido' : 'em_andamento',
+                atualizado_em: new Date().toISOString(),
+              },
+              { onConflict: 'membro_id' }
+            );
+        }
+      } catch (err: any) {
+        console.error('Erro no batchCompleteStep Supabase:', err);
+        throw err;
+      }
+    }
+
+    // 6. Sincroniza o armazenamento local para compatibilidade com outros componentes
+    const allTracks = loadFromStorage<Record<string, LeadershipTrackProgress>>(
+      STORAGE_KEYS.TRACKS,
+      INITIAL_LEADERSHIP_PROGRESS
+    );
+
+    memberIds.forEach((mId) => {
+      const currentProgress = allTracks[mId] || {
+        memberId: mId,
+        currentStepId: 1,
+        steps: [],
+      };
+
+      let stepFound = false;
+      const updatedSteps = (currentProgress.steps || []).map((st) => {
+        if (String(st.id) === String(stepId) || st.id === numericStepId) {
+          stepFound = true;
+          return {
+            ...st,
+            completed: true,
+            completedAt: dateStr,
+            validatedBy: validatedBy || 'Líder',
+          };
+        }
+        return st;
+      });
+
+      if (!stepFound) {
+        updatedSteps.push({
+          id: numericStepId,
+          stepNumber: numericStepId,
+          title: `Etapa ${numericStepId}`,
+          description: '',
+          completed: true,
+          completedAt: dateStr,
+          validatedBy: validatedBy || 'Líder',
+        });
+      }
+
+      allTracks[mId] = {
+        ...currentProgress,
+        currentStepId: numericStepId + 1,
+        steps: updatedSteps,
+      };
+    });
+
+    saveToStorage(STORAGE_KEYS.TRACKS, allTracks);
   },
 
   /**
@@ -2029,5 +2345,40 @@ export const AppChurchService = {
       m.id === memberId ? { ...m, roleId, role: roleName } : m
     );
     saveToStorage(STORAGE_KEYS.MEMBERS, updated);
+  },
+
+  /**
+   * Atualiza a foto de avatar do usuário logado (members.url_avatar e cache de sessão)
+   */
+  async updateUserAvatar(userId: string, avatarUrl: string): Promise<void> {
+    if (supabase && userId && !userId.startsWith('admin-')) {
+      try {
+        await supabase
+          .from('members')
+          .update({
+            url_avatar: avatarUrl,
+            atualizado_em: new Date().toISOString(),
+          })
+          .eq('id', userId);
+      } catch (e) {
+        console.warn('Erro ao atualizar avatar no Supabase:', e);
+      }
+    }
+
+    // 1. Atualiza na sessão ativa
+    const currentSession = loadFromStorage<UserProfile | null>(STORAGE_KEYS.SESSION, null);
+    if (currentSession) {
+      const updatedSession = { ...currentSession, avatarUrl };
+      saveToStorage(STORAGE_KEYS.SESSION, updatedSession);
+    }
+
+    // 2. Atualiza na lista de membros em cache
+    const allMembers = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+    const updatedMembers = allMembers.map((m) =>
+      m.id === userId || (currentSession?.login && m.login === currentSession.login)
+        ? { ...m, avatarUrl }
+        : m
+    );
+    saveToStorage(STORAGE_KEYS.MEMBERS, updatedMembers);
   },
 };

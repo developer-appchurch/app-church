@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import {
   Home,
@@ -14,9 +14,13 @@ import {
   Building2,
   Layers,
   Network,
+  Camera,
+  Upload,
+  Check,
 } from 'lucide-react';
 import { ActiveScreen, UserProfile, CellGroup } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
+import { AppChurchService } from '../lib/supabase';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -26,7 +30,19 @@ interface SidebarProps {
   user: UserProfile;
   currentCell?: CellGroup;
   onLogout: () => void;
+  onUpdateAvatar?: (newAvatarUrl: string) => Promise<void> | void;
 }
+
+const SUGGESTED_AVATARS = [
+  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=250',
+  'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=250',
+  'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=250',
+  'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=250',
+  'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=250',
+  'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=250',
+  'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=250',
+  'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=250',
+];
 
 export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
@@ -36,7 +52,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
   user,
   currentCell,
   onLogout,
+  onUpdateAvatar,
 }) => {
+  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState(user?.avatarUrl || '');
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
+  const [avatarSuccess, setAvatarSuccess] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setAvatarPreview(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSaveAvatar = async () => {
+    if (!avatarPreview || !user) return;
+    setIsSavingAvatar(true);
+    try {
+      if (onUpdateAvatar) {
+        await onUpdateAvatar(avatarPreview);
+      } else {
+        await AppChurchService.updateUserAvatar(user.id, avatarPreview);
+      }
+      setAvatarSuccess(true);
+      setTimeout(() => {
+        setAvatarSuccess(false);
+        setIsAvatarModalOpen(false);
+      }, 900);
+    } catch (err) {
+      console.error('Erro ao salvar foto de perfil:', err);
+    } finally {
+      setIsSavingAvatar(false);
+    }
+  };
+
   const isSystemAdmin =
     user?.isSystemAdmin === true ||
     user?.role === 'Administrador' ||
@@ -134,7 +191,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="shrink-0 bg-[#04213d] text-white p-4 sm:p-5 relative overflow-hidden">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
-              <AppChurchLogo variant="light" className="h-10 sm:h-11 w-28 sm:w-32" />
+              <AppChurchLogo variant="light" className="h-5 sm:h-[22px] w-14 sm:w-16" />
             </div>
             <button
               id="btn-sidebar-close"
@@ -149,7 +206,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
           {/* User Profile Card in Drawer */}
           <div className="flex items-center gap-3 pt-1">
-            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full border-2 border-sky-400 overflow-hidden bg-slate-700 shrink-0 relative">
+            <div
+              id="btn-change-user-avatar"
+              onClick={() => {
+                setAvatarPreview(user.avatarUrl || '');
+                setIsAvatarModalOpen(true);
+              }}
+              title="Clique para alterar sua foto de perfil"
+              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full border-2 border-sky-400 hover:border-white overflow-hidden bg-slate-700 shrink-0 relative cursor-pointer group shadow-md transition-all"
+            >
               <Image
                 src={
                   user.avatarUrl ||
@@ -158,14 +223,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 alt={user.name}
                 width={48}
                 height={48}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                 unoptimized
                 referrerPolicy="no-referrer"
               />
+              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <Camera size={18} className="text-white drop-shadow-md" />
+              </div>
             </div>
             <div className="min-w-0 flex-1">
               <h3 className="font-bold text-white text-sm sm:text-base truncate">{user.name}</h3>
-              <p className="text-xs text-sky-200 font-medium truncate">{user.role}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setAvatarPreview(user.avatarUrl || '');
+                  setIsAvatarModalOpen(true);
+                }}
+                className="text-xs text-sky-200 hover:text-white font-medium truncate flex items-center gap-1 cursor-pointer transition-colors"
+                title="Alterar foto de perfil"
+              >
+                <span>{user.role}</span>
+                <span className="text-[10px] text-sky-300 underline underline-offset-2 ml-1">
+                  • Trocar foto
+                </span>
+              </button>
             </div>
           </div>
         </div>
@@ -219,7 +300,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Fixed Bottom Actions: High-visibility Logout button returning strictly to Login screen */}
-        <div className="shrink-0 p-3 sm:p-4 border-t border-slate-200 bg-slate-50 space-y-2">
+        <div className="shrink-0 p-3 sm:p-4 border-t border-slate-200 bg-slate-50">
           <button
             type="button"
             id="btn-sidebar-logout"
@@ -237,11 +318,187 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
             </div>
           </button>
-          <div className="text-center text-[10px] sm:text-[11px] text-slate-400 pt-0.5">
-            AppChurch Mobile • Versão 332.0
-          </div>
         </div>
       </aside>
+
+      {/* Modal Interativo para Alterar Foto de Perfil */}
+      {isAvatarModalOpen && (
+        <div
+          id="modal-change-avatar"
+          className="fixed inset-0 z-60 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150 select-none text-slate-800"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col border border-slate-200 animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-[#04213d] text-white p-4 sm:p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center">
+                  <Camera size={20} className="text-sky-300" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Alterar Foto de Perfil</h3>
+                  <p className="text-xs text-sky-200 truncate max-w-[200px]">{user.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-close-avatar-modal"
+                onClick={() => setIsAvatarModalOpen(false)}
+                className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
+                aria-label="Fechar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+              {/* Preview Central */}
+              <div className="flex flex-col items-center justify-center gap-2 py-1">
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-28 h-28 rounded-full border-4 border-sky-600 overflow-hidden bg-slate-100 shadow-md relative group cursor-pointer"
+                  title="Clique para carregar uma imagem do seu aparelho"
+                >
+                  <Image
+                    src={
+                      avatarPreview ||
+                      user.avatarUrl ||
+                      'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=250'
+                    }
+                    alt="Pré-visualização da foto de perfil"
+                    width={112}
+                    height={112}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                    unoptimized
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute inset-0 bg-black/45 flex flex-col items-center justify-center text-white opacity-0 group-hover:opacity-100 transition-opacity">
+                    <Upload size={22} />
+                    <span className="text-[11px] font-semibold mt-1">Carregar Foto</span>
+                  </div>
+                </div>
+
+                {/* Input nativo de arquivo oculto */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleFileSelected}
+                />
+
+                <button
+                  type="button"
+                  id="btn-select-device-photo"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-1 inline-flex items-center gap-2 px-4 py-2 bg-sky-50 hover:bg-sky-100 text-sky-950 border border-sky-300 text-xs font-bold rounded-xl transition cursor-pointer active:scale-95 shadow-2xs"
+                >
+                  <Upload size={15} />
+                  Escolher do Computador ou Celular
+                </button>
+                <p className="text-[11px] text-slate-400 text-center">
+                  Formatos aceitos: JPG, PNG, WEBP (fotos da câmera ou galeria)
+                </p>
+              </div>
+
+              {/* Sugestões de Avatares Prontos */}
+              <div className="pt-2 border-t border-slate-100">
+                <label className="block text-xs font-bold text-slate-700 mb-2">
+                  Ou selecione uma foto da galeria:
+                </label>
+                <div className="grid grid-cols-4 gap-2.5">
+                  {SUGGESTED_AVATARS.map((avatar, idx) => {
+                    const isSelected = avatarPreview === avatar;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setAvatarPreview(avatar)}
+                        className={`w-full aspect-square rounded-full overflow-hidden border-2 transition p-0.5 cursor-pointer relative ${
+                          isSelected
+                            ? 'border-sky-600 ring-2 ring-sky-300 scale-105'
+                            : 'border-slate-200 hover:border-sky-400'
+                        }`}
+                        title={`Escolher opção ${idx + 1}`}
+                      >
+                        <Image
+                          src={avatar}
+                          alt={`Opção ${idx + 1}`}
+                          width={60}
+                          height={60}
+                          className="w-full h-full object-cover rounded-full"
+                          unoptimized
+                          referrerPolicy="no-referrer"
+                        />
+                        {isSelected && (
+                          <div className="absolute inset-0 bg-sky-900/40 rounded-full flex items-center justify-center">
+                            <Check size={18} className="text-white drop-shadow-md stroke-[3]" />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Informar URL Externa */}
+              <div className="pt-2 border-t border-slate-100">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Ou cole o link direto de uma imagem (URL):
+                </label>
+                <input
+                  type="url"
+                  value={avatarPreview}
+                  onChange={(e) => setAvatarPreview(e.target.value)}
+                  placeholder="https://exemplo.com/sua-foto.jpg"
+                  className="w-full text-xs p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800"
+                />
+              </div>
+
+              {avatarSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2 animate-in fade-in">
+                  <Check size={18} className="text-emerald-600" />
+                  Foto de perfil atualizada com sucesso!
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setAvatarPreview('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=250');
+                }}
+                className="text-xs text-slate-500 hover:text-rose-600 font-medium cursor-pointer"
+              >
+                Restaurar Padrão
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAvatarModalOpen(false)}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 rounded-xl hover:bg-slate-200 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  id="btn-confirm-save-avatar"
+                  disabled={isSavingAvatar || !avatarPreview}
+                  onClick={handleSaveAvatar}
+                  className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isSavingAvatar ? 'Salvando...' : 'Salvar Nova Foto'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

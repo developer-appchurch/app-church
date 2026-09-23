@@ -368,3 +368,126 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err?.message || 'Erro interno ao criar unidade.' }, { status: 500 });
   }
 }
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { unitId, churchId, leaderMemberIds } = body;
+
+    if (!unitId || !churchId) {
+      return NextResponse.json(
+        { error: 'Identificadores unitId e churchId são obrigatórios.' },
+        { status: 400 }
+      );
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+    }
+
+    // 1. Verificar se a unidade existe
+    const { data: unit, error: unitErr } = await supabase
+      .from('unidades')
+      .select('id, nome, igreja_id, nivel_tipo_id')
+      .eq('id', unitId)
+      .eq('igreja_id', churchId)
+      .maybeSingle();
+
+    if (unitErr || !unit) {
+      return NextResponse.json({ error: 'Unidade não encontrada.' }, { status: 404 });
+    }
+
+    // 2. Obter níveis para checar se é folha (célula)
+    const { data: levels } = await supabase
+      .from('nivel_tipo')
+      .select('id, nome, ordem')
+      .eq('igreja_id', churchId)
+      .order('ordem', { ascending: true });
+
+    const isLeafLevel =
+      levels && levels.length > 0 && levels[levels.length - 1].id === unit.nivel_tipo_id;
+
+    // 3. Remover vínculos antigos na tabela unidade_lideres para esta unidade
+    const { error: deleteErr } = await supabase
+      .from('unidade_lideres')
+      .delete()
+      .eq('unidade_id', unitId);
+
+    if (deleteErr) {
+      console.warn('Aviso ao limpar líderes antigos de unidade_lideres:', deleteErr.message);
+    }
+
+    // 4. Inserir novos líderes
+    const safeLeaderIds: string[] = Array.isArray(leaderMemberIds)
+      ? leaderMemberIds.filter((id) => typeof id === 'string' && id.trim() !== '')
+      : [];
+
+    if (safeLeaderIds.length > 0) {
+      const leaderRows = safeLeaderIds.map((mId) => ({
+        unidade_id: unitId,
+        pessoa_id: mId,
+        papel: 'Líder',
+        ativo: true,
+      }));
+
+      const { error: insertErr } = await supabase.from('unidade_lideres').insert(leaderRows);
+      if (insertErr) {
+        console.error('Erro ao inserir novos líderes em unidade_lideres:', insertErr);
+      }
+
+      // Se for folha (célula), associa o celula_id aos líderes
+      if (isLeafLevel) {
+        for (const mId of safeLeaderIds) {
+          await supabase
+            .from('members')
+            .update({ celula_id: unitId })
+            .eq('id', mId);
+        }
+      }
+    }
+
+    // 5. Buscar informações dos novos líderes selecionados
+    let leadersAssigned: any[] = [];
+    let leaderNamesText = 'Sem Líder';
+
+    if (safeLeaderIds.length > 0) {
+      const { data: membersInfo } = await supabase
+        .from('members')
+        .select('id, nome, funcao, url_avatar, telefone')
+        .in('id', safeLeaderIds);
+
+      if (membersInfo && membersInfo.length > 0) {
+        leadersAssigned = membersInfo.map((m: any) => ({
+          id: m.id,
+          name: m.nome,
+          role: m.funcao || 'Líder',
+          avatarUrl: m.url_avatar,
+          phone: m.telefone,
+        }));
+        leaderNamesText = leadersAssigned.map((l) => l.name).join(' & ');
+      }
+    }
+
+    // 6. Atualizar nome_lider na tabela legada cells se for folha
+    if (isLeafLevel) {
+      await supabase
+        .from('cells')
+        .update({ nome_lider: leaderNamesText })
+        .eq('id', unitId);
+    }
+
+    return NextResponse.json({
+      success: true,
+      unitId,
+      leaders: leadersAssigned,
+      message: 'Líderes atualizados com sucesso.',
+    });
+  } catch (err: any) {
+    console.error('Erro na rota /api/hierarchy/units PATCH:', err);
+    return NextResponse.json(
+      { error: err?.message || 'Erro interno ao atualizar líderes da unidade.' },
+      { status: 500 }
+    );
+  }
+}

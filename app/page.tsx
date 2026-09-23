@@ -226,6 +226,19 @@ export default function Home() {
     setAnnouncements(updated.filter((a) => a.churchId === user?.churchId));
   };
 
+  const handleUpdateAvatar = async (newAvatarUrl: string) => {
+    if (!user) return;
+    try {
+      await AppChurchService.updateUserAvatar(user.id, newAvatarUrl);
+      setUser((prev) => (prev ? { ...prev, avatarUrl: newAvatarUrl } : null));
+      setMembers((prev) =>
+        prev.map((m) => (m.id === user.id ? { ...m, avatarUrl: newAvatarUrl } : m))
+      );
+    } catch (err) {
+      console.error('Erro ao atualizar avatar do usuário:', err);
+    }
+  };
+
   // Current active cell
   const currentCell: CellGroup =
     cells.find((c) => c.id === selectedCellId) ||
@@ -273,6 +286,7 @@ export default function Home() {
         user={user}
         currentCell={currentCell}
         onLogout={handleLogout}
+        onUpdateAvatar={handleUpdateAvatar}
       />
 
       {/* Main Dynamic View */}
@@ -343,6 +357,9 @@ export default function Home() {
           <LeadershipOverviewView
             members={members}
             currentCell={currentCell}
+            currentUser={user}
+            cells={cells}
+            onSelectCell={setSelectedCellId}
             onOpenMemberTrack={(member) => setSelectedMemberForTrack(member)}
           />
         )}

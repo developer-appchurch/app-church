@@ -473,23 +473,30 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     }
   };
 
+  const getShortRole = (role: string) => {
+    if (role === 'Líder em Treinamento') return 'Líder Trein.';
+    if (role === 'Líder de Célula') return 'Líder Célula';
+    if (role === 'Líder de Setor') return 'Líder Setor';
+    return role;
+  };
+
   const getStatusLabel = (status: AttendanceStatus) => {
     switch (status) {
       case 'green':
-        return 'Assíduo (90% - 100%)';
+        return 'Assíduo (90-100%)';
       case 'yellow':
-        return 'Frequência Regular (~75%)';
+        return 'Regular (~75%)';
       case 'red':
-        return 'Atenção / Oscilando (40% - 60%)';
+        return 'Alerta (< 50%)';
       case 'black':
-        return 'Ausente / Necessita Visita (< 30%)';
+        return 'Ausente (3+ faltas)';
     }
   };
 
   return (
-    <div id="screen-my-cell" className="bg-[#e9eff6] min-h-screen pb-16 font-sans">
-      {/* Top Banner / Breadcrumb & Controls - Exact structure of user screenshot */}
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-4 pb-2">
+    <div id="screen-my-cell" className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full overflow-x-hidden">
+      {/* Top Banner / Breadcrumb & Controls */}
+      <div className="max-w-6xl mx-auto px-2.5 sm:px-6 pt-3 sm:pt-4 pb-2 w-full">
         {/* Seletor Hierárquico Contextual:
             Aparece a partir do penúltimo nível da estrutura (Líder de Setor) até Pastores/Supervisores.
             - Líder de Setor: acesso apenas às células vinculadas ao seu setor.
@@ -497,8 +504,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             - Membros ou Líderes de Célula: não veem esse seletor, mantendo a tela perfeitamente limpa.
         */}
         {canAccessCellSelector && cells && cells.length > 1 && (
-          <div className="mb-3 px-3.5 py-2.5 bg-white rounded-2xl border border-slate-200/90 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2.5 min-w-0">
+          <div className="mb-3 px-3 py-2.5 bg-white rounded-xl sm:rounded-2xl border border-slate-200/90 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-2.5 w-full">
+            <div className="flex items-center gap-2 min-w-0">
               <div className="w-8 h-8 rounded-xl bg-slate-100 text-[#04213d] flex items-center justify-center shrink-0">
                 <Network size={16} />
               </div>
@@ -507,29 +514,29 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   <span className="text-xs font-bold text-slate-800">
                     {isSectorLeaderOnly ? 'Seu Setor de Células' : 'Navegação Hierárquica'}
                   </span>
-                  <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-2 py-0.5 rounded-md">
+                  <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded-md">
                     {currentUser?.role || 'Liderança'}
                   </span>
                   {isSectorLeaderOnly && currentUser?.sector && (
-                    <span className="text-[10px] bg-sky-50 text-sky-800 font-bold px-2 py-0.5 rounded-md border border-sky-200/60">
+                    <span className="text-[10px] bg-sky-50 text-sky-800 font-bold px-1.5 py-0.5 rounded-md border border-sky-200/60 truncate max-w-[130px]">
                       {currentUser.sector}
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-slate-500 truncate">
+                <p className="text-[10px] sm:text-[11px] text-slate-500 truncate">
                   {isSectorLeaderOnly
-                    ? `Visualizando células sob sua coordenação (${accessibleCells.length} disponíveis)`
+                    ? `Células sob sua coordenação (${accessibleCells.length} disponíveis)`
                     : 'Filtrado por setor para rápida alternância sem poluir a tela'}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full md:w-auto">
               {/* Para Pastores/Supervisores/Admin: Seletor de Setor para evitar listas imensas de dezenas de células */}
               {!isSectorLeaderOnly && availableSectors.length > 1 && (
-                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <div className="flex-1 sm:flex-initial flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 min-w-0">
                   <Layers size={13} className="text-slate-500 shrink-0" />
-                  <span className="text-[11px] font-semibold text-slate-600 shrink-0">Setor:</span>
+                  <span className="text-[10px] sm:text-[11px] font-semibold text-slate-600 shrink-0">Setor:</span>
                   <select
                     value={selectedSectorFilter}
                     onChange={(e) => {
@@ -540,9 +547,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                         onSelectCell?.(cellsInSec[0].id);
                       }
                     }}
-                    className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                    className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer truncate w-full"
                   >
-                    <option value="todos">Todos os Setores ({cells.length})</option>
+                    <option value="todos">Todos ({cells.length})</option>
                     {availableSectors.map((sec) => {
                       const count = cells.filter(c => (c.sectorName || 'Geral') === sec).length;
                       return (
@@ -556,12 +563,12 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               )}
 
               {/* Seletor de Célula */}
-              <div className="flex items-center gap-1.5 bg-sky-50/70 border border-sky-200 rounded-xl px-2.5 py-1.5">
-                <span className="text-[11px] font-bold text-sky-950 shrink-0">Célula:</span>
+              <div className="flex-1 sm:flex-initial flex items-center gap-1.5 bg-sky-50/70 border border-sky-200 rounded-xl px-2.5 py-1.5 min-w-0">
+                <span className="text-[10px] sm:text-[11px] font-bold text-sky-950 shrink-0">Célula:</span>
                 <select
                   value={cell.id}
                   onChange={(e) => onSelectCell?.(e.target.value)}
-                  className="text-xs font-extrabold text-[#04213d] bg-transparent focus:outline-none cursor-pointer max-w-[200px] truncate"
+                  className="text-xs font-extrabold text-[#04213d] bg-transparent focus:outline-none cursor-pointer max-w-[170px] sm:max-w-[200px] truncate w-full"
                 >
                   {accessibleCells.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -574,102 +581,102 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
           </div>
         )}
 
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-4 rounded-2xl shadow-xs border border-slate-200/80 mb-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-sky-800 bg-sky-100 px-2.5 py-0.5 rounded-full">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-xs border border-slate-200/80 mb-3 w-full">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
                 Lifegroup
               </span>
               <span className="text-xs text-slate-400">•</span>
-              <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                <MapPin size={12} className="text-slate-400" /> {cell.address}
+              <span className="text-xs text-slate-500 font-medium flex items-center gap-1 truncate">
+                <MapPin size={12} className="text-slate-400 shrink-0" /> <span className="truncate">{cell.address}</span>
               </span>
             </div>
-            <h2 className="text-xl sm:text-2xl font-extrabold text-[#04213d] mt-1">
+            <h2 className="text-lg sm:text-2xl font-extrabold text-[#04213d] mt-1 break-words">
               Membros da Célula {cell.name}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
               Reunião toda <strong>{cell.meetingDay}</strong> às <strong>{cell.meetingTime}</strong> • Líder: {cell.leaderName}
             </p>
           </div>
 
           {/* Action buttons */}
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               id="btn-cell-frequency-legend"
               onClick={() => setShowLegend(!showLegend)}
-              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center gap-1.5 cursor-pointer"
+              className="flex-1 sm:flex-initial px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
               title="Entenda as cores da frequência"
             >
               <HelpCircle size={15} className="text-slate-500" />
-              Legenda Frequência
+              <span>Legenda</span>
             </button>
             <button
               type="button"
               id="btn-cell-add-member"
               onClick={handleOpenAddModal}
-              className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              className="flex-1 sm:flex-initial px-3.5 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
             >
-              <Plus size={16} />
-              Novo Membro
+              <Plus size={15} />
+              <span>Novo Membro</span>
             </button>
           </div>
         </div>
 
         {/* Legend Expandable Drawer */}
         {showLegend && (
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs mb-3 animate-in fade-in duration-150">
+          <div className="bg-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs mb-3 animate-in fade-in duration-150 w-full">
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
                 Critérios de Frequência da Célula:
               </h4>
               <button
                 onClick={() => setShowLegend(false)}
-                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 text-xs">
-              <div className="flex items-center gap-2.5 p-2 rounded-lg bg-emerald-50/60 border border-emerald-100">
-                <span className="w-4 h-4 rounded-full bg-[#16a34a] shrink-0" />
-                <div>
-                  <div className="font-bold text-emerald-950">Verde (Assíduo)</div>
-                  <div className="text-[11px] text-emerald-700">Presente em 90%-100%</div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-50/70 border border-emerald-100">
+                <span className="w-3.5 h-3.5 rounded-full bg-[#16a34a] shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-bold text-emerald-950 text-[11px] sm:text-xs truncate">Verde (Assíduo)</div>
+                  <div className="text-[10px] text-emerald-700 truncate">90% a 100%</div>
                 </div>
               </div>
-              <div className="flex items-center gap-2.5 p-2 rounded-lg bg-amber-50/60 border border-amber-100">
-                <span className="w-4 h-4 rounded-full bg-[#facc15] shrink-0" />
-                <div>
-                  <div className="font-bold text-amber-950">Amarelo (Regular)</div>
-                  <div className="text-[11px] text-amber-700">Presente em ~75%</div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-50/70 border border-amber-100">
+                <span className="w-3.5 h-3.5 rounded-full bg-[#facc15] shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-bold text-amber-950 text-[11px] sm:text-xs truncate">Amarelo (Regular)</div>
+                  <div className="text-[10px] text-amber-700 truncate">Em torno de 75%</div>
                 </div>
               </div>
-              <div className="flex items-center gap-2.5 p-2 rounded-lg bg-red-50/60 border border-red-100">
-                <span className="w-4 h-4 rounded-full bg-[#d05a5a] shrink-0" />
-                <div>
-                  <div className="font-bold text-red-950">Vermelho (Alerta)</div>
-                  <div className="text-[11px] text-red-700">Presença abaixo de 50%</div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-red-50/70 border border-red-100">
+                <span className="w-3.5 h-3.5 rounded-full bg-[#d05a5a] shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-bold text-red-950 text-[11px] sm:text-xs truncate">Vermelho (Alerta)</div>
+                  <div className="text-[10px] text-red-700 truncate">Abaixo de 50%</div>
                 </div>
               </div>
-              <div className="flex items-center gap-2.5 p-2 rounded-lg bg-slate-100 border border-slate-200">
-                <span className="w-4 h-4 rounded-full bg-[#18181b] shrink-0" />
-                <div>
-                  <div className="font-bold text-slate-950">Preto (Ausente)</div>
-                  <div className="text-[11px] text-slate-600">Faltando há 3+ semanas</div>
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-100 border border-slate-200">
+                <span className="w-3.5 h-3.5 rounded-full bg-[#18181b] shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-bold text-slate-950 text-[11px] sm:text-xs truncate">Preto (Ausente)</div>
+                  <div className="text-[10px] text-slate-600 truncate">3+ faltas seguidas</div>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Responsive Search & Filters Bar matching screenshot */}
-        <div className="flex flex-col sm:flex-row items-center gap-2.5 mb-3">
+        {/* Responsive Search & Filters Bar */}
+        <div className="flex flex-col sm:flex-row items-center gap-2 mb-3 w-full">
           <div className="relative w-full sm:flex-1">
             <Search
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
-              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              size={15}
             />
             <input
               id="input-search-members"
@@ -677,27 +684,27 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               placeholder="Buscar por nome, bairro ou função..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-sky-800 focus:ring-1 focus:ring-sky-800"
+              className="w-full bg-white border border-slate-200 rounded-xl pl-8.5 pr-3 py-2 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-sky-800"
             />
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto">
             <select
               id="select-filter-role"
               value={selectedRole}
               onChange={(e) => setSelectedRole(e.target.value)}
-              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-sky-800 cursor-pointer flex-1 sm:flex-initial"
+              className="bg-white border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-sky-800 cursor-pointer w-full sm:w-auto"
             >
               <option value="todos">Todas as Funções</option>
               <option value="Membro">Membro</option>
-              <option value="Líder em Treinamento">Líder em Treinamento</option>
-              <option value="Líder de Setor">Líder de Setor</option>
-              <option value="Líder de Célula">Líder de Célula</option>
+              <option value="Líder em Treinamento">Líder Trein.</option>
+              <option value="Líder de Setor">Líder Setor</option>
+              <option value="Líder de Célula">Líder Célula</option>
             </select>
             <select
               id="select-filter-attendance"
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
-              className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-sky-800 cursor-pointer flex-1 sm:flex-initial"
+              className="bg-white border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-sky-800 cursor-pointer w-full sm:w-auto"
             >
               <option value="todos">Toda Frequência</option>
               <option value="green">Assíduo</option>
@@ -708,172 +715,191 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
           </div>
         </div>
 
-        {/* Quick KPI Stats row matching screenshot */}
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-3 select-none">
-          <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-slate-500">Total:</span>
-            <span className="text-sm font-bold text-[#04213d]">{stats.total} vidas</span>
-          </div>
-          <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" /> Assíduos:
-            </span>
-            <span className="text-sm font-bold text-emerald-700">{stats.greenCount}</span>
-          </div>
-          <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-amber-700 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-amber-400" /> Regular:
-            </span>
-            <span className="text-sm font-bold text-amber-700">{stats.yellowCount}</span>
-          </div>
-          <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between">
-            <span className="text-[11px] font-semibold text-red-700 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-red-400" /> Alerta:
-            </span>
-            <span className="text-sm font-bold text-red-700">{stats.redCount}</span>
-          </div>
-          <div className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between col-span-2 sm:col-span-1">
-            <span className="text-[11px] font-semibold text-slate-800 flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-slate-900" /> Ausentes:
-            </span>
-            <span className="text-sm font-bold text-slate-900">{stats.blackCount}</span>
+        {/* Quick KPI Stats Bar - Compact & 100% responsive without overflowing */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-2 sm:p-2.5 mb-3 select-none w-full">
+          <div className="grid grid-cols-5 divide-x divide-slate-100 text-center">
+            <div className="px-0.5 sm:px-2">
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 block truncate">Total</span>
+              <span className="text-xs sm:text-sm font-bold text-[#04213d]">{stats.total}</span>
+            </div>
+            <div className="px-0.5 sm:px-2">
+              <span className="text-[10px] sm:text-xs font-semibold text-emerald-700 flex items-center justify-center gap-1 truncate">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                <span className="truncate">Assíduo</span>
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-emerald-700">{stats.greenCount}</span>
+            </div>
+            <div className="px-0.5 sm:px-2">
+              <span className="text-[10px] sm:text-xs font-semibold text-amber-700 flex items-center justify-center gap-1 truncate">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                <span className="truncate">Regular</span>
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-amber-700">{stats.yellowCount}</span>
+            </div>
+            <div className="px-0.5 sm:px-2">
+              <span className="text-[10px] sm:text-xs font-semibold text-red-700 flex items-center justify-center gap-1 truncate">
+                <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                <span className="truncate">Alerta</span>
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-red-700">{stats.redCount}</span>
+            </div>
+            <div className="px-0.5 sm:px-2">
+              <span className="text-[10px] sm:text-xs font-semibold text-slate-800 flex items-center justify-center gap-1 truncate">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-900 shrink-0" />
+                <span className="truncate">Ausente</span>
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-slate-900">{stats.blackCount}</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Main Members Table Container - EXACT LAYOUT OF USER ATTACHMENT */}
-      <div className="max-w-6xl mx-auto px-2 sm:px-6">
-        <div className="overflow-x-auto rounded-xl shadow-2xs">
-          <div className="min-w-[540px] sm:min-w-full">
-            {/* Dark Navy Table Header row matching image 1 & 2 */}
-            <div className="bg-[#052447] text-white rounded-t-xl px-3 sm:px-6 py-2.5 flex items-center text-xs font-bold tracking-wider select-none shadow-xs">
-              {/* Freq dot indicator column */}
-              <div className="w-8 sm:w-10 shrink-0 text-center text-slate-300 text-[10px]">
-                Freq.
+      {/* Main Members Table Container - 100% responsive, no margin overflow */}
+      <div className="max-w-6xl mx-auto px-2 sm:px-6 w-full">
+        <div className="w-full rounded-xl shadow-2xs overflow-hidden">
+          {/* Dark Navy Table Header */}
+          <div className="bg-[#052447] text-white rounded-t-xl px-2 sm:px-5 py-2.5 flex items-center text-xs font-bold tracking-wider select-none shadow-xs w-full">
+            {/* Freq dot indicator column */}
+            <div className="w-7 sm:w-10 shrink-0 text-center text-slate-300 text-[10px] sm:text-xs">
+              Freq.
+            </div>
+
+            {/* Member Name */}
+            <div className="flex-1 min-w-0 pl-1.5 sm:pl-3 text-left">
+              Nome do Membro
+            </div>
+
+            {/* Role */}
+            <div className="w-20 sm:w-36 md:w-44 text-center sm:text-left shrink-0">
+              Função
+            </div>
+
+            {/* Neighborhood (desktop only) */}
+            <div className="w-28 sm:w-36 text-left hidden md:block shrink-0">
+              Bairro
+            </div>
+
+            {/* Birthday */}
+            <div className="w-12 sm:w-20 text-center shrink-0">
+              <span className="hidden sm:inline">Aniversário</span>
+              <span className="sm:hidden">Aniv.</span>
+            </div>
+
+            {/* Leadership Track Button */}
+            <div className="w-8 sm:w-14 text-center shrink-0">
+              Trilho
+            </div>
+          </div>
+
+          {/* Member List Rows */}
+          <div className="space-y-1.5 pt-1.5 bg-[#e9eff6] rounded-b-xl w-full">
+            {filteredMembers.length === 0 ? (
+              <div className="bg-white rounded-xl p-8 text-center text-slate-500">
+                <AlertCircle size={32} className="mx-auto text-slate-400 mb-2" />
+                <p className="text-sm font-medium">
+                  Nenhum membro encontrado com os filtros selecionados para esta célula.
+                </p>
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSelectedRole('todos');
+                    setSelectedStatus('todos');
+                  }}
+                  className="mt-3 text-xs text-sky-800 font-semibold underline cursor-pointer"
+                >
+                  Limpar filtros
+                </button>
               </div>
-
-              {/* Member Name */}
-              <div className="flex-1 sm:flex-[2.5] text-left pl-2 sm:pl-3">Nome do Membro</div>
-
-              {/* Role */}
-              <div className="w-28 sm:w-44 text-center sm:text-left">Função</div>
-
-              {/* Neighborhood */}
-              <div className="w-24 sm:w-36 text-center sm:text-left hidden md:block">Bairro</div>
-
-              {/* Birthday */}
-              <div className="w-16 sm:w-24 text-center">Aniversário</div>
-
-              {/* Leadership Track Button */}
-              <div className="w-12 sm:w-16 text-center">Trilho</div>
-            </div>
-
-            {/* Member List Rows */}
-            <div className="space-y-1.5 pt-1.5 bg-[#e9eff6] rounded-b-xl">
-              {filteredMembers.length === 0 ? (
-                <div className="bg-white rounded-xl p-8 text-center text-slate-500">
-                  <AlertCircle size={32} className="mx-auto text-slate-400 mb-2" />
-                  <p className="text-sm font-medium">
-                    Nenhum membro encontrado com os filtros selecionados para esta célula.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setSearchQuery('');
-                      setSelectedRole('todos');
-                      setSelectedStatus('todos');
-                    }}
-                    className="mt-3 text-xs text-sky-800 font-semibold underline cursor-pointer"
+            ) : (
+              filteredMembers.map((member) => {
+                return (
+                  <div
+                    key={member.id}
+                    id={`member-row-${member.id}`}
+                    className="bg-white hover:bg-slate-50 transition-colors rounded-xl px-2 sm:px-5 py-2.5 sm:py-3 flex items-center shadow-2xs border border-slate-200/70 w-full"
                   >
-                    Limpar filtros
-                  </button>
-                </div>
-              ) : (
-                filteredMembers.map((member) => {
-                  return (
-                    <div
-                      key={member.id}
-                      id={`member-row-${member.id}`}
-                      className="bg-white hover:bg-slate-50 transition-colors rounded-xl px-3 sm:px-6 py-3 flex items-center shadow-2xs border border-slate-200/70"
-                    >
-                      {/* Attendance Frequency Circle Dot (Interactive) */}
-                      <div className="w-8 sm:w-10 shrink-0 flex items-center justify-center">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedMemberForAttendance(member)}
-                          title={`Frequência: ${getStatusLabel(
+                    {/* Attendance Frequency Circle Dot (Interactive) */}
+                    <div className="w-7 sm:w-10 shrink-0 flex items-center justify-center">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedMemberForAttendance(member)}
+                        title={`Frequência: ${getStatusLabel(
+                          member.attendanceStatus
+                        )} - Clique para alterar`}
+                        className="cursor-pointer group relative p-1 focus:outline-none"
+                      >
+                        <span
+                          className={`block w-3.5 h-3.5 sm:w-5 sm:h-5 rounded-full ${getStatusColor(
                             member.attendanceStatus
-                          )} - Clique para alterar`}
-                          className="cursor-pointer group relative p-1 focus:outline-none"
-                        >
-                          <span
-                            className={`block w-4 h-4 sm:w-5 sm:h-5 rounded-full ${getStatusColor(
-                              member.attendanceStatus
-                            )} shadow-xs group-hover:scale-110 transition-transform`}
-                          />
-                        </button>
-                      </div>
-
-                      {/* Nome do Membro */}
-                      <div className="flex-1 sm:flex-[2.5] text-left pl-2 sm:pl-3 min-w-0 pr-2">
-                        <span
-                          onClick={() => onOpenLeadershipTrack(member)}
-                          className="text-sm sm:text-base font-semibold text-[#0a2540] hover:text-sky-700 cursor-pointer truncate block"
-                        >
-                          {member.name}
-                        </span>
-                        {/* Small tag visible on mobile if neighborhood is hidden */}
-                        <div className="text-[11px] text-slate-400 md:hidden flex items-center gap-1 truncate">
-                          {member.neighborhood && <span>{member.neighborhood}</span>}
-                        </div>
-                      </div>
-
-                      {/* Função */}
-                      <div className="w-28 sm:w-44 text-center sm:text-left shrink-0">
-                        <span
-                          className={`text-xs sm:text-sm font-medium leading-tight inline-block ${
-                            member.role === 'Líder em Treinamento'
-                              ? 'text-[#0284c7] font-bold'
-                              : member.role === 'Líder de Setor'
-                              ? 'text-[#052447] font-bold'
-                              : member.role === 'Líder de Célula'
-                              ? 'text-purple-800 font-bold'
-                              : 'text-[#0a2540]'
-                          }`}
-                        >
-                          {member.role}
-                        </span>
-                      </div>
-
-                      {/* Bairro */}
-                      <div className="w-24 sm:w-36 text-left shrink-0 hidden md:block text-xs sm:text-sm text-[#0a2540] truncate pr-2">
-                        {member.neighborhood || '—'}
-                      </div>
-
-                      {/* Aniversário (dd/MM) */}
-                      <div className="w-16 sm:w-24 text-center shrink-0 text-xs sm:text-sm font-medium text-[#0a2540]">
-                        {member.birthday || '—'}
-                      </div>
-
-                      {/* Trilho Button (Notebook contact icon matching Screenshot) */}
-                      <div className="w-12 sm:w-16 text-center shrink-0 flex items-center justify-center">
-                        <button
-                          type="button"
-                          onClick={() => onOpenLeadershipTrack(member)}
-                          className="p-1 rounded-lg text-[#0e3056] hover:bg-sky-50 hover:text-sky-700 active:scale-95 transition-all group cursor-pointer"
-                          title={`Ver Trilho de Liderança de ${member.name}`}
-                          aria-label={`Trilho de liderança de ${member.name}`}
-                        >
-                          <LeadershipBadgeIcon
-                            className="w-7 h-7 sm:w-8 sm:h-8 group-hover:scale-105 transition-transform"
-                            size={28}
-                          />
-                        </button>
-                      </div>
+                          )} shadow-xs group-hover:scale-110 transition-transform`}
+                        />
+                      </button>
                     </div>
-                  );
-                })
-              )}
-            </div>
+
+                    {/* Nome do Membro */}
+                    <div className="flex-1 min-w-0 pl-1.5 sm:pl-3 pr-1 text-left">
+                      <span
+                        onClick={() => onOpenLeadershipTrack(member)}
+                        className="text-xs sm:text-base font-semibold text-[#0a2540] hover:text-sky-700 cursor-pointer truncate block"
+                        title={member.name}
+                      >
+                        {member.name}
+                      </span>
+                      {member.neighborhood && (
+                        <span className="text-[10px] text-slate-400 md:hidden truncate block">
+                          {member.neighborhood}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Função */}
+                    <div className="w-20 sm:w-36 md:w-44 text-center sm:text-left shrink-0">
+                      <span
+                        className={`text-[11px] sm:text-sm font-medium leading-tight block truncate ${
+                          member.role === 'Líder em Treinamento'
+                            ? 'text-[#0284c7] font-bold'
+                            : member.role === 'Líder de Setor'
+                            ? 'text-[#052447] font-bold'
+                            : member.role === 'Líder de Célula'
+                            ? 'text-purple-800 font-bold'
+                            : 'text-[#0a2540]'
+                        }`}
+                        title={member.role}
+                      >
+                        <span className="hidden sm:inline">{member.role}</span>
+                        <span className="sm:hidden">{getShortRole(member.role)}</span>
+                      </span>
+                    </div>
+
+                    {/* Bairro (desktop only) */}
+                    <div className="w-28 sm:w-36 text-left shrink-0 hidden md:block text-xs sm:text-sm text-[#0a2540] truncate pr-2">
+                      {member.neighborhood || '—'}
+                    </div>
+
+                    {/* Aniversário (dd/MM) */}
+                    <div className="w-12 sm:w-20 text-center shrink-0 text-[11px] sm:text-sm font-medium text-[#0a2540]">
+                      {member.birthday || '—'}
+                    </div>
+
+                    {/* Trilho Button (Notebook contact icon matching Screenshot) */}
+                    <div className="w-8 sm:w-14 text-center shrink-0 flex items-center justify-center">
+                      <button
+                        type="button"
+                        onClick={() => onOpenLeadershipTrack(member)}
+                        className="p-1 rounded-lg text-[#0e3056] hover:bg-sky-50 hover:text-sky-700 active:scale-95 transition-all group cursor-pointer"
+                        title={`Ver Trilho de Liderança de ${member.name}`}
+                        aria-label={`Trilho de liderança de ${member.name}`}
+                      >
+                        <LeadershipBadgeIcon
+                          className="w-6 h-6 sm:w-8 sm:h-8 group-hover:scale-105 transition-transform"
+                          size={24}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -906,10 +932,10 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             <div className="space-y-2 mt-3">
               {(
                 [
-                  { id: 'green', label: 'Verde - Assíduo (100%)', pct: 100, color: 'bg-[#16a34a]' },
-                  { id: 'yellow', label: 'Amarelo - Regular (75%)', pct: 75, color: 'bg-[#facc15]' },
-                  { id: 'red', label: 'Vermelho - Alerta (50%)', pct: 50, color: 'bg-[#d05a5a]' },
-                  { id: 'black', label: 'Preto - Ausente (15%)', pct: 15, color: 'bg-[#18181b]' },
+                  { id: 'green', label: 'Verde • Assíduo (90% - 100%)', pct: 100, color: 'bg-[#16a34a]' },
+                  { id: 'yellow', label: 'Amarelo • Regular (~75%)', pct: 75, color: 'bg-[#facc15]' },
+                  { id: 'red', label: 'Vermelho • Alerta (< 50%)', pct: 50, color: 'bg-[#d05a5a]' },
+                  { id: 'black', label: 'Preto • Ausente (3+ faltas)', pct: 15, color: 'bg-[#18181b]' },
                 ] as const
               ).map((option) => (
                 <button

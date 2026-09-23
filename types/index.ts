@@ -116,6 +116,7 @@ export interface CellMember {
   id: string;
   churchId: string;
   cellId: string; // Pertence à Célula
+  cellName?: string;
   name: string;
   login?: string; // Login exclusivo para autenticação na aplicação
   password?: string; // Senha para acesso à aplicação
@@ -273,6 +274,12 @@ export interface CreateUnitInput {
   meetingTime?: string;
   latitude?: number;
   longitude?: number;
+}
+
+export interface UpdateUnitLeadersInput {
+  unitId: string;
+  churchId: string;
+  leaderMemberIds: string[];
 }
 
 export interface RegisterChurchInput {
