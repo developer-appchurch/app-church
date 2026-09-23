@@ -624,64 +624,26 @@ export const AppChurchService = {
           }
         }
 
-        // 3. Resolver ID da Role de Pastor no Supabase para evitar violação de FK
-        let resolvedRoleId = 'b2000000-0000-0000-0000-000000000001';
-        try {
-          const { data: matchedRoles } = await supabase
-            .from('roles')
-            .select('id, nome, slug')
-            .or('slug.eq.pastor,slug.eq.PASTOR,nome.ilike.%pastor%')
-            .limit(1);
-
-          if (matchedRoles && matchedRoles.length > 0) {
-            resolvedRoleId = matchedRoles[0].id;
-          } else {
-            const { data: anyRole } = await supabase.from('roles').select('id').limit(1);
-            if (anyRole && anyRole.length > 0) {
-              resolvedRoleId = anyRole[0].id;
-            }
-          }
-        } catch (rErr) {
-          console.warn('Aviso ao resolver role do pastor no cliente direto:', rErr);
-        }
-
-        const pastorPayload: any = {
-          id: pastorId,
-          igreja_id: churchId,
-          celula_id: null,
-          funcao_id: resolvedRoleId,
-          funcao: 'Pastor',
-          nome: input.pastorName.trim(),
-          login: cleanPastorLogin,
-          senha_hash: cleanPastorPass,
-          telefone: input.pastorPhone?.trim() || null,
-          email: input.pastorEmail?.trim() || null,
-          bairro: 'Centro',
-          status_frequencia: 'green',
-          percentual_frequencia: 100,
-          url_avatar: pastorProfile.avatarUrl,
-          observacoes: 'Pastor Titular cadastrado no registro da igreja (aguardando 1ª célula)',
-        };
-
-        let { error: pastorErr } = await supabase.from('members').insert([pastorPayload]);
-
-        // Auto-recuperação se FK falhar
-        if (pastorErr && (pastorErr.message?.includes('members_funcao_id_fkey') || pastorErr.message?.includes('funcao_id'))) {
-          try {
-            const { data: validRoles } = await supabase.from('roles').select('id, nome, slug');
-            if (validRoles && validRoles.length > 0) {
-              const matched =
-                validRoles.find(
-                  (r: any) =>
-                    r.slug?.toLowerCase().includes('pastor') ||
-                    r.nome?.toLowerCase().includes('pastor')
-                ) || validRoles[0];
-              pastorPayload.funcao_id = matched.id;
-              const retryRes = await supabase.from('members').insert([pastorPayload]);
-              pastorErr = retryRes.error;
-            }
-          } catch {}
-        }
+        // 3. Cadastrar Pastor em 'members' (celula_id nulo aguardando 1ª célula)
+        let { error: pastorErr } = await supabase.from('members').insert([
+          {
+            id: pastorId,
+            igreja_id: churchId,
+            celula_id: null,
+            funcao_id: 'b2000000-0000-0000-0000-000000000001', // Pastor
+            funcao: 'Pastor',
+            nome: input.pastorName.trim(),
+            login: cleanPastorLogin,
+            senha_hash: cleanPastorPass,
+            telefone: input.pastorPhone?.trim() || null,
+            email: input.pastorEmail?.trim() || null,
+            bairro: 'Centro',
+            status_frequencia: 'green',
+            percentual_frequencia: 100,
+            url_avatar: pastorProfile.avatarUrl,
+            observacoes: 'Pastor Titular cadastrado no registro da igreja (aguardando 1ª célula)',
+          },
+        ]);
 
         if (pastorErr) {
           // Rollback
@@ -857,11 +819,12 @@ export const AppChurchService = {
     members: (CellMember & { isUnlinked: boolean; cellName?: string })[];
     counts: { total: number; unlinked: number; linked: number };
   }> {
+    // 1. Tentativa via API Server Route
     if (typeof window !== 'undefined') {
       try {
         const res = await fetch(`/api/members/pool?churchId=${churchId}&filter=${filter}`);
         const data = await res.json();
-        if (res.ok && data?.members) {
+        if (res.ok && data?.members && data.members.length > 0) {
           return {
             members: data.members,
             counts: data.counts || {
@@ -872,10 +835,90 @@ export const AppChurchService = {
           };
         }
       } catch (err) {
-        console.warn('Falha ao buscar pool de membros via API:', err);
+        console.warn('Falha ao buscar pool de membros via API, tentando fallback direto:', err);
       }
     }
-    return { members: [], counts: { total: 0, unlinked: 0, linked: 0 } };
+
+    // 2. Fallback direto via Supabase Client
+    if (supabase) {
+      try {
+        let query = supabase
+          .from('members')
+          .select('*')
+          .eq('igreja_id', churchId)
+          .order('nome', { ascending: true });
+
+        if (filter === 'unlinked') {
+          query = query.is('celula_id', null);
+        } else if (filter === 'linked') {
+          query = query.not('celula_id', 'is', null);
+        }
+
+        const { data: dbMembers, error } = await query;
+        if (!error && dbMembers && dbMembers.length > 0) {
+          const mapped = dbMembers.map((m: any) => ({
+            id: m.id,
+            churchId: m.igreja_id,
+            cellId: m.celula_id || '',
+            isUnlinked: !m.celula_id,
+            cellName: m.celula_id ? 'Célula Vinculada' : 'Pool Geral (Sem Célula)',
+            name: m.nome,
+            login: m.login || '',
+            role: (m.funcao as UserRole) || 'Membro',
+            roleId: m.funcao_id,
+            neighborhood: m.bairro || 'Centro',
+            birthday: m.aniversario || '01/01',
+            phone: m.telefone || '',
+            email: m.email || '',
+            attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
+            attendancePercentage: m.percentual_frequencia ?? 100,
+            avatarUrl: m.url_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+            notes: m.observacoes || '',
+          }));
+
+          const unlinkedCount = mapped.filter((m) => m.isUnlinked).length;
+          const linkedCount = mapped.filter((m) => !m.isUnlinked).length;
+
+          return {
+            members: mapped,
+            counts: {
+              total: mapped.length,
+              unlinked: unlinkedCount,
+              linked: linkedCount,
+            },
+          };
+        }
+      } catch (directErr) {
+        console.warn('Aviso no fallback direto do Supabase:', directErr);
+      }
+    }
+
+    // 3. Fallback Local Storage
+    const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+    const churchMembers = allMembers.filter((m) => m.churchId === churchId);
+    let resultList = churchMembers.map((m) => ({
+      ...m,
+      isUnlinked: !m.cellId,
+      cellName: m.cellId ? 'Célula Vinculada' : 'Pool Geral (Sem Célula)',
+    }));
+
+    if (filter === 'unlinked') {
+      resultList = resultList.filter((m) => m.isUnlinked);
+    } else if (filter === 'linked') {
+      resultList = resultList.filter((m) => !m.isUnlinked);
+    }
+
+    const unlinkedCount = churchMembers.filter((m) => !m.cellId).length;
+    const linkedCount = churchMembers.filter((m) => Boolean(m.cellId)).length;
+
+    return {
+      members: resultList,
+      counts: {
+        total: churchMembers.length,
+        unlinked: unlinkedCount,
+        linked: linkedCount,
+      },
+    };
   },
 
   /**
@@ -1187,7 +1230,7 @@ export const AppChurchService = {
     };
 
     if (supabase) {
-      const payload: any = {
+      const { error: insertError } = await supabase.from('members').insert({
         id: newId,
         igreja_id: validChurchId,
         celula_id: validCellId,
@@ -1203,29 +1246,7 @@ export const AppChurchService = {
         percentual_frequencia: newMember.attendancePercentage ?? 100,
         url_avatar: newMember.avatarUrl || null,
         observacoes: newMember.notes || null,
-      };
-
-      let { error: insertError } = await supabase.from('members').insert(payload);
-
-      // Auto-recuperação caso o banco não reconheça o UUID de funcao_id
-      if (insertError && (insertError.message?.includes('members_funcao_id_fkey') || insertError.message?.includes('funcao_id'))) {
-        try {
-          const { data: dbRoles } = await supabase.from('roles').select('id, nome, slug');
-          if (dbRoles && dbRoles.length > 0) {
-            const roleSlug = newMember.role.toLowerCase();
-            const matched = dbRoles.find(
-              (r: any) =>
-                r.slug?.toLowerCase() === roleSlug ||
-                r.nome?.toLowerCase() === roleSlug ||
-                newMember.role.toLowerCase().includes(r.nome?.toLowerCase())
-            ) || dbRoles[0];
-            payload.funcao_id = matched.id;
-            created.roleId = matched.id;
-            const retryRes = await supabase.from('members').insert(payload);
-            insertError = retryRes.error;
-          }
-        } catch {}
-      }
+      });
 
       if (insertError) {
         if (

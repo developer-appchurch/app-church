@@ -48,24 +48,27 @@ export async function GET(req: NextRequest) {
     }
 
     // Obter nomes das células da igreja para enriquecer o retorno
-    const { data: cellsData } = await supabase
-      .from('cells')
-      .select('id, nome')
-      .eq('igreja_id', churchId);
-
     const cellMap = new Map<string, string>();
-    (cellsData || []).forEach((c: any) => cellMap.set(c.id, c.nome));
+    try {
+      const { data: cellsData } = await supabase
+        .from('cells')
+        .select('id, nome')
+        .eq('igreja_id', churchId);
+      (cellsData || []).forEach((c: any) => cellMap.set(c.id, c.nome));
+    } catch {}
 
     // Também checa unidades que sejam células
-    const { data: unidadesData } = await supabase
-      .from('unidades')
-      .select('id, nome')
-      .eq('igreja_id', churchId);
-    (unidadesData || []).forEach((u: any) => {
-      if (!cellMap.has(u.id)) {
-        cellMap.set(u.id, u.nome);
-      }
-    });
+    try {
+      const { data: unidadesData } = await supabase
+        .from('unidades')
+        .select('id, nome')
+        .eq('igreja_id', churchId);
+      (unidadesData || []).forEach((u: any) => {
+        if (!cellMap.has(u.id)) {
+          cellMap.set(u.id, u.nome);
+        }
+      });
+    } catch {}
 
     const members: (CellMember & { isUnlinked: boolean; cellName?: string })[] = (
       membersData || []
