@@ -7,7 +7,7 @@ interface LogoProps {
 }
 
 export const AppChurchLogo: React.FC<LogoProps> = ({
-  className = 'h-16',
+  className = 'h-14',
   variant = 'light',
 }) => {
   const isDark = variant === 'dark';
@@ -16,7 +16,7 @@ export const AppChurchLogo: React.FC<LogoProps> = ({
   return (
     <div className={`inline-flex flex-col items-center justify-center select-none ${className}`}>
       <svg
-        viewBox="0 0 300 170"
+        viewBox="0 0 320 200"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         className="w-full h-full max-w-full drop-shadow-sm"
@@ -24,16 +24,16 @@ export const AppChurchLogo: React.FC<LogoProps> = ({
       >
         {/* Linha 1: 'app' */}
         <text
-          x="150"
-          y="70"
+          x="160"
+          y="82"
           textAnchor="middle"
           fill={textColor}
           style={{
             fontFamily:
-              '"Plus Jakarta Sans", "Outfit", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-            fontSize: '80px',
-            fontWeight: 900,
-            letterSpacing: '-3.2px',
+              'system-ui, -apple-system, BlinkMacSystemFont, "Plus Jakarta Sans", "Outfit", "Inter", "Segoe UI", Roboto, sans-serif',
+            fontSize: '84px',
+            fontWeight: 800,
+            letterSpacing: '-2px',
           }}
         >
           app
@@ -41,16 +41,16 @@ export const AppChurchLogo: React.FC<LogoProps> = ({
 
         {/* Linha 2: 'Church' */}
         <text
-          x="150"
-          y="150"
+          x="160"
+          y="166"
           textAnchor="middle"
           fill={textColor}
           style={{
             fontFamily:
-              '"Plus Jakarta Sans", "Outfit", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              'system-ui, -apple-system, BlinkMacSystemFont, "Plus Jakarta Sans", "Outfit", "Inter", "Segoe UI", Roboto, sans-serif',
             fontSize: '84px',
-            fontWeight: 900,
-            letterSpacing: '-3.8px',
+            fontWeight: 800,
+            letterSpacing: '-2.5px',
           }}
         >
           Church
@@ -59,6 +59,5 @@ export const AppChurchLogo: React.FC<LogoProps> = ({
     </div>
   );
 };
-
 
 
