@@ -25,6 +25,7 @@ interface LeadershipTrackModalProps {
   churchId?: string;
   churchName?: string;
   cellName: string;
+  validatorName?: string;
   onClose: () => void;
   onSaveProgress?: (memberId: string, progress: LeadershipTrackProgress) => void;
 }
@@ -34,6 +35,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   churchId,
   churchName,
   cellName,
+  validatorName,
   onClose,
   onSaveProgress,
 }) => {
@@ -45,7 +47,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   const [savedAlert, setSavedAlert] = useState(false);
   const [expandedStepNoteId, setExpandedStepNoteId] = useState<number | string | null>(null);
 
-  // Carrega as etapas vinculadas à igreja específica e o status real do membro da tabela member_track_steps
+  // Carrega as etapas vinculadas à igreja específica e o status real do membro da tabela membro_etapas_trilha
   useEffect(() => {
     if (!member) return;
 
@@ -83,6 +85,8 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
 
   if (!member) return null;
 
+  const defaultValidator = validatorName || 'Líder Responsável';
+
   const toggleStep = (stepId: number | string) => {
     if (!track) return;
 
@@ -92,7 +96,8 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
         return {
           ...s,
           completed: nextCompleted,
-          completedAt: nextCompleted ? new Date().toLocaleDateString('pt-BR') : undefined,
+          completedAt: nextCompleted ? (s.completedAt || new Date().toLocaleDateString('pt-BR')) : undefined,
+          validatedBy: nextCompleted ? (s.validatedBy?.trim() || defaultValidator) : undefined,
         };
       }
       return s;
@@ -124,21 +129,44 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
     });
   };
 
+  const handleStepValidatorChange = (stepId: number | string, valText: string) => {
+    if (!track) return;
+    setTrack({
+      ...track,
+      steps: track.steps.map((s) =>
+        String(s.id) === String(stepId) ? { ...s, validatedBy: valText } : s
+      ),
+    });
+  };
+
   const handleSave = async () => {
     if (!track || !member) return;
 
     setIsSaving(true);
     try {
       const resolvedChurchId = member.churchId || churchId;
+      
+      // Assegura que todas as etapas concluídas tenham o nome do validador na coluna validado_por
+      const stepsWithValidation = track.steps.map((st) => ({
+        ...st,
+        validatedBy: st.completed ? (st.validatedBy?.trim() || defaultValidator) : undefined,
+        completedAt: st.completed ? (st.completedAt || new Date().toLocaleDateString('pt-BR')) : undefined,
+      }));
+
+      const trackToSave: LeadershipTrackProgress = {
+        ...track,
+        steps: stepsWithValidation,
+      };
+
       await AppChurchService.saveLeadershipProgress(
         member.id,
-        track,
+        trackToSave,
         resolvedChurchId,
         member.cellId
       );
 
       if (onSaveProgress) {
-        onSaveProgress(member.id, track);
+        onSaveProgress(member.id, trackToSave);
       }
 
       setSavedAlert(true);
@@ -354,19 +382,33 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Campo expansível de anotação na etapa */}
+                    {/* Campo expansível de anotação e validação na etapa */}
                     {isExpanded && (
-                      <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-100 bg-white/70">
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Observações específicas desta etapa (member_track_steps.observacoes):
-                        </label>
-                        <input
-                          type="text"
-                          value={step.notes || ''}
-                          onChange={(e) => handleStepNoteChange(step.id, e.target.value)}
-                          placeholder="Ex: Concluiu com louvor, batizado pelo Pr. Paulo..."
-                          className="w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800"
-                        />
+                      <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-100 bg-white/70 space-y-2.5">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Validado por (membro_etapas_trilha.validado_por):
+                          </label>
+                          <input
+                            type="text"
+                            value={step.validatedBy || ''}
+                            onChange={(e) => handleStepValidatorChange(step.id, e.target.value)}
+                            placeholder={`Ex: ${validatorName || 'Pr. Paulo, Líder de Célula...'}`}
+                            className="w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Observações específicas desta etapa (membro_etapas_trilha.observacoes):
+                          </label>
+                          <input
+                            type="text"
+                            value={step.notes || ''}
+                            onChange={(e) => handleStepNoteChange(step.id, e.target.value)}
+                            placeholder="Ex: Concluiu com louvor, batizado pelo Pr. Paulo..."
+                            className="w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white"
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
@@ -415,10 +457,10 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
           <div className="text-xs text-slate-500">
             {savedAlert ? (
               <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                <Check size={14} /> Progresso gravado com sucesso em member_track_steps!
+                <Check size={14} /> Progresso e validação gravados com sucesso na tabela membro_etapas_trilha!
               </span>
             ) : (
-              'Os dados do membro ficam salvos na tabela member_track_steps.'
+              'Os dados e o validador da etapa ficam salvos na tabela membro_etapas_trilha.'
             )}
           </div>
           <div className="flex items-center gap-2">

@@ -173,8 +173,13 @@ export const AppChurchService = {
     }
 
     try {
-      // Query churches table to test read access
-      const { data, error } = await supabase.from('churches').select('id, nome').limit(1);
+      // Query igrejas table (or churches view) to test read access
+      let { data, error } = await supabase.from('igrejas').select('id, nome').limit(1);
+      if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+        const legRes = await supabase.from('churches').select('id, nome').limit(1);
+        data = legRes.data;
+        error = legRes.error;
+      }
       const elapsed = Date.now() - startTime;
 
       if (error) {
@@ -246,7 +251,11 @@ export const AppChurchService = {
       let adminChurchName = 'Administração do Sistema';
       if (supabase) {
         try {
-          const { data: firstChurch } = await supabase.from('churches').select('id, nome').limit(1);
+          let { data: firstChurch } = await supabase.from('igrejas').select('id, nome').limit(1);
+          if (!firstChurch || firstChurch.length === 0) {
+            const legRes = await supabase.from('churches').select('id, nome').limit(1);
+            firstChurch = legRes.data;
+          }
           if (firstChurch && firstChurch.length > 0) {
             adminChurchId = firstChurch[0].id;
             adminChurchName = firstChurch[0].nome;
@@ -277,17 +286,27 @@ export const AppChurchService = {
       return adminUser;
     }
 
-    // 1. Consulta prioritária na tabela real "members" do Supabase
+    // 1. Consulta prioritária na tabela real "membros" (ou "members") do Supabase
     if (supabase) {
       try {
-        const { data: memberRows, error } = await supabase
-          .from('members')
+        let { data: memberRows, error } = await supabase
+          .from('membros')
           .select('*')
           .or(`login.ilike.${cleanLogin},email.ilike.${cleanLogin}`)
           .limit(1);
 
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          const legRes = await supabase
+            .from('members')
+            .select('*')
+            .or(`login.ilike.${cleanLogin},email.ilike.${cleanLogin}`)
+            .limit(1);
+          memberRows = legRes.data;
+          error = legRes.error;
+        }
+
         if (error) {
-          console.warn('Erro ao consultar tabela members no Supabase:', error);
+          console.warn('Erro ao consultar tabela membros no Supabase:', error);
         } else if (!memberRows || memberRows.length === 0) {
           throw new Error('Usuário não encontrado na tabela de membros.');
         } else {
@@ -307,23 +326,39 @@ export const AppChurchService = {
           // Busca dados da igreja vinculada
           let churchName = 'Paz Church Sobral';
           if (m.igreja_id) {
-            const { data: cData } = await supabase
-              .from('churches')
+            let { data: cData } = await supabase
+              .from('igrejas')
               .select('nome')
               .eq('id', m.igreja_id)
               .single();
-            if (cData?.nome) churchName = cData.nome;
+            if (!cData?.nome) {
+              const legC = await supabase.from('churches').select('nome').eq('id', m.igreja_id).single();
+              if (legC.data?.nome) churchName = legC.data.nome;
+            } else {
+              churchName = cData.nome;
+            }
           }
 
-          // Busca informações da célula/setor
+          // Busca informações da célula/unidade/setor
           let sector = 'Setor Geral';
-          if (m.celula_id) {
-            const { data: cellData } = await supabase
-              .from('cells')
-              .select('nome, nome_setor')
-              .eq('id', m.celula_id)
-              .single();
-            if (cellData?.nome_setor) sector = cellData.nome_setor;
+          const resolvedUnitId = m.unidade_id || m.celula_id;
+          if (resolvedUnitId) {
+            const { data: unitData } = await supabase
+              .from('unidades')
+              .select('id, nome, pai_id')
+              .eq('id', resolvedUnitId)
+              .maybeSingle();
+
+            if (unitData?.pai_id) {
+              const { data: parentUnit } = await supabase
+                .from('unidades')
+                .select('nome')
+                .eq('id', unitData.pai_id)
+                .maybeSingle();
+              if (parentUnit?.nome) sector = parentUnit.nome;
+            } else if (unitData?.nome) {
+              sector = unitData.nome;
+            }
           }
 
           const userProfile: UserProfile = {
@@ -333,9 +368,9 @@ export const AppChurchService = {
             name: m.nome,
             login: m.login || cleanLogin,
             role: (m.funcao as UserRole) || 'Membro',
-            roleId: m.funcao_id,
+            roleId: m.papel_id || m.funcao_id,
             sector,
-            currentCellId: m.celula_id,
+            currentCellId: resolvedUnitId || '',
             email: m.email || `${m.login || cleanLogin}@appchurch.local`,
             phone: m.telefone || '',
             avatarUrl:
@@ -422,7 +457,12 @@ export const AppChurchService = {
   async getChurches(): Promise<Church[]> {
     if (supabase) {
       try {
-        const { data, error } = await supabase.from('churches').select('*').order('nome');
+        let { data, error } = await supabase.from('igrejas').select('*').order('nome');
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          const legRes = await supabase.from('churches').select('*').order('nome');
+          data = legRes.data;
+          error = legRes.error;
+        }
         if (!error && data && data.length > 0) {
           return data.map((c: any) => ({
             id: c.id,
@@ -937,38 +977,48 @@ export const AppChurchService = {
     if (supabase) {
       try {
         let query = supabase
-          .from('members')
-          .select('*')
+          .from('membros')
+          .select('id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, observacoes')
           .eq('igreja_id', churchId)
           .order('nome', { ascending: true });
 
         if (filter === 'unlinked') {
-          query = query.is('celula_id', null);
+          query = query.is('unidade_id', null);
         } else if (filter === 'linked') {
-          query = query.not('celula_id', 'is', null);
+          query = query.not('unidade_id', 'is', null);
         }
 
-        const { data: dbMembers, error } = await query;
+        let { data: dbMembers, error } = await query;
+        if (error) {
+          const legQ = supabase.from('members').select('*').eq('igreja_id', churchId).order('nome');
+          const legRes = await legQ;
+          dbMembers = legRes.data;
+          error = legRes.error;
+        }
+
         if (!error && dbMembers && dbMembers.length > 0) {
-          const mapped = dbMembers.map((m: any) => ({
-            id: m.id,
-            churchId: m.igreja_id,
-            cellId: m.celula_id || '',
-            isUnlinked: !m.celula_id,
-            cellName: m.celula_id ? 'Célula Vinculada' : 'Pool Geral (Sem Célula)',
-            name: m.nome,
-            login: m.login || '',
-            role: (m.funcao as UserRole) || 'Membro',
-            roleId: m.funcao_id,
-            neighborhood: m.bairro || 'Centro',
-            birthday: m.aniversario || '01/01',
-            phone: m.telefone || '',
-            email: m.email || '',
-            attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
-            attendancePercentage: m.percentual_frequencia ?? 100,
-            avatarUrl: m.url_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-            notes: m.observacoes || '',
-          }));
+          const mapped = dbMembers.map((m: any) => {
+            const effectiveCell = m.unidade_id || m.celula_id || '';
+            return {
+              id: m.id,
+              churchId: m.igreja_id,
+              cellId: effectiveCell,
+              isUnlinked: !effectiveCell,
+              cellName: effectiveCell ? 'Célula Vinculada' : 'Sem Célula (Geral)',
+              name: m.nome,
+              login: m.login || '',
+              role: (m.funcao as UserRole) || 'Membro',
+              roleId: m.papel_id || m.funcao_id,
+              neighborhood: m.bairro || 'Centro',
+              birthday: m.aniversario || '01/01',
+              phone: m.telefone || '',
+              email: m.email || '',
+              attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
+              attendancePercentage: m.percentual_frequencia ?? 100,
+              avatarUrl: m.url_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+              notes: m.observacoes || '',
+            };
+          });
 
           const unlinkedCount = mapped.filter((m) => m.isUnlinked).length;
           const linkedCount = mapped.filter((m) => !m.isUnlinked).length;
@@ -1068,30 +1118,96 @@ export const AppChurchService = {
 
   /**
    * Get Cells - STRICTLY filtered by churchId
+   * Busca diretamente das tabelas físicas unidades, celulas, unidade_lideres e membros
    */
   async getCells(churchId: string): Promise<CellGroup[]> {
     if (supabase) {
       try {
-        const { data, error } = await supabase
-          .from('cells')
-          .select('*')
+        // 1. Busca todas as unidades ativas da igreja
+        const { data: units, error: uErr } = await supabase
+          .from('unidades')
+          .select('id, igreja_id, nome, pai_id')
           .eq('igreja_id', churchId)
-          .order('nome');
+          .eq('ativo', true);
 
-        if (!error && data) {
-          const cells: CellGroup[] = data.map((c: any) => ({
-            id: c.id,
-            churchId: c.igreja_id,
-            name: c.nome,
-            leaderName: c.nome_lider,
-            sectorName: c.nome_setor,
-            address: c.endereco,
-            meetingDay: c.dia_reuniao,
-            meetingTime: c.horario_reuniao,
-            memberCount: c.quantidade_membros || 0,
-          }));
-          saveToStorage(`${STORAGE_KEYS.CELLS}_${churchId}`, cells);
-          return cells;
+        if (!uErr && units && units.length > 0) {
+          const unitIds = units.map((u: any) => u.id);
+
+          // 2. Busca detalhes de células (dia, horário, endereço, etc.)
+          const { data: celulasData } = await supabase
+            .from('celulas')
+            .select('*')
+            .in('unidade_id', unitIds);
+
+          const celulaMap = new Map<string, any>();
+          (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
+
+          // 3. Mapeia nomes das unidades superiores (setor / distrito)
+          const parentNameMap = new Map<string, string>();
+          units.forEach((u: any) => parentNameMap.set(u.id, u.nome));
+
+          // 4. Busca líderes atribuídos em unidade_lideres
+          const { data: leadersData } = await supabase
+            .from('unidade_lideres')
+            .select('unidade_id, pessoa_id, papel')
+            .in('unidade_id', unitIds)
+            .eq('ativo', true);
+
+          const leaderPessoaIds = (leadersData || []).map((l: any) => l.pessoa_id);
+          const leaderMemberMap = new Map<string, string>();
+          if (leaderPessoaIds.length > 0) {
+            const { data: leaderMembers } = await supabase
+              .from('membros')
+              .select('id, nome')
+              .in('id', leaderPessoaIds);
+            (leaderMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m.nome));
+          }
+
+          const leaderMap = new Map<string, string>();
+          (leadersData || []).forEach((l: any) => {
+            const memName = leaderMemberMap.get(l.pessoa_id);
+            if (memName && !leaderMap.has(l.unidade_id)) {
+              leaderMap.set(l.unidade_id, memName);
+            }
+          });
+
+          // 5. Contagem real de membros por unidade
+          const { data: membersCount } = await supabase
+            .from('membros')
+            .select('unidade_id')
+            .eq('igreja_id', churchId);
+          const countMap = new Map<string, number>();
+          (membersCount || []).forEach((m: any) => {
+            if (m.unidade_id) {
+              countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
+            }
+          });
+
+          // Unidades que são células (possuem entrada em 'celulas' ou são unidades folha)
+          const parentIdsSet = new Set(units.map((u: any) => u.pai_id).filter(Boolean));
+          let targetUnits = units.filter((u: any) => celulaMap.has(u.id) || !parentIdsSet.has(u.id));
+          if (targetUnits.length === 0) targetUnits = units;
+
+          const cells: CellGroup[] = targetUnits.map((u: any) => {
+            const cInfo = celulaMap.get(u.id);
+            const parentName = u.pai_id ? parentNameMap.get(u.pai_id) : 'Setor Geral';
+            return {
+              id: u.id,
+              churchId: u.igreja_id,
+              name: u.nome,
+              leaderName: leaderMap.get(u.id) || 'Líder',
+              sectorName: parentName || 'Setor Geral',
+              address: cInfo?.endereco || 'Rua Sumaré, 245 - Junco',
+              meetingDay: cInfo?.dia_reuniao || 'Quinta-feira',
+              meetingTime: cInfo?.horario_reuniao || '19:30',
+              memberCount: countMap.get(u.id) || cInfo?.quantidade_membros || 0,
+            };
+          });
+
+          if (cells.length > 0) {
+            saveToStorage(`${STORAGE_KEYS.CELLS}_${churchId}`, cells);
+            return cells;
+          }
         }
       } catch (e) {
         console.warn('Erro ao buscar células no Supabase:', e);
@@ -1187,18 +1303,26 @@ export const AppChurchService = {
   async getMembers(churchId: string, cellId?: string): Promise<CellMember[]> {
     if (supabase) {
       try {
-        let query = supabase.from('members').select('*').eq('igreja_id', churchId);
+        let query = supabase.from('membros').select('*').eq('igreja_id', churchId);
         if (cellId) {
-          query = query.eq('celula_id', cellId);
+          query = query.or(`unidade_id.eq.${cellId},celula_id.eq.${cellId}`);
         }
-        const { data, error } = await query.order('nome');
+        let { data, error } = await query.order('nome');
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          let legQuery = supabase.from('members').select('*').eq('igreja_id', churchId);
+          if (cellId) legQuery = legQuery.eq('celula_id', cellId);
+          const legRes = await legQuery.order('nome');
+          data = legRes.data;
+          error = legRes.error;
+        }
 
         if (!error && data) {
           const members: CellMember[] = data.map((m: any) => ({
             id: m.id,
             churchId: m.igreja_id,
-            cellId: m.celula_id,
-            roleId: m.funcao_id,
+            cellId: m.unidade_id || m.celula_id,
+            roleId: m.papel_id || m.funcao_id,
             role: (m.funcao as UserRole) || 'Membro',
             name: m.nome,
             login: m.login || '',
@@ -1248,13 +1372,26 @@ export const AppChurchService = {
     if (supabase) {
       try {
         let query = supabase
-          .from('members')
+          .from('membros')
           .select('id, login')
           .ilike('login', cleanLogin);
         if (excludeMemberId) {
           query = query.neq('id', excludeMemberId);
         }
-        const { data, error } = await query.limit(1);
+        let { data, error } = await query.limit(1);
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          let legQuery = supabase
+            .from('members')
+            .select('id, login')
+            .ilike('login', cleanLogin);
+          if (excludeMemberId) {
+            legQuery = legQuery.neq('id', excludeMemberId);
+          }
+          const legRes = await legQuery.limit(1);
+          data = legRes.data;
+          error = legRes.error;
+        }
 
         // Se a consulta ao banco Supabase foi executada com sucesso
         if (!error) {
@@ -1316,7 +1453,7 @@ export const AppChurchService = {
       throw new Error(availability.error || `O login "${cleanLogin}" já está em uso.`);
     }
 
-    // Normaliza celula_id para null se for string vazia ou inexistente (PostgreSQL uuid)
+    // Normaliza celula_id / unidade_id para null se for string vazia ou inexistente (PostgreSQL uuid)
     const validCellId =
       newMember.cellId && newMember.cellId.trim() !== '' ? newMember.cellId.trim() : null;
 
@@ -1328,7 +1465,11 @@ export const AppChurchService = {
     let roleId = newMember.roleId;
     if (supabase && (!roleId || !roleId.includes('-') || roleId.startsWith('role-'))) {
       try {
-        const { data: dbRoles } = await supabase.from('roles').select('id, nome, slug');
+        let { data: dbRoles } = await supabase.from('papeis').select('id, nome, slug');
+        if (!dbRoles || dbRoles.length === 0) {
+          const legRoles = await supabase.from('roles').select('id, nome, slug');
+          dbRoles = legRoles.data;
+        }
         if (dbRoles && dbRoles.length > 0) {
           const matched = dbRoles.find(
             (r: any) =>
@@ -1356,11 +1497,11 @@ export const AppChurchService = {
     };
 
     if (supabase) {
-      const payload: any = {
+      const ptPayload: any = {
         id: newId,
         igreja_id: validChurchId,
-        celula_id: validCellId,
-        funcao_id: validRoleId,
+        unidade_id: validCellId,
+        papel_id: validRoleId,
         funcao: newMember.role,
         nome: newMember.name,
         login: cleanLogin,
@@ -1374,12 +1515,25 @@ export const AppChurchService = {
         observacoes: newMember.notes || null,
       };
 
-      let { error: insertError } = await supabase.from('members').insert(payload);
+      let { error: insertError } = await supabase.from('membros').insert(ptPayload);
 
-      // Auto-recuperação caso o banco não reconheça o UUID de funcao_id
-      if (insertError && (insertError.message?.includes('members_funcao_id_fkey') || insertError.message?.includes('funcao_id'))) {
+      // Fallback para tabela legada members se a nova tabela membros falhar
+      if (insertError && (insertError.code === '42P01' || insertError.message?.includes('does not exist'))) {
+        const legacyPayload = {
+          ...ptPayload,
+          celula_id: validCellId,
+          funcao_id: validRoleId,
+        };
+        delete legacyPayload.unidade_id;
+        delete legacyPayload.papel_id;
+        const legRes = await supabase.from('members').insert(legacyPayload);
+        insertError = legRes.error;
+      }
+
+      // Auto-recuperação caso o banco reclame de foreign key em papel_id / funcao_id
+      if (insertError && (insertError.message?.includes('funcao_id') || insertError.message?.includes('papel_id'))) {
         try {
-          const { data: dbRoles } = await supabase.from('roles').select('id, nome, slug');
+          const { data: dbRoles } = await supabase.from('papeis').select('id, nome, slug');
           if (dbRoles && dbRoles.length > 0) {
             const roleSlug = newMember.role.toLowerCase();
             const matched = dbRoles.find(
@@ -1388,9 +1542,9 @@ export const AppChurchService = {
                 r.nome?.toLowerCase() === roleSlug ||
                 newMember.role.toLowerCase().includes(r.nome?.toLowerCase())
             ) || dbRoles[0];
-            payload.funcao_id = matched.id;
+            ptPayload.papel_id = matched.id;
             created.roleId = matched.id;
-            const retryRes = await supabase.from('members').insert(payload);
+            const retryRes = await supabase.from('membros').insert(ptPayload);
             insertError = retryRes.error;
           }
         } catch {}
@@ -1434,14 +1588,25 @@ export const AppChurchService = {
   ): Promise<void> {
     if (supabase) {
       try {
-        await supabase
-          .from('members')
+        let { error } = await supabase
+          .from('membros')
           .update({
             status_frequencia: attendanceStatus,
             percentual_frequencia: attendancePercentage,
             atualizado_em: new Date().toISOString(),
           })
           .eq('id', memberId);
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          await supabase
+            .from('members')
+            .update({
+              status_frequencia: attendanceStatus,
+              percentual_frequencia: attendancePercentage,
+              atualizado_em: new Date().toISOString(),
+            })
+            .eq('id', memberId);
+        }
       } catch (e) {
         console.warn('Erro ao atualizar frequência no Supabase:', e);
       }
@@ -1474,25 +1639,42 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        let query = supabase.from('feed_posts').select('*').eq('igreja_id', churchId);
+        let query = supabase.from('postagens_feed').select('*').eq('igreja_id', churchId);
         if (cellId) {
-          query = query.eq('celula_id', cellId);
+          query = query.or(`unidade_id.eq.${cellId},celula_id.eq.${cellId}`);
         }
-        const { data: postsData, error } = await query.order('criado_em', { ascending: false });
+        let { data: postsData, error } = await query.order('criado_em', { ascending: false });
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          let legQuery = supabase.from('feed_posts').select('*').eq('igreja_id', churchId);
+          if (cellId) legQuery = legQuery.eq('celula_id', cellId);
+          const legRes = await legQuery.order('criado_em', { ascending: false });
+          postsData = legRes.data;
+          error = legRes.error;
+        }
 
         if (!error && postsData) {
           // Fetch all comments for these posts
-          const postIds = postsData.map((p) => p.id);
+          const postIds = postsData.map((p: any) => p.id);
           let commentsByPost: Record<string, any[]> = {};
 
           if (postIds.length > 0) {
-            const { data: commentsData } = await supabase
-              .from('post_comments')
+            let { data: commentsData, error: comErr } = await supabase
+              .from('comentarios_postagem')
               .select('*')
               .in('post_id', postIds)
               .order('criado_em', { ascending: true });
 
-            (commentsData || []).forEach((c) => {
+            if (comErr || !commentsData) {
+              const legCom = await supabase
+                .from('post_comments')
+                .select('*')
+                .in('post_id', postIds)
+                .order('criado_em', { ascending: true });
+              commentsData = legCom.data;
+            }
+
+            (commentsData || []).forEach((c: any) => {
               if (!commentsByPost[c.post_id]) commentsByPost[c.post_id] = [];
               commentsByPost[c.post_id].push({
                 id: c.id,
@@ -1506,10 +1688,10 @@ export const AppChurchService = {
             });
           }
 
-          const mappedPosts: FeedPost[] = postsData.map((p) => ({
+          const mappedPosts: FeedPost[] = postsData.map((p: any) => ({
             id: p.id,
             churchId: p.igreja_id,
-            cellId: p.celula_id,
+            cellId: p.unidade_id || p.celula_id,
             cellName: p.nome_celula,
             authorName: p.nome_autor,
             authorRole: p.funcao_autor,
@@ -1557,10 +1739,10 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        const { error } = await supabase.from('feed_posts').insert({
+        const ptPayload: any = {
           id: newId,
           igreja_id: post.churchId,
-          celula_id: post.cellId || null,
+          unidade_id: post.cellId || null,
           nome_celula: post.cellName,
           nome_autor: post.authorName,
           funcao_autor: post.authorRole,
@@ -1569,7 +1751,14 @@ export const AppChurchService = {
           url_imagem: post.imageUrl || null,
           categoria: post.category || 'Célula',
           quantidade_curtidas: 0,
-        });
+        };
+        let { error } = await supabase.from('postagens_feed').insert(ptPayload);
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.code === 'PGRST204')) {
+          const legPayload = { ...ptPayload, celula_id: post.cellId || null };
+          delete legPayload.unidade_id;
+          const legRes = await supabase.from('feed_posts').insert(legPayload);
+          error = legRes.error;
+        }
         if (error) {
           console.warn('Supabase post insert warning:', error);
         }
@@ -1606,10 +1795,16 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        await supabase
-          .from('feed_posts')
+        let { error } = await supabase
+          .from('postagens_feed')
           .update({ quantidade_curtidas: newLikes })
           .eq('id', postId);
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          await supabase
+            .from('feed_posts')
+            .update({ quantidade_curtidas: newLikes })
+            .eq('id', postId);
+        }
       } catch (e) {
         console.warn('Erro ao atualizar curtida no Supabase:', e);
       }
@@ -1635,14 +1830,18 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        await supabase.from('post_comments').insert({
+        const ptComment = {
           id: commentId,
           post_id: postId,
           nome_autor: user.name,
           funcao_autor: user.role,
           avatar_autor: user.avatarUrl || null,
           conteudo: commentText,
-        });
+        };
+        let { error } = await supabase.from('comentarios_postagem').insert(ptComment);
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          await supabase.from('post_comments').insert(ptComment);
+        }
       } catch (e) {
         console.warn('Erro ao adicionar comentário no Supabase:', e);
       }
@@ -1669,9 +1868,9 @@ export const AppChurchService = {
     if (supabase) {
       try {
         // Delete related comments first due to foreign key
-        await supabase.from('post_comments').delete().eq('post_id', postId);
+        await supabase.from('comentarios_postagem').delete().eq('post_id', postId);
         // Delete post
-        await supabase.from('feed_posts').delete().eq('id', postId);
+        await supabase.from('postagens_feed').delete().eq('id', postId);
       } catch (e) {
         console.warn('Erro ao excluir post no Supabase:', e);
       }
@@ -1689,11 +1888,21 @@ export const AppChurchService = {
   async getAnnouncements(churchId: string): Promise<ChurchAnnouncement[]> {
     if (supabase) {
       try {
-        const { data, error } = await supabase
-          .from('announcements')
+        let { data, error } = await supabase
+          .from('avisos')
           .select('*')
           .eq('igreja_id', churchId)
           .order('criado_em', { ascending: false });
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          const legRes = await supabase
+            .from('announcements')
+            .select('*')
+            .eq('igreja_id', churchId)
+            .order('criado_em', { ascending: false });
+          data = legRes.data;
+          error = legRes.error;
+        }
 
         if (!error && data) {
           return data.map((a: any) => ({
@@ -1741,7 +1950,7 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        await supabase.from('announcements').insert({
+        const payload = {
           id: newId,
           igreja_id: announcement.churchId,
           titulo: announcement.title,
@@ -1756,7 +1965,11 @@ export const AppChurchService = {
           categoria: announcement.category || 'Geral',
           importante: announcement.isImportant || false,
           quantidade_confirmados: 1,
-        });
+        };
+        let { error } = await supabase.from('avisos').insert(payload);
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          await supabase.from('announcements').insert(payload);
+        }
       } catch (e) {
         console.warn('Erro ao criar aviso no Supabase:', e);
       }
@@ -1792,10 +2005,16 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        await supabase
-          .from('announcements')
+        let { error } = await supabase
+          .from('avisos')
           .update({ quantidade_confirmados: newCount })
           .eq('id', announcementId);
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          await supabase
+            .from('announcements')
+            .update({ quantidade_confirmados: newCount })
+            .eq('id', announcementId);
+        }
       } catch (e) {
         console.warn('Erro ao atualizar RSVP no Supabase:', e);
       }
@@ -1805,8 +2024,8 @@ export const AppChurchService = {
   },
 
   /**
-   * Get Leadership Track Progress for a member, matching specific church steps (etapa_trilhos)
-   * and member's progress in member_track_steps
+   * Get Leadership Track Progress for a member, matching specific church steps (etapas_trilha)
+   * and member's progress in membro_etapas_trilha
    */
   async getLeadershipProgress(memberId: string, churchId?: string): Promise<LeadershipTrackProgress | null> {
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
@@ -1818,20 +2037,39 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        const { data: trackSummary } = await supabase
-          .from('leadership_tracks')
+        let { data: trackSummary, error: trkErr } = await supabase
+          .from('trilhas_lideranca')
           .select('*')
           .eq('membro_id', memberId)
           .maybeSingle();
 
-        const { data: stepsData, error: stepsError } = await supabase
-          .from('member_track_steps')
+        if (trkErr && (trkErr.code === '42P01' || trkErr.message?.includes('does not exist'))) {
+          const legTrk = await supabase
+            .from('leadership_tracks')
+            .select('*')
+            .eq('membro_id', memberId)
+            .maybeSingle();
+          trackSummary = legTrk.data;
+        }
+
+        let { data: stepsData, error: stepsError } = await supabase
+          .from('membro_etapas_trilha')
           .select('*')
           .eq('membro_id', memberId)
           .order('etapa_id', { ascending: true });
 
+        if (stepsError && (stepsError.code === '42P01' || stepsError.message?.includes('does not exist'))) {
+          const legSteps = await supabase
+            .from('member_track_steps')
+            .select('*')
+            .eq('membro_id', memberId)
+            .order('etapa_id', { ascending: true });
+          stepsData = legSteps.data;
+          stepsError = legSteps.error;
+        }
+
         if (!stepsError && stepsData) {
-          // Mapeia registros da tabela member_track_steps por etapa_id
+          // Mapeia registros da tabela membro_etapas_trilha por etapa_id
           const completedMap = new Map<string, any>();
           stepsData.forEach((st: any) => {
             completedMap.set(String(st.etapa_id), st);
@@ -1926,13 +2164,22 @@ export const AppChurchService = {
       }
     });
 
-    // 2. Se Supabase estiver conectado, busca registros reais de member_track_steps
+    // 2. Se Supabase estiver conectado, busca registros reais de membro_etapas_trilha
     if (supabase) {
       try {
-        const { data: stepRows, error } = await supabase
-          .from('member_track_steps')
+        let { data: stepRows, error } = await supabase
+          .from('membro_etapas_trilha')
           .select('membro_id, etapa_id, concluida, concluida_em')
           .in('membro_id', memberIds);
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          const legRows = await supabase
+            .from('member_track_steps')
+            .select('membro_id, etapa_id, concluida, concluida_em')
+            .in('membro_id', memberIds);
+          stepRows = legRows.data;
+          error = legRows.error;
+        }
 
         if (!error && stepRows) {
           stepRows.forEach((row: any) => {
@@ -1946,7 +2193,7 @@ export const AppChurchService = {
           });
         }
       } catch (err) {
-        console.warn('Erro ao carregar member_track_steps do Supabase:', err);
+        console.warn('Erro ao carregar etapas do trilho do Supabase:', err);
       }
     }
 
@@ -1954,7 +2201,7 @@ export const AppChurchService = {
   },
 
   /**
-   * Save Leadership Track Progress to Supabase (member_track_steps + leadership_tracks) + local cache
+   * Save Leadership Track Progress to Supabase (membro_etapas_trilha + trilhas_lideranca) + local cache
    */
   async saveLeadershipProgress(
     memberId: string,
@@ -1976,28 +2223,50 @@ export const AppChurchService = {
           resolvedChurchId.startsWith('c1000000') ||
           resolvedCellId.startsWith('e1000000')
         ) {
-          const { data: dbMem } = await supabase
-            .from('members')
-            .select('igreja_id, celula_id')
+          let dbMem: any = null;
+          const { data: ptMem } = await supabase
+            .from('membros')
+            .select('igreja_id, unidade_id, celula_id')
             .eq('id', memberId)
             .maybeSingle();
 
+          dbMem = ptMem;
+
+          if (!dbMem) {
+            const legMem = await supabase
+              .from('members')
+              .select('igreja_id, celula_id')
+              .eq('id', memberId)
+              .maybeSingle();
+            dbMem = legMem.data;
+          }
+
           if (dbMem) {
             if (dbMem.igreja_id) resolvedChurchId = dbMem.igreja_id;
-            if (dbMem.celula_id) resolvedCellId = dbMem.celula_id;
+            if (dbMem.unidade_id || dbMem.celula_id) resolvedCellId = dbMem.unidade_id || dbMem.celula_id;
           }
         }
 
-        // Se cellId ainda for nulo (ex: pastor sem célula), obtém uma célula válida da igreja para satisfazer a foreign key
+        // Se cellId ainda for nulo (ex: pastor sem célula), obtém uma unidade/célula válida da igreja para satisfazer a foreign key
         if (!resolvedCellId || resolvedCellId.startsWith('e1000000')) {
-          const { data: firstCell } = await supabase
-            .from('cells')
+          const { data: firstUnit } = await supabase
+            .from('unidades')
             .select('id')
             .eq('igreja_id', resolvedChurchId || '')
             .limit(1)
             .maybeSingle();
-          if (firstCell?.id) {
-            resolvedCellId = firstCell.id;
+          if (firstUnit?.id) {
+            resolvedCellId = firstUnit.id;
+          } else {
+            const { data: firstCell } = await supabase
+              .from('cells')
+              .select('id')
+              .eq('igreja_id', resolvedChurchId || '')
+              .limit(1)
+              .maybeSingle();
+            if (firstCell?.id) {
+              resolvedCellId = firstCell.id;
+            }
           }
         }
 
@@ -2008,12 +2277,12 @@ export const AppChurchService = {
         const totalCount = progress.steps.length || 6;
         const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-        // Upsert summary row into leadership_tracks with igreja_id and celula_id
-        const { error: trackErr } = await supabase.from('leadership_tracks').upsert(
+        // Upsert summary row into trilhas_lideranca with igreja_id and unidade_id
+        let { error: trackErr } = await supabase.from('trilhas_lideranca').upsert(
           {
             membro_id: memberId,
             igreja_id: resolvedChurchId,
-            celula_id: resolvedCellId,
+            unidade_id: resolvedCellId,
             etapa_atual_id: progress.currentStepId,
             quantidade_etapas_concluidas: completedCount,
             quantidade_total_etapas: totalCount,
@@ -2023,15 +2292,29 @@ export const AppChurchService = {
           },
           { onConflict: 'membro_id' }
         );
-        if (trackErr) {
-          console.error('Erro ao salvar leadership_tracks no Supabase:', trackErr);
+
+        if (trackErr && (trackErr.code === '42P01' || trackErr.message?.includes('does not exist') || trackErr.message?.includes('unidade_id'))) {
+          await supabase.from('leadership_tracks').upsert(
+            {
+              membro_id: memberId,
+              igreja_id: resolvedChurchId,
+              celula_id: resolvedCellId,
+              etapa_atual_id: progress.currentStepId,
+              quantidade_etapas_concluidas: completedCount,
+              quantidade_total_etapas: totalCount,
+              percentual: pct,
+              status: pct === 100 ? 'concluido' : 'em_andamento',
+              atualizado_em: new Date().toISOString(),
+            },
+            { onConflict: 'membro_id' }
+          );
         }
 
-        // Upsert step rows into member_track_steps with celula_id
+        // Upsert step rows into membro_etapas_trilha with unidade_id
         if (progress.steps && progress.steps.length > 0) {
-          const stepRows = progress.steps.map((st) => ({
+          const stepRowsPt = progress.steps.map((st) => ({
             membro_id: memberId,
-            celula_id: resolvedCellId,
+            unidade_id: resolvedCellId,
             etapa_id: typeof st.id === 'number' ? st.id : parseInt(String(st.id), 10) || 1,
             concluida: Boolean(st.completed),
             concluida_em: st.completed ? (st.completedAt || new Date().toLocaleDateString('pt-BR')) : null,
@@ -2040,11 +2323,24 @@ export const AppChurchService = {
             atualizado_em: new Date().toISOString(),
           }));
 
-          const { error: stepsErr } = await supabase
-            .from('member_track_steps')
-            .upsert(stepRows, { onConflict: 'membro_id,etapa_id' });
-          if (stepsErr) {
-            console.error('Erro ao salvar member_track_steps no Supabase:', stepsErr);
+          let { error: stepsErr } = await supabase
+            .from('membro_etapas_trilha')
+            .upsert(stepRowsPt, { onConflict: 'membro_id,etapa_id' });
+
+          if (stepsErr && (stepsErr.code === '42P01' || stepsErr.message?.includes('does not exist') || stepsErr.message?.includes('unidade_id') || stepsErr.code === 'PGRST204')) {
+            const stepRowsLeg = stepRowsPt.map((st) => ({
+              membro_id: st.membro_id,
+              celula_id: st.unidade_id,
+              etapa_id: st.etapa_id,
+              concluida: st.concluida,
+              concluida_em: st.concluida_em,
+              observacoes: st.observacoes,
+              validado_por: st.validado_por,
+              atualizado_em: st.atualizado_em,
+            }));
+            await supabase
+              .from('member_track_steps')
+              .upsert(stepRowsLeg, { onConflict: 'membro_id,etapa_id' });
           }
         }
       } catch (e) {
@@ -2095,44 +2391,51 @@ export const AppChurchService = {
     if (supabase) {
       try {
         // 1. Busca dados dos membros selecionados no Supabase
-        const { data: dbMembers, error: memErr } = await supabase
-          .from('members')
-          .select('id, celula_id, igreja_id')
+        let dbMembers: any[] | null = null;
+        const { data: ptMembers, error: memErr } = await supabase
+          .from('membros')
+          .select('id, unidade_id, celula_id, igreja_id')
           .in('id', memberIds);
 
-        if (memErr) {
-          console.warn('Aviso ao consultar membros no Supabase para batch:', memErr);
+        dbMembers = ptMembers;
+
+        if (memErr && (memErr.code === '42P01' || memErr.message?.includes('does not exist'))) {
+          const legMem = await supabase
+            .from('members')
+            .select('id, celula_id, igreja_id')
+            .in('id', memberIds);
+          dbMembers = legMem.data;
         }
 
-        const memberMap = new Map<string, { id: string; celula_id?: string | null; igreja_id?: string | null }>();
+        const memberMap = new Map<string, { id: string; celula_id?: string | null; unidade_id?: string | null; igreja_id?: string | null }>();
         if (dbMembers) {
           dbMembers.forEach((m: any) => memberMap.set(m.id, m));
         }
 
-        // 2. Busca células disponíveis para fallback caso algum membro não tenha célula vinculada
-        const { data: dbCells } = await supabase.from('cells').select('id, igreja_id');
+        // 2. Busca células/unidades disponíveis para fallback caso algum membro não tenha unidade vinculada
+        const { data: dbUnits } = await supabase.from('unidades').select('id, igreja_id');
         const fallbackCellMap = new Map<string, string>();
-        if (dbCells) {
-          dbCells.forEach((c: any) => {
+        if (dbUnits) {
+          dbUnits.forEach((c: any) => {
             if (c.igreja_id && !fallbackCellMap.has(c.igreja_id)) {
               fallbackCellMap.set(c.igreja_id, c.id);
             }
           });
         }
-        const defaultAnyCell = dbCells && dbCells.length > 0 ? dbCells[0].id : CELL_UUIDS.ADONAI;
+        const defaultAnyCell = dbUnits && dbUnits.length > 0 ? dbUnits[0].id : CELL_UUIDS.ADONAI;
 
-        // 3. Constrói as linhas para inserção/atualização na tabela member_track_steps
-        const stepRows = memberIds.map((mId) => {
+        // 3. Constrói as linhas para inserção/atualização na tabela membro_etapas_trilha (com unidade_id)
+        const stepRowsPt = memberIds.map((mId) => {
           const mem = memberMap.get(mId);
           const resolvedChurch = churchId || mem?.igreja_id || CHURCH_UUIDS.SOBRAL;
-          let resolvedCell = mem?.celula_id;
+          let resolvedCell = mem?.unidade_id || mem?.celula_id;
           if (!resolvedCell || resolvedCell.startsWith('e1000000')) {
             resolvedCell = fallbackCellMap.get(resolvedChurch) || defaultAnyCell;
           }
 
           return {
             membro_id: mId,
-            celula_id: resolvedCell,
+            unidade_id: resolvedCell,
             etapa_id: numericStepId,
             concluida: true,
             concluida_em: dateStr,
@@ -2141,41 +2444,65 @@ export const AppChurchService = {
           };
         });
 
-        // 4. Executa o upsert em lote na tabela member_track_steps
-        const { error: upsertErr } = await supabase
-          .from('member_track_steps')
-          .upsert(stepRows, { onConflict: 'membro_id,etapa_id' });
+        // 4. Executa o upsert em lote na tabela membro_etapas_trilha
+        let { error: upsertErr } = await supabase
+          .from('membro_etapas_trilha')
+          .upsert(stepRowsPt, { onConflict: 'membro_id,etapa_id' });
+
+        if (upsertErr && (upsertErr.code === '42P01' || upsertErr.message?.includes('does not exist') || upsertErr.message?.includes('unidade_id') || upsertErr.code === 'PGRST204')) {
+          const stepRowsLeg = stepRowsPt.map((st) => ({
+            membro_id: st.membro_id,
+            celula_id: st.unidade_id,
+            etapa_id: st.etapa_id,
+            concluida: st.concluida,
+            concluida_em: st.concluida_em,
+            validado_por: st.validado_por,
+            atualizado_em: st.atualizado_em,
+          }));
+          const legUpsert = await supabase
+            .from('member_track_steps')
+            .upsert(stepRowsLeg, { onConflict: 'membro_id,etapa_id' });
+          upsertErr = legUpsert.error;
+        }
 
         if (upsertErr) {
-          console.error('Falha ao gravar member_track_steps no Supabase:', upsertErr);
+          console.error('Falha ao gravar etapas do trilho no Supabase:', upsertErr);
           throw new Error(`Erro ao salvar no banco: ${upsertErr.message}`);
         }
 
-        // 5. Atualiza o resumo de progresso em leadership_tracks para cada membro
+        // 5. Atualiza o resumo de progresso em trilhas_lideranca para cada membro (com unidade_id)
         for (const mId of memberIds) {
           const mem = memberMap.get(mId);
           const resolvedChurch = churchId || mem?.igreja_id || CHURCH_UUIDS.SOBRAL;
-          let resolvedCell = mem?.celula_id;
+          let resolvedCell = mem?.unidade_id || mem?.celula_id;
           if (!resolvedCell || resolvedCell.startsWith('e1000000')) {
             resolvedCell = fallbackCellMap.get(resolvedChurch) || defaultAnyCell;
           }
 
-          const { data: allSteps } = await supabase
-            .from('member_track_steps')
+          let { data: allSteps } = await supabase
+            .from('membro_etapas_trilha')
             .select('etapa_id, concluida')
             .eq('membro_id', mId);
+
+          if (!allSteps) {
+            const legSteps = await supabase
+              .from('member_track_steps')
+              .select('etapa_id, concluida')
+              .eq('membro_id', mId);
+            allSteps = legSteps.data;
+          }
 
           const completedCount = allSteps ? allSteps.filter((s: any) => s.concluida).length : 1;
           const totalCount = 9;
           const pct = Math.round((completedCount / totalCount) * 100);
 
-          await supabase
-            .from('leadership_tracks')
+          let { error: sumErr } = await supabase
+            .from('trilhas_lideranca')
             .upsert(
               {
                 membro_id: mId,
                 igreja_id: resolvedChurch,
-                celula_id: resolvedCell,
+                unidade_id: resolvedCell,
                 etapa_atual_id: numericStepId + 1,
                 quantidade_etapas_concluidas: completedCount,
                 quantidade_total_etapas: totalCount,
@@ -2185,6 +2512,25 @@ export const AppChurchService = {
               },
               { onConflict: 'membro_id' }
             );
+
+          if (sumErr && (sumErr.code === '42P01' || sumErr.message?.includes('does not exist') || sumErr.message?.includes('unidade_id') || sumErr.code === 'PGRST204')) {
+            await supabase
+              .from('leadership_tracks')
+              .upsert(
+                {
+                  membro_id: mId,
+                  igreja_id: resolvedChurch,
+                  celula_id: resolvedCell,
+                  etapa_atual_id: numericStepId + 1,
+                  quantidade_etapas_concluidas: completedCount,
+                  quantidade_total_etapas: totalCount,
+                  percentual: pct,
+                  status: pct === 100 ? 'concluido' : 'em_andamento',
+                  atualizado_em: new Date().toISOString(),
+                },
+                { onConflict: 'membro_id' }
+              );
+          }
         }
       } catch (err: any) {
         console.error('Erro no batchCompleteStep Supabase:', err);
@@ -2242,17 +2588,28 @@ export const AppChurchService = {
   },
 
   /**
-   * Roles (Tabela de Funções - Roles)
+   * Roles (Tabela de Funções / Papéis)
    * Ordenado do menor para o maior nível de hierarquia
    */
   async getRoles(): Promise<Role[]> {
     if (supabase) {
       try {
-        const { data, error } = await supabase
-          .from('roles')
+        let { data, error } = await supabase
+          .from('papeis')
           .select('*')
           .order('nivel_hierarquia', { ascending: true })
           .order('nome', { ascending: true });
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          const legRes = await supabase
+            .from('roles')
+            .select('*')
+            .order('nivel_hierarquia', { ascending: true })
+            .order('nome', { ascending: true });
+          data = legRes.data;
+          error = legRes.error;
+        }
+
         if (!error && data && data.length > 0) {
           return data.map((r: any) => ({
             id: r.id,
@@ -2276,10 +2633,20 @@ export const AppChurchService = {
   async getPermissions(): Promise<Permission[]> {
     if (supabase) {
       try {
-        const { data, error } = await supabase
-          .from('permissions')
+        let { data, error } = await supabase
+          .from('permissoes')
           .select('*')
           .order('modulo');
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          const legRes = await supabase
+            .from('permissions')
+            .select('*')
+            .order('modulo');
+          data = legRes.data;
+          error = legRes.error;
+        }
+
         if (!error && data && data.length > 0) {
           return data.map((p: any) => ({
             id: p.id,
@@ -2302,12 +2669,21 @@ export const AppChurchService = {
   async getRolePermissions(roleId?: string): Promise<RolePermission[]> {
     if (supabase) {
       try {
-        let query = supabase.from('role_permissions').select('*');
-        if (roleId) query = query.eq('funcao_id', roleId);
-        const { data, error } = await query;
+        let query = supabase.from('papel_permissoes').select('*');
+        if (roleId) query = query.eq('papel_id', roleId);
+        let { data, error } = await query;
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          let legQuery = supabase.from('role_permissions').select('*');
+          if (roleId) legQuery = legQuery.eq('funcao_id', roleId);
+          const legRes = await legQuery;
+          data = legRes.data;
+          error = legRes.error;
+        }
+
         if (!error && data && data.length > 0) {
           return data.map((rp: any) => ({
-            roleId: rp.funcao_id,
+            roleId: rp.papel_id || rp.funcao_id,
             permissionId: rp.permissao_id,
           }));
         }
@@ -2322,26 +2698,36 @@ export const AppChurchService = {
   },
 
   /**
-   * Catálogo de Etapas do Trilho (etapa_trilhos) filtradas por id_igreja
+   * Catálogo de Etapas do Trilho (etapas_trilha) filtradas por igreja_id
    */
   async getTrackSteps(churchId?: string): Promise<TrackStep[]> {
     if (supabase) {
       try {
-        let query = supabase.from('etapa_trilhos').select('*');
+        let query = supabase.from('etapas_trilha').select('*');
         if (churchId) {
-          query = query.or(`id_igreja.eq.${churchId},id_igreja.is.null`);
+          query = query.or(`igreja_id.eq.${churchId},igreja_id.is.null`);
         }
-        const { data, error } = await query.order('numero_etapa', { ascending: true });
+        let { data, error } = await query.order('numero_etapa', { ascending: true });
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          let legQuery = supabase.from('etapa_trilhos').select('*');
+          if (churchId) {
+            legQuery = legQuery.or(`id_igreja.eq.${churchId},id_igreja.is.null`);
+          }
+          const legRes = await legQuery.order('numero_etapa', { ascending: true });
+          data = legRes.data;
+          error = legRes.error;
+        }
 
         if (!error && data && data.length > 0) {
           // Se tiver etapas específicas da igreja, prioriza elas; senão usa as globais
-          const churchSpecific = churchId ? data.filter((ts: any) => ts.id_igreja === churchId) : [];
+          const churchSpecific = churchId ? data.filter((ts: any) => (ts.igreja_id || ts.id_igreja) === churchId) : [];
           const sourceList = churchSpecific.length > 0 ? churchSpecific : data;
 
           return sourceList.map((ts: any) => ({
             id: ts.id,
-            id_igreja: ts.id_igreja,
-            churchId: ts.id_igreja,
+            id_igreja: ts.igreja_id || ts.id_igreja,
+            churchId: ts.igreja_id || ts.id_igreja,
             stepNumber: ts.numero_etapa,
             title: ts.titulo,
             description: ts.descricao || '',
@@ -2361,14 +2747,25 @@ export const AppChurchService = {
   async updateMemberRole(memberId: string, roleId: string, roleName: UserRole): Promise<void> {
     if (supabase) {
       try {
-        await supabase
-          .from('members')
+        let { error } = await supabase
+          .from('membros')
           .update({
-            funcao_id: roleId,
+            papel_id: roleId,
             funcao: roleName,
             atualizado_em: new Date().toISOString(),
           })
           .eq('id', memberId);
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.message?.includes('papel_id'))) {
+          await supabase
+            .from('members')
+            .update({
+              funcao_id: roleId,
+              funcao: roleName,
+              atualizado_em: new Date().toISOString(),
+            })
+            .eq('id', memberId);
+        }
       } catch (e) {
         console.warn('Erro ao atualizar role no Supabase:', e);
       }
@@ -2382,18 +2779,28 @@ export const AppChurchService = {
   },
 
   /**
-   * Atualiza a foto de avatar do usuário logado (members.url_avatar e cache de sessão)
+   * Atualiza a foto de avatar do usuário logado (membros.url_avatar e cache de sessão)
    */
   async updateUserAvatar(userId: string, avatarUrl: string): Promise<void> {
     if (supabase && userId && !userId.startsWith('admin-')) {
       try {
-        await supabase
-          .from('members')
+        let { error } = await supabase
+          .from('membros')
           .update({
             url_avatar: avatarUrl,
             atualizado_em: new Date().toISOString(),
           })
           .eq('id', userId);
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          await supabase
+            .from('members')
+            .update({
+              url_avatar: avatarUrl,
+              atualizado_em: new Date().toISOString(),
+            })
+            .eq('id', userId);
+        }
       } catch (e) {
         console.warn('Erro ao atualizar avatar no Supabase:', e);
       }

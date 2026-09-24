@@ -60,10 +60,21 @@ export async function POST(req: NextRequest) {
     // Garante que o slug seja único verificando congregações existentes no Supabase
     let finalSlug = baseSlug;
     try {
-      const { data: existingSlugs } = await supabase
-        .from('churches')
+      let existingSlugs: any[] | null = null;
+      const ptChurch = await supabase
+        .from('igrejas')
         .select('id, slug, nome')
         .or(`slug.eq.${baseSlug},slug.like.${baseSlug}-%`);
+
+      if (!ptChurch.error) {
+        existingSlugs = ptChurch.data;
+      } else {
+        const legacyChurch = await supabase
+          .from('churches')
+          .select('id, slug, nome')
+          .or(`slug.eq.${baseSlug},slug.like.${baseSlug}-%`);
+        existingSlugs = legacyChurch.data;
+      }
 
       if (existingSlugs && existingSlugs.length > 0) {
         const takenSlugs = new Set(existingSlugs.map((s) => s.slug));
@@ -72,19 +83,31 @@ export async function POST(req: NextRequest) {
           const orphanCandidate = existingSlugs.find((s) => s.slug === baseSlug);
           let isOrphan = false;
           if (orphanCandidate) {
-            const { count } = await supabase
-              .from('members')
+            let mCount = 0;
+            const ptCount = await supabase
+              .from('membros')
               .select('*', { count: 'exact', head: true })
               .eq('igreja_id', orphanCandidate.id);
-            if (count === 0) {
+            if (!ptCount.error && ptCount.count !== null) {
+              mCount = ptCount.count;
+            } else {
+              const legCount = await supabase
+                .from('members')
+                .select('*', { count: 'exact', head: true })
+                .eq('igreja_id', orphanCandidate.id);
+              mCount = legCount.count || 0;
+            }
+            if (mCount === 0) {
               isOrphan = true;
             }
           }
 
           if (isOrphan && orphanCandidate) {
             // Limpa registro órfão para reaproveitar o slug limpo
-            await supabase.from('nivel_tipo').delete().eq('igreja_id', orphanCandidate.id);
-            await supabase.from('churches').delete().eq('id', orphanCandidate.id);
+            try {
+              await supabase.from('nivel_tipo').delete().eq('igreja_id', orphanCandidate.id);
+              await supabase.from('igrejas').delete().eq('id', orphanCandidate.id);
+            } catch {}
             finalSlug = baseSlug;
           } else {
             let counter = 2;
@@ -125,7 +148,7 @@ export async function POST(req: NextRequest) {
       isPrivileged: true,
     };
 
-    // 1. Inserir Igreja em 'churches' (com fallback de CNPJ e proteção contra colisão de slug)
+    // 1. Inserir Igreja em 'igrejas' (ou fallback 'churches')
     const churchPayload: any = {
       id: churchId,
       nome: input.name.trim(),
@@ -138,21 +161,27 @@ export async function POST(req: NextRequest) {
       churchPayload.cnpj = cleanCnpj;
     }
 
-    let { error: churchErr } = await supabase.from('churches').insert([churchPayload]);
+    let churchTargetTable = 'igrejas';
+    let churchRes = await supabase.from('igrejas').insert([churchPayload]);
+    if (churchRes.error && (churchRes.error.code === '42P01' || churchRes.error.message?.includes('does not exist'))) {
+      churchTargetTable = 'churches';
+      churchRes = await supabase.from('churches').insert([churchPayload]);
+    }
+    let churchErr = churchRes.error;
 
     // Trata colisão de slug inesperada
-    if (churchErr && churchErr.message?.includes('churches_slug_key')) {
+    if (churchErr && (churchErr.message?.includes('slug_key') || churchErr.message?.includes('unique'))) {
       const randomSuffix = Math.random().toString(36).substring(2, 7);
       finalSlug = `${baseSlug}-${randomSuffix}`;
       churchPayload.slug = finalSlug;
       churchObj.slug = finalSlug;
-      const retrySlugRes = await supabase.from('churches').insert([churchPayload]);
+      const retrySlugRes = await supabase.from(churchTargetTable).insert([churchPayload]);
       churchErr = retrySlugRes.error;
     }
 
     if (churchErr && (churchErr.message?.includes('cnpj') || churchErr.message?.includes('column'))) {
       delete churchPayload.cnpj;
-      const retryRes = await supabase.from('churches').insert([churchPayload]);
+      const retryRes = await supabase.from(churchTargetTable).insert([churchPayload]);
       churchErr = retryRes.error;
     }
 
@@ -190,19 +219,30 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Resolver ID da Role de Pastor no Supabase para evitar violação de FK (members_funcao_id_fkey)
+    // 3. Resolver ID do Papel de Pastor no Supabase
     let resolvedRoleId: string | null = 'b2000000-0000-0000-0000-000000000001';
     try {
-      const { data: matchedRoles } = await supabase
-        .from('roles')
+      let matchedRoles: any[] | null = null;
+      const ptRoles = await supabase
+        .from('papeis')
         .select('id, nome, slug')
         .or('slug.eq.pastor,slug.eq.PASTOR,nome.ilike.%pastor%')
         .limit(1);
 
+      if (!ptRoles.error && ptRoles.data && ptRoles.data.length > 0) {
+        matchedRoles = ptRoles.data;
+      } else {
+        const legRoles = await supabase
+          .from('roles')
+          .select('id, nome, slug')
+          .or('slug.eq.pastor,slug.eq.PASTOR,nome.ilike.%pastor%')
+          .limit(1);
+        matchedRoles = legRoles.data;
+      }
+
       if (matchedRoles && matchedRoles.length > 0) {
         resolvedRoleId = matchedRoles[0].id;
       } else {
-        // Tenta registrar as roles padrão caso a tabela roles não tenha sido populada
         const defaultPastorRole = {
           id: 'b2000000-0000-0000-0000-000000000001',
           nome: 'Pastor',
@@ -211,14 +251,18 @@ export async function POST(req: NextRequest) {
           nivel_hierarquia: 10,
           cor_distintivo: '#0284c7',
         };
-        const { error: seedRoleErr } = await supabase.from('roles').insert([defaultPastorRole]);
-        if (!seedRoleErr) {
+        const ptRoleIns = await supabase.from('papeis').insert([defaultPastorRole]);
+        if (!ptRoleIns.error) {
           resolvedRoleId = defaultPastorRole.id;
         } else {
-          // Busca qualquer role existente no banco
-          const { data: anyRole } = await supabase.from('roles').select('id').limit(1);
-          if (anyRole && anyRole.length > 0) {
-            resolvedRoleId = anyRole[0].id;
+          const { error: seedRoleErr } = await supabase.from('roles').insert([defaultPastorRole]);
+          if (!seedRoleErr) {
+            resolvedRoleId = defaultPastorRole.id;
+          } else {
+            const { data: anyRole } = await supabase.from('papeis').select('id').limit(1);
+            if (anyRole && anyRole.length > 0) {
+              resolvedRoleId = anyRole[0].id;
+            }
           }
         }
       }
@@ -228,14 +272,12 @@ export async function POST(req: NextRequest) {
 
     pastorProfile.roleId = resolvedRoleId || 'b2000000-0000-0000-0000-000000000001';
 
-    // 4. Cadastrar Pastor Titular com login e senha na tabela 'members'
-    // Conforme especificação: celula_id fica pendente (null) até o cadastro da primeira célula da igreja.
-    // Tabelas 'cells', 'unidades' e 'celulas' NÃO são populadas automaticamente aqui.
-    const pastorMemberPayload: any = {
+    // 4. Cadastrar Pastor Titular na tabela 'membros' (ou fallback 'members')
+    const pastorMemberPt: any = {
       id: pastorId,
       igreja_id: churchId,
-      celula_id: null,
-      funcao_id: resolvedRoleId,
+      unidade_id: null,
+      papel_id: resolvedRoleId,
       funcao: 'Pastor',
       nome: input.pastorName.trim(),
       login: cleanPastorLogin,
@@ -250,14 +292,33 @@ export async function POST(req: NextRequest) {
       observacoes: 'Pastor Titular cadastrado no registro da igreja (pendente de vinculação à 1ª célula)',
     };
 
-    let { error: pastorErr } = await supabase.from('members').insert([pastorMemberPayload]);
+    let pastorIns = await supabase.from('membros').insert([pastorMemberPt]);
+    if (pastorIns.error && (pastorIns.error.code === '42P01' || pastorIns.error.message?.includes('does not exist') || pastorIns.error.message?.includes('papel_id') || pastorIns.error.message?.includes('unidade_id'))) {
+      const pastorMemberLeg: any = {
+        ...pastorMemberPt,
+        celula_id: null,
+        funcao_id: resolvedRoleId,
+      };
+      delete pastorMemberLeg.unidade_id;
+      delete pastorMemberLeg.papel_id;
+      pastorIns = await supabase.from('members').insert([pastorMemberLeg]);
+    }
+    let pastorErr = pastorIns.error;
     let seedCellCreated: CellGroup | undefined = undefined;
 
-    // Se violou FK em funcao_id, tenta auto-recuperação buscando a role real do banco
-    if (pastorErr && (pastorErr.message?.includes('members_funcao_id_fkey') || pastorErr.message?.includes('funcao_id'))) {
-      console.warn('Auto-recuperação: erro de FK em funcao_id. Buscando roles válidas no banco...');
+    // Se violou FK em funcao/papel_id, tenta auto-recuperação buscando a role real do banco
+    if (pastorErr && (pastorErr.message?.includes('papel_id') || pastorErr.message?.includes('funcao_id'))) {
+      console.warn('Auto-recuperação: erro de FK em papel/funcao_id. Buscando roles válidas no banco...');
       try {
-        const { data: validRoles } = await supabase.from('roles').select('id, nome, slug');
+        let validRoles: any[] | null = null;
+        const ptRoles = await supabase.from('papeis').select('id, nome, slug');
+        if (!ptRoles.error && ptRoles.data) {
+          validRoles = ptRoles.data;
+        } else {
+          const legRoles = await supabase.from('roles').select('id, nome, slug');
+          validRoles = legRoles.data;
+        }
+
         if (validRoles && validRoles.length > 0) {
           const matched =
             validRoles.find(
@@ -265,13 +326,13 @@ export async function POST(req: NextRequest) {
                 r.slug?.toLowerCase().includes('pastor') ||
                 r.nome?.toLowerCase().includes('pastor')
             ) || validRoles[0];
-          pastorMemberPayload.funcao_id = matched.id;
+          pastorMemberPt.papel_id = matched.id;
           pastorProfile.roleId = matched.id;
-          const retryRes = await supabase.from('members').insert([pastorMemberPayload]);
+          const retryRes = await supabase.from('membros').insert([pastorMemberPt]);
           pastorErr = retryRes.error;
         }
       } catch (fkRecoveryErr) {
-        console.warn('Falha na recuperação de FK de funcao_id:', fkRecoveryErr);
+        console.warn('Falha na recuperação de FK de papel_id:', fkRecoveryErr);
       }
     }
 
@@ -325,15 +386,23 @@ export async function POST(req: NextRequest) {
           },
         ]);
 
-        // 4. Atribui a celula_id ao pastor e tenta novamente
-        pastorMemberPayload.celula_id = seedCellId;
-        pastorProfile.currentCellId = seedCellId;
-        const retryPastor = await supabase.from('members').insert([pastorMemberPayload]);
-        pastorErr = retryPastor.error;
+        // 4. Atribui a unidade_id / celula_id ao pastor e tenta novamente
+        pastorMemberPt.unidade_id = seedUnitId;
+        pastorProfile.currentCellId = seedUnitId;
+        const retryPastor = await supabase.from('membros').insert([pastorMemberPt]);
+        if (retryPastor.error) {
+          const legPayload: any = { ...pastorMemberPt, celula_id: seedCellId, funcao_id: resolvedRoleId };
+          delete legPayload.unidade_id;
+          delete legPayload.papel_id;
+          const retryLeg = await supabase.from('members').insert([legPayload]);
+          pastorErr = retryLeg.error;
+        } else {
+          pastorErr = null;
+        }
 
         if (!pastorErr) {
           seedCellCreated = {
-            id: seedCellId,
+            id: seedUnitId,
             churchId,
             name: 'Célula Betel',
             leaderName: input.pastorName.trim(),
@@ -352,10 +421,11 @@ export async function POST(req: NextRequest) {
     if (pastorErr) {
       // Rollback para não deixar congregação órfã travando o slug ou poluindo o banco
       await supabase.from('nivel_tipo').delete().eq('igreja_id', churchId);
+      await supabase.from('igrejas').delete().eq('id', churchId);
       await supabase.from('churches').delete().eq('id', churchId);
 
       return NextResponse.json(
-        { error: `Falha ao cadastrar pastor titular na tabela members: ${pastorErr.message}` },
+        { error: `Falha ao cadastrar pastor titular na tabela de membros: ${pastorErr.message}` },
         { status: 500 }
       );
     }

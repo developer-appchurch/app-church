@@ -208,9 +208,9 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
     }
   };
 
-  // Desvincular Membro (Retornar ao Pool Geral)
+  // Desvincular Membro (Retornar ao Cadastro Geral)
   const handleUnassignMember = async (member: CellMember & { isUnlinked: boolean; cellName?: string }) => {
-    if (!confirm(`Deseja desvincular "${member.name}" da célula e movê-lo de volta ao Pool Geral da igreja?`)) {
+    if (!confirm(`Deseja desvincular "${member.name}" da célula e movê-lo para o cadastro geral da congregação?`)) {
       return;
     }
 
@@ -220,7 +220,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       setMembers((prev) =>
         prev.map((m) =>
           m.id === member.id
-            ? { ...m, isUnlinked: true, cellId: '', cellName: 'Pool Geral (Sem Célula)' }
+            ? { ...m, isUnlinked: true, cellId: '', cellName: 'Sem Célula (Geral)' }
             : m
         )
       );
@@ -231,7 +231,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         linked: Math.max(0, prev.linked - 1),
       }));
 
-      setActionSuccessBanner(`"${member.name}" foi movido para o Pool Geral da igreja.`);
+      setActionSuccessBanner(`"${member.name}" agora está no cadastro geral (sem vínculo a célula).`);
     } catch (err: any) {
       console.error('Erro ao desvincular membro:', err);
       setErrorMessage(err?.message || 'Falha ao desvincular membro.');
@@ -270,7 +270,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       const newMemberItem = {
         ...created,
         isUnlinked: !destinationCellId,
-        cellName: cellObj ? cellObj.name : 'Pool Geral (Sem Célula)',
+        cellName: cellObj ? cellObj.name : 'Sem Célula (Geral)',
       };
 
       setMembers((prev) => [newMemberItem, ...prev]);
@@ -283,7 +283,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       setActionSuccessBanner(
         destinationCellId
           ? `Membro "${created.name}" cadastrado e vinculado à "${cellObj?.name}"!`
-          : `Membro "${created.name}" adicionado com sucesso ao Pool Geral da igreja!`
+          : `Membro "${created.name}" adicionado com sucesso ao cadastro geral da igreja!`
       );
 
       // Limpa formulário
@@ -301,295 +301,298 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
 
   if (isLoading) {
     return (
-      <div className="min-h-[500px] flex flex-col items-center justify-center p-8 text-slate-500">
+      <div className="bg-[#e9eff6] min-h-screen font-sans w-full flex flex-col items-center justify-center p-8 text-slate-500">
         <Loader2 size={36} className="animate-spin text-[#052447] mb-3" />
-        <p className="text-sm font-semibold">Carregando Pool Geral de Membros...</p>
+        <p className="text-sm font-semibold text-slate-700">Carregando Nossos Membros...</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Header com Contexto */}
-      <div className="bg-[#04213d] text-white rounded-2xl p-5 sm:p-6 shadow-md border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
-            <Users size={24} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-sky-300">
-                Banco de Pessoas
-              </span>
-              <span className="text-slate-400">•</span>
-              <span className="text-xs text-slate-300 font-medium">{user.churchName}</span>
+    <div id="screen-member-pool" className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full overflow-x-hidden">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 pb-4 space-y-4">
+        {/* Header com Contexto */}
+        <div className="bg-[#04213d] text-white rounded-2xl p-4 sm:p-6 shadow-md border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
+              <Users size={24} />
             </div>
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Pool Geral de Membros
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
-              Gerencie membros da congregação e vincule pessoas do pool diretamente às células
-            </p>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-sky-300">
+                  Banco de Pessoas
+                </span>
+                <span className="text-slate-400">•</span>
+                <span className="text-[11px] sm:text-xs text-slate-300 font-medium">{user.churchName}</span>
+              </div>
+              <h1 className="text-lg sm:text-2xl font-black text-white tracking-tight">
+                Nossos Membros
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
+                Gerencie todos os membros da congregação e organize pessoas vinculadas às células ou no cadastro geral
+              </p>
+            </div>
           </div>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setIsNewMemberModalOpen(true)}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm cursor-pointer"
-          >
-            <UserPlus size={16} />
-            <span>+ Novo Membro</span>
-          </button>
-          {onNavigateUnits && (
+          <div className="flex flex-wrap items-center gap-2 self-stretch sm:self-auto">
             <button
               type="button"
-              onClick={onNavigateUnits}
-              className="px-3.5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer border border-white/10"
+              onClick={() => setIsNewMemberModalOpen(true)}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 shadow-xs cursor-pointer flex-1 sm:flex-initial"
             >
-              <Building2 size={15} />
-              <span>Níveis Organizacionais</span>
+              <UserPlus size={16} />
+              <span>+ Novo Membro</span>
             </button>
-          )}
-        </div>
-      </div>
-
-      {/* Cards de Métricas do Pool */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500">Total de Membros</p>
-            <p className="text-2xl font-black text-slate-900 mt-0.5">{counts.total}</p>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold">
-            <Users size={20} />
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-4 border border-amber-200 bg-amber-50/30 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-amber-800">No Pool Geral (Sem Célula)</p>
-            <p className="text-2xl font-black text-amber-900 mt-0.5">{counts.unlinked}</p>
-            <span className="text-[10px] text-amber-700">Disponíveis para vínculo</span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-            <LinkIcon size={18} />
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-4 border border-emerald-200 bg-emerald-50/30 shadow-xs flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-emerald-800">Vinculados em Células</p>
-            <p className="text-2xl font-black text-emerald-900 mt-0.5">{counts.linked}</p>
-            <span className="text-[10px] text-emerald-700">Ativos em grupos pequenos</span>
-          </div>
-          <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-            <UserCheck size={20} />
-          </div>
-        </div>
-      </div>
-
-      {/* Mensagens de Sucesso ou Erro */}
-      {actionSuccessBanner && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between text-emerald-900 text-xs">
-          <div className="flex items-center gap-2.5">
-            <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
-            <span className="font-semibold">{actionSuccessBanner}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setActionSuccessBanner('')}
-            className="text-emerald-700 hover:text-emerald-900 font-bold ml-3 cursor-pointer"
-          >
-            Dispensar
-          </button>
-        </div>
-      )}
-
-      {errorMessage && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-2xl text-red-700 text-xs flex items-center gap-2">
-          <AlertCircle size={18} className="shrink-0" />
-          <span>{errorMessage}</span>
-        </div>
-      )}
-
-      {/* Controle de Filtros e Busca */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-        {/* Abas */}
-        <div className="flex items-center gap-1.5 w-full sm:w-auto bg-slate-100 p-1 rounded-xl">
-          <button
-            type="button"
-            onClick={() => setActiveTab('unlinked')}
-            className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'unlinked'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <span>Pool Geral</span>
-            <span className="px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold">
-              {counts.unlinked}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('all')}
-            className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'all'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <span>Todos os Membros</span>
-            <span className="px-1.5 py-0.2 rounded-md bg-slate-200 text-slate-700 text-[10px] font-bold">
-              {counts.total}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('linked')}
-            className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
-              activeTab === 'linked'
-                ? 'bg-white text-slate-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <span>Vinculados</span>
-            <span className="px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-              {counts.linked}
-            </span>
-          </button>
-        </div>
-
-        {/* Busca */}
-        <div className="relative w-full sm:w-80">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar por nome, telefone, bairro ou célula..."
-            className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800"
-          />
-        </div>
-      </div>
-
-      {/* Lista de Membros */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        {filteredMembers.length === 0 ? (
-          <div className="py-16 text-center text-slate-400 text-xs px-4">
-            <Users size={36} className="mx-auto text-slate-300 mb-2" />
-            <p className="font-semibold text-slate-600">
-              {activeTab === 'unlinked'
-                ? 'Nenhum membro no Pool Geral no momento.'
-                : 'Nenhum membro encontrado com os filtros atuais.'}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
-              {activeTab === 'unlinked'
-                ? 'Todos os membros da congregação já estão vinculados a células ativas.'
-                : 'Clique em "+ Novo Membro" para cadastrar uma nova pessoa.'}
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {filteredMembers.map((member) => (
-              <div
-                key={member.id}
-                className="p-4 sm:p-4.5 hover:bg-slate-50/80 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+            {onNavigateUnits && (
+              <button
+                type="button"
+                onClick={onNavigateUnits}
+                className="px-3.5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer border border-white/10 flex-1 sm:flex-initial"
               >
-                <div className="flex items-start sm:items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-slate-700 shrink-0 text-sm overflow-hidden">
-                    {member.avatarUrl ? (
-                      <Image
-                        src={member.avatarUrl}
-                        alt={member.name}
-                        width={40}
-                        height={40}
-                        unoptimized
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      member.name.charAt(0)
-                    )}
-                  </div>
+                <Building2 size={15} />
+                <span>Níveis Organizacionais</span>
+              </button>
+            )}
+          </div>
+        </div>
 
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                        {member.name}
-                      </h3>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                        {member.role || 'Membro'}
-                      </span>
-                      {member.isUnlinked ? (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
-                          Pool Geral (Sem Célula)
-                        </span>
-                      ) : (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                          {member.cellName}
-                        </span>
-                      )}
-                    </div>
+        {/* Cards de Métricas */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="bg-white rounded-xl sm:rounded-2xl p-4 border border-slate-200/90 shadow-2xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500">Total de Membros</p>
+              <p className="text-2xl font-black text-slate-900 mt-0.5">{counts.total}</p>
+              <span className="text-[10px] text-slate-400">Congregação total</span>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center font-bold">
+              <Users size={20} />
+            </div>
+          </div>
 
-                    <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 mt-1">
-                      {member.phone && (
-                        <span className="flex items-center gap-1">
-                          <Phone size={11} className="text-slate-400" />
-                          {member.phone}
-                        </span>
-                      )}
-                      {member.email && (
-                        <span className="flex items-center gap-1">
-                          <Mail size={11} className="text-slate-400" />
-                          {member.email}
-                        </span>
-                      )}
-                      {member.neighborhood && (
-                        <span className="flex items-center gap-1">
-                          <MapPin size={11} className="text-slate-400" />
-                          {member.neighborhood}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
+          <div className="bg-white rounded-xl sm:rounded-2xl p-4 border border-amber-200 bg-amber-50/40 shadow-2xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-amber-800">Sem Célula (Geral)</p>
+              <p className="text-2xl font-black text-amber-900 mt-0.5">{counts.unlinked}</p>
+              <span className="text-[10px] text-amber-700 font-medium">Disponíveis para vínculo</span>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
+              <LinkIcon size={18} />
+            </div>
+          </div>
 
-                {/* Ações */}
-                <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                  {member.isUnlinked ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedMemberToAssign(member);
-                        if (availableCells.length > 0 && !targetCellId) {
-                          setTargetCellId(availableCells[0].id);
-                        }
-                      }}
-                      className="px-3.5 py-1.5 bg-[#052447] hover:bg-[#073366] text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                    >
-                      <LinkIcon size={13} />
-                      <span>Vincular à Célula</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleUnassignMember(member)}
-                      className="px-3 py-1.5 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 hover:border-red-200"
-                      title="Mover de volta para o Pool Geral"
-                    >
-                      <Unlink size={13} />
-                      <span>Desvincular</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+          <div className="bg-white rounded-xl sm:rounded-2xl p-4 border border-emerald-200 bg-emerald-50/40 shadow-2xs flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-emerald-800">Vinculados em Células</p>
+              <p className="text-2xl font-black text-emerald-900 mt-0.5">{counts.linked}</p>
+              <span className="text-[10px] text-emerald-700 font-medium">Ativos em grupos pequenos</span>
+            </div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
+              <UserCheck size={20} />
+            </div>
+          </div>
+        </div>
+
+        {/* Mensagens de Sucesso ou Erro */}
+        {actionSuccessBanner && (
+          <div className="p-3.5 sm:p-4 bg-emerald-50 border border-emerald-200 rounded-xl sm:rounded-2xl flex items-center justify-between text-emerald-900 text-xs">
+            <div className="flex items-center gap-2.5">
+              <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+              <span className="font-semibold">{actionSuccessBanner}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActionSuccessBanner('')}
+              className="text-emerald-700 hover:text-emerald-900 font-bold ml-3 cursor-pointer"
+            >
+              Dispensar
+            </button>
           </div>
         )}
+
+        {errorMessage && (
+          <div className="p-3.5 sm:p-4 bg-red-50 border border-red-200 rounded-xl sm:rounded-2xl text-red-700 text-xs flex items-center gap-2">
+            <AlertCircle size={18} className="shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Controle de Filtros e Busca */}
+        <div className="bg-white rounded-xl sm:rounded-2xl p-3.5 sm:p-4 border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          {/* Abas */}
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={() => setActiveTab('all')}
+              className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTab === 'all'
+                  ? 'bg-white text-[#04213d] shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Todos</span>
+              <span className="px-1.5 py-0.2 rounded-md bg-slate-200 text-slate-700 text-[10px] font-bold">
+                {counts.total}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('unlinked')}
+              className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTab === 'unlinked'
+                  ? 'bg-white text-amber-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Sem Célula</span>
+              <span className="px-1.5 py-0.2 rounded-md bg-amber-100 text-amber-800 text-[10px] font-bold">
+                {counts.unlinked}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('linked')}
+              className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeTab === 'linked'
+                  ? 'bg-white text-emerald-950 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Vinculados</span>
+              <span className="px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                {counts.linked}
+              </span>
+            </button>
+          </div>
+
+          {/* Busca */}
+          <div className="relative w-full sm:w-80">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar por nome, telefone, bairro ou célula..."
+              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800"
+            />
+          </div>
+        </div>
+
+        {/* Lista de Membros */}
+        <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/90 shadow-2xs overflow-hidden">
+          {filteredMembers.length === 0 ? (
+            <div className="py-16 text-center text-slate-400 text-xs px-4">
+              <Users size={36} className="mx-auto text-slate-300 mb-2" />
+              <p className="font-semibold text-slate-600">
+                {activeTab === 'unlinked'
+                  ? 'Nenhum membro sem célula no momento.'
+                  : 'Nenhum membro encontrado com os filtros atuais.'}
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
+                {activeTab === 'unlinked'
+                  ? 'Todos os membros da congregação já estão vinculados a células ativas.'
+                  : 'Clique em "+ Novo Membro" para cadastrar uma nova pessoa.'}
+              </p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {filteredMembers.map((member) => (
+                <div
+                  key={member.id}
+                  className="p-3.5 sm:p-4 hover:bg-slate-50/80 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-start sm:items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-slate-700 shrink-0 text-sm overflow-hidden">
+                      {member.avatarUrl ? (
+                        <Image
+                          src={member.avatarUrl}
+                          alt={member.name}
+                          width={40}
+                          height={40}
+                          unoptimized
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        member.name.charAt(0)
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-xs sm:text-sm font-bold text-slate-900">
+                          {member.name}
+                        </h3>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
+                          {member.role || 'Membro'}
+                        </span>
+                        {member.isUnlinked ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                            Sem Célula
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            {member.cellName}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 mt-1">
+                        {member.phone && (
+                          <span className="flex items-center gap-1">
+                            <Phone size={11} className="text-slate-400" />
+                            {member.phone}
+                          </span>
+                        )}
+                        {member.email && (
+                          <span className="flex items-center gap-1">
+                            <Mail size={11} className="text-slate-400" />
+                            {member.email}
+                          </span>
+                        )}
+                        {member.neighborhood && (
+                          <span className="flex items-center gap-1">
+                            <MapPin size={11} className="text-slate-400" />
+                            {member.neighborhood}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ações */}
+                  <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                    {member.isUnlinked ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedMemberToAssign(member);
+                          if (availableCells.length > 0 && !targetCellId) {
+                            setTargetCellId(availableCells[0].id);
+                          }
+                        }}
+                        className="px-3.5 py-1.5 bg-[#052447] hover:bg-[#073366] text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <LinkIcon size={13} />
+                        <span>Vincular à Célula</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleUnassignMember(member)}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 hover:border-red-200"
+                        title="Desvincular e mover para membros gerais"
+                      >
+                        <Unlink size={13} />
+                        <span>Desvincular</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Modal: Vincular Membro à Célula */}
@@ -778,7 +781,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                 </div>
               </div>
 
-              {/* Escolha do Destino: Pool Geral vs Célula */}
+              {/* Escolha do Destino: Sem Célula vs Célula */}
               <div className="pt-2 border-t border-slate-100">
                 <label className="block text-xs font-bold text-slate-700 mb-2">Destino do Membro</label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -792,10 +795,10 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                   >
                     <p className="font-bold flex items-center gap-1.5">
                       <Users size={14} className="text-amber-700" />
-                      <span>Pool Geral da Igreja</span>
+                      <span>Cadastro Geral (Sem Célula)</span>
                     </p>
                     <p className="text-[11px] text-slate-500 font-normal mt-0.5">
-                      Fica disponível no banco geral para vínculo posterior por líderes.
+                      Fica disponível no banco geral para vínculo posterior pelos líderes.
                     </p>
                   </div>
 

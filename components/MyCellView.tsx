@@ -947,15 +947,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     {/* Função */}
                     <div className="w-20 sm:w-36 md:w-44 text-center sm:text-left shrink-0">
                       <span
-                        className={`text-[11px] sm:text-sm font-medium leading-tight block truncate ${
-                          member.role === 'Líder em Treinamento'
-                            ? 'text-[#0284c7] font-bold'
-                            : member.role === 'Líder de Setor'
-                            ? 'text-[#052447] font-bold'
-                            : member.role === 'Líder de Célula'
-                            ? 'text-purple-800 font-bold'
-                            : 'text-[#0a2540]'
-                        }`}
+                        className="text-[11px] sm:text-sm font-medium leading-tight block truncate text-[#0a2540]"
                         title={member.role}
                       >
                         <span className="hidden sm:inline">{member.role}</span>

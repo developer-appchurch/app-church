@@ -84,14 +84,35 @@ export async function GET(req: NextRequest) {
     // 4. Buscar líderes vinculados em unidade_lideres
     const { data: lideresData } = await supabase
       .from('unidade_lideres')
-      .select('unidade_id, pessoa_id, papel, members(id, nome, funcao, url_avatar, telefone)')
+      .select('unidade_id, pessoa_id, papel')
       .in('unidade_id', unitIds)
       .eq('ativo', true);
+
+    const leaderPessoaIds = (lideresData || []).map((l: any) => l.pessoa_id);
+    let leaderMemberMap = new Map<string, any>();
+    if (leaderPessoaIds.length > 0) {
+      let ptMembersRes = await supabase
+        .from('membros')
+        .select('id, nome, funcao, url_avatar, telefone')
+        .in('id', leaderPessoaIds);
+
+      if (ptMembersRes.error || !ptMembersRes.data || ptMembersRes.data.length === 0) {
+        const legMembersRes = await supabase
+          .from('members')
+          .select('id, nome, funcao, url_avatar, telefone')
+          .in('id', leaderPessoaIds);
+        if (legMembersRes.data) {
+          legMembersRes.data.forEach((m: any) => leaderMemberMap.set(m.id, m));
+        }
+      } else {
+        ptMembersRes.data.forEach((m: any) => leaderMemberMap.set(m.id, m));
+      }
+    }
 
     const leadersMap = new Map<string, any[]>();
     (lideresData || []).forEach((l: any) => {
       const existing = leadersMap.get(l.unidade_id) || [];
-      const member = l.members;
+      const member = leaderMemberMap.get(l.pessoa_id);
       existing.push({
         id: l.pessoa_id,
         name: member?.nome || 'Líder',
@@ -103,18 +124,31 @@ export async function GET(req: NextRequest) {
     });
 
     // 5. Contagem de membros por célula
-    const { data: memberCounts } = await supabase
-      .from('members')
-      .select('celula_id')
+    let countMap = new Map<string, number>();
+    let { data: memberCounts, error: memCountErr } = await supabase
+      .from('membros')
+      .select('unidade_id')
       .eq('igreja_id', churchId)
-      .not('celula_id', 'is', null);
+      .not('unidade_id', 'is', null);
 
-    const countMap = new Map<string, number>();
-    (memberCounts || []).forEach((m: any) => {
-      if (m.celula_id) {
-        countMap.set(m.celula_id, (countMap.get(m.celula_id) || 0) + 1);
-      }
-    });
+    if (memCountErr || !memberCounts) {
+      const { data: legMemberCounts } = await supabase
+        .from('members')
+        .select('celula_id')
+        .eq('igreja_id', churchId)
+        .not('celula_id', 'is', null);
+      (legMemberCounts || []).forEach((m: any) => {
+        if (m.celula_id) {
+          countMap.set(m.celula_id, (countMap.get(m.celula_id) || 0) + 1);
+        }
+      });
+    } else {
+      memberCounts.forEach((m: any) => {
+        if (m.unidade_id) {
+          countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
+        }
+      });
+    }
 
     // 6. Formata retorno
     const formattedUnits: OrganizationalUnit[] = unitsData.map((u: any) => {
@@ -282,18 +316,22 @@ export async function POST(req: NextRequest) {
         if (lMember?.nome) firstLeaderName = lMember.nome;
       }
 
-      // Inserir na tabela cells para views do feed, relatórios e reuniões
-      const legacyCellPayload = {
-        id: unitId,
-        igreja_id: input.churchId,
-        nome: input.name.trim(),
-        nome_lider: firstLeaderName,
-        nome_setor: parentName,
-        endereco: input.address?.trim() || `${input.neighborhood?.trim() || 'Centro'}`,
-        dia_reuniao: input.meetingDay?.trim() || 'Quarta-feira',
-        horario_reuniao: input.meetingTime?.trim() || '19:30',
-      };
-      await supabase.from('cells').insert([legacyCellPayload]);
+      // Inserir opcionalmente na tabela legada cells caso exista
+      try {
+        const legacyCellPayload = {
+          id: unitId,
+          igreja_id: input.churchId,
+          nome: input.name.trim(),
+          nome_lider: firstLeaderName,
+          nome_setor: parentName,
+          endereco: input.address?.trim() || `${input.neighborhood?.trim() || 'Centro'}`,
+          dia_reuniao: input.meetingDay?.trim() || 'Quarta-feira',
+          horario_reuniao: input.meetingTime?.trim() || '19:30',
+        };
+        await supabase.from('cells').insert([legacyCellPayload]);
+      } catch {
+        // Ignora caso a view 'cells' tenha sido dropada
+      }
     }
 
     // 5. Inserir múltiplos líderes na tabela unidade_lideres
@@ -311,9 +349,13 @@ export async function POST(req: NextRequest) {
         console.warn('Aviso ao inserir unidade_lideres:', leaderErr.message);
       }
 
-      // Se for célula, atualiza celula_id dos líderes que não possuíam célula vinculada
+      // Se for célula, atualiza unidade_id dos líderes que não possuíam célula vinculada
       if (isLeafLevel) {
         for (const mId of input.leaderMemberIds) {
+          await supabase
+            .from('membros')
+            .update({ unidade_id: unitId })
+            .eq('id', mId);
           await supabase
             .from('members')
             .update({ celula_id: unitId })
@@ -322,10 +364,20 @@ export async function POST(req: NextRequest) {
       }
 
       // Buscar dados para retorno
-      const { data: membersInfo } = await supabase
-        .from('members')
+      let membersInfo: any[] | null = null;
+      const ptMemInfo = await supabase
+        .from('membros')
         .select('id, nome, funcao, url_avatar, telefone')
         .in('id', input.leaderMemberIds);
+      if (!ptMemInfo.error && ptMemInfo.data && ptMemInfo.data.length > 0) {
+        membersInfo = ptMemInfo.data;
+      } else {
+        const legMemInfo = await supabase
+          .from('members')
+          .select('id, nome, funcao, url_avatar, telefone')
+          .in('id', input.leaderMemberIds);
+        membersInfo = legMemInfo.data;
+      }
 
       (membersInfo || []).forEach((m: any) => {
         leadersAssigned.push({
@@ -436,9 +488,13 @@ export async function PATCH(req: NextRequest) {
         console.error('Erro ao inserir novos líderes em unidade_lideres:', insertErr);
       }
 
-      // Se for folha (célula), associa o celula_id aos líderes
+      // Se for folha (célula), associa o unidade_id e celula_id aos líderes
       if (isLeafLevel) {
         for (const mId of safeLeaderIds) {
+          await supabase
+            .from('membros')
+            .update({ unidade_id: unitId })
+            .eq('id', mId);
           await supabase
             .from('members')
             .update({ celula_id: unitId })
@@ -452,10 +508,21 @@ export async function PATCH(req: NextRequest) {
     let leaderNamesText = 'Sem Líder';
 
     if (safeLeaderIds.length > 0) {
-      const { data: membersInfo } = await supabase
-        .from('members')
+      let membersInfo: any[] | null = null;
+      const ptMemInfo = await supabase
+        .from('membros')
         .select('id, nome, funcao, url_avatar, telefone')
         .in('id', safeLeaderIds);
+
+      if (!ptMemInfo.error && ptMemInfo.data && ptMemInfo.data.length > 0) {
+        membersInfo = ptMemInfo.data;
+      } else {
+        const legMemInfo = await supabase
+          .from('members')
+          .select('id, nome, funcao, url_avatar, telefone')
+          .in('id', safeLeaderIds);
+        membersInfo = legMemInfo.data;
+      }
 
       if (membersInfo && membersInfo.length > 0) {
         leadersAssigned = membersInfo.map((m: any) => ({
@@ -469,12 +536,16 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    // 6. Atualizar nome_lider na tabela legada cells se for folha
+    // 6. Atualizar opcionalmente nome_lider na tabela legada cells se existir
     if (isLeafLevel) {
-      await supabase
-        .from('cells')
-        .update({ nome_lider: leaderNamesText })
-        .eq('id', unitId);
+      try {
+        await supabase
+          .from('cells')
+          .update({ nome_lider: leaderNamesText })
+          .eq('id', unitId);
+      } catch {
+        // Ignora caso 'cells' tenha sido dropada
+      }
     }
 
     return NextResponse.json({

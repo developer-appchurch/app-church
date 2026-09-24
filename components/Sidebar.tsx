@@ -160,8 +160,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'member_pool' as ActiveScreen,
-      label: 'Pool de Membros',
-      sublabel: 'Banco geral & vínculo de membros',
+      label: 'Nossos Membros',
+      sublabel: 'Gestão geral & vínculo de membros',
       icon: Users,
     },
     {

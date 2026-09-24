@@ -433,6 +433,7 @@ export default function Home() {
           churchId={selectedMemberForTrack.churchId || targetChurchContext?.id || user.churchId}
           churchName={targetChurchContext?.name || user.churchName}
           cellName={currentCell?.name || 'Célula'}
+          validatorName={user?.name || user?.role || 'Líder Responsável'}
           onClose={() => setSelectedMemberForTrack(null)}
           onSaveProgress={handleSaveLeadershipProgress}
         />
