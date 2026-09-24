@@ -189,12 +189,19 @@ export interface FeedPost {
   authorRole: string;
   authorAvatar?: string;
   createdAt: string;
+  created_at_raw?: string;
   caption: string;
   imageUrl?: string;
+  imageWidth?: number;
+  imageHeight?: number;
   likes: number;
   likedByCurrentUser: boolean;
   comments: PostComment[];
+  commentsCount?: number;
   category?: 'Célula' | 'Comunhão' | 'Batismo' | 'Testemunho' | 'Liderança' | 'Jejum & Oração';
+  isPending?: boolean;
+  uploadProgress?: number;
+  isError?: boolean;
 }
 
 export interface ChurchAnnouncement {

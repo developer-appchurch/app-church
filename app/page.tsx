@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import {
   ActiveScreen,
   AttendanceStatus,
@@ -15,17 +16,61 @@ import { AppChurchService } from '../lib/supabase';
 import { LoginScreen } from '../components/LoginScreen';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
-import { MyCellView } from '../components/MyCellView';
-import { FeedView } from '../components/FeedView';
-import { LeadershipOverviewView } from '../components/LeadershipOverviewView';
-import { WeeklyReportView } from '../components/WeeklyReportView';
-import { LeadershipTrackModal } from '../components/LeadershipTrackModal';
 import { ConnectionBadge } from '../components/ConnectionBadge';
-import { RegisterChurchView } from '../components/RegisterChurchView';
-import { HierarchicalUnitsView } from '../components/HierarchicalUnitsView';
-import { MemberPoolView } from '../components/MemberPoolView';
-import { ChurchHierarchyOverviewView } from '../components/ChurchHierarchyOverviewView';
 import { Plus, AlertCircle, Layers, X, CheckCircle2, Loader2 } from 'lucide-react';
+
+const ViewLoading = () => (
+  <div className="flex flex-col items-center justify-center min-h-[400px] w-full p-8 text-gray-500">
+    <Loader2 className="w-8 h-8 text-[#1a365d] animate-spin mb-3" />
+    <span className="text-sm font-medium">Carregando visualização...</span>
+  </div>
+);
+
+// Dynamic imports to code-split heavy views and prevent initial chunk timeout
+const MyCellView = dynamic(
+  () => import('../components/MyCellView').then((m) => m.MyCellView),
+  { loading: ViewLoading, ssr: false }
+);
+
+const FeedView = dynamic(
+  () => import('../components/FeedView').then((m) => m.FeedView),
+  { loading: ViewLoading, ssr: false }
+);
+
+const LeadershipOverviewView = dynamic(
+  () => import('../components/LeadershipOverviewView').then((m) => m.LeadershipOverviewView),
+  { loading: ViewLoading, ssr: false }
+);
+
+const WeeklyReportView = dynamic(
+  () => import('../components/WeeklyReportView').then((m) => m.WeeklyReportView),
+  { loading: ViewLoading, ssr: false }
+);
+
+const LeadershipTrackModal = dynamic(
+  () => import('../components/LeadershipTrackModal').then((m) => m.LeadershipTrackModal),
+  { ssr: false }
+);
+
+const RegisterChurchView = dynamic(
+  () => import('../components/RegisterChurchView').then((m) => m.RegisterChurchView),
+  { loading: ViewLoading, ssr: false }
+);
+
+const HierarchicalUnitsView = dynamic(
+  () => import('../components/HierarchicalUnitsView').then((m) => m.HierarchicalUnitsView),
+  { loading: ViewLoading, ssr: false }
+);
+
+const MemberPoolView = dynamic(
+  () => import('../components/MemberPoolView').then((m) => m.MemberPoolView),
+  { loading: ViewLoading, ssr: false }
+);
+
+const ChurchHierarchyOverviewView = dynamic(
+  () => import('../components/ChurchHierarchyOverviewView').then((m) => m.ChurchHierarchyOverviewView),
+  { loading: ViewLoading, ssr: false }
+);
 
 export default function Home() {
   // Requirement 1: Tela inicial do aplicativo sempre será Login
@@ -199,19 +244,46 @@ export default function Home() {
 
   // Feed Post Actions
   const handleLikePost = async (postId: string) => {
-    const updated = await AppChurchService.toggleLikePost(postId, user?.id);
-    setPosts(updated.filter((p) => p.churchId === user?.churchId));
+    if (!user) return;
+    const { liked, likesCount } = await AppChurchService.toggleLikePost(postId, user.id);
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? { ...p, likedByCurrentUser: liked, likes: likesCount }
+          : p
+      )
+    );
   };
 
   const handleAddComment = async (postId: string, commentText: string) => {
     if (!user) return;
-    const updated = await AppChurchService.addComment(postId, commentText, user);
-    setPosts(updated.filter((p) => p.churchId === user.churchId));
+    const newComment = await AppChurchService.addComment(postId, commentText, user);
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? {
+              ...p,
+              comments: [...p.comments, newComment],
+              commentsCount: (p.commentsCount || p.comments.length) + 1,
+            }
+          : p
+      )
+    );
   };
 
   const handleDeleteComment = async (postId: string, commentId: string) => {
-    const updated = await AppChurchService.deleteComment(postId, commentId);
-    setPosts(updated.filter((p) => p.churchId === user?.churchId));
+    await AppChurchService.deleteComment(postId, commentId);
+    setPosts((prev) =>
+      prev.map((p) =>
+        p.id === postId
+          ? {
+              ...p,
+              comments: p.comments.filter((c) => c.id !== commentId),
+              commentsCount: Math.max(0, (p.commentsCount || p.comments.length) - 1),
+            }
+          : p
+      )
+    );
   };
 
   const handleCreatePost = async (
@@ -222,8 +294,8 @@ export default function Home() {
   };
 
   const handleDeletePost = async (postId: string) => {
-    const updated = await AppChurchService.deleteFeedPost(postId);
-    setPosts(updated.filter((p) => p.churchId === user?.churchId));
+    await AppChurchService.deleteFeedPost(postId);
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
   };
 
   // Announcement Actions

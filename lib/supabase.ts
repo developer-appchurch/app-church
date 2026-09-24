@@ -1,10 +1,12 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { deleteFeedImage } from './feedStorage';
 import {
   Church,
   UserProfile,
   CellGroup,
   CellMember,
   FeedPost,
+  PostComment,
   ChurchAnnouncement,
   LeadershipTrackProgress,
   LeadershipTrackStep,
@@ -1655,15 +1657,24 @@ export const AppChurchService = {
   },
 
   /**
-   * Get Feed Posts - filtered by churchId and optionally cellId
-   * Performance-optimized: Strictly limited to the latest 10 posts, ordered from newest to oldest.
+   * Feed de Notícias com Paginação por Cursor
+   * (criado_em desc, id desc, 10 por página)
+   * Usa diretamente a tabela postagens_feed e apenas as colunas usadas nos cards.
+   * Não carrega comentários pesados antecipadamente.
    */
-  async getFeedPosts(
-    churchId: string,
-    cellId?: string,
-    userId?: string,
-    limit: number = 10
-  ): Promise<FeedPost[]> {
+  async getFeedPostsPage({
+    churchId,
+    cellId,
+    userId,
+    cursor,
+    pageSize = 10,
+  }: {
+    churchId: string;
+    cellId?: string;
+    userId?: string;
+    cursor?: { criado_em: string; id: string } | null;
+    pageSize?: number;
+  }): Promise<{ posts: FeedPost[]; nextCursor: { criado_em: string; id: string } | null; hasMore: boolean }> {
     const formatTime = (isoString?: string) => {
       if (!isoString) return 'Agora mesmo';
       const d = new Date(isoString);
@@ -1679,71 +1690,71 @@ export const AppChurchService = {
     };
 
     const userLikesKey = userId ? `appchurch_likes_${userId}` : 'appchurch_likes_anon';
-    const userLikedPosts: string[] =
+    const localLikedPosts: string[] =
       typeof window !== 'undefined' ? loadFromStorage<string[]>(userLikesKey, []) : [];
 
     if (supabase) {
       try {
-        let query = supabase
-          .from('postagens_feed')
-          .select('*')
-          .eq('igreja_id', churchId);
-        if (cellId) {
-          query = query.or(`unidade_id.eq.${cellId},celula_id.eq.${cellId}`);
-        }
-        let { data: postsData, error } = await query
-          .order('criado_em', { ascending: false })
-          .limit(limit);
+        const fullColumns =
+          'id, igreja_id, unidade_id, nome_celula, nome_autor, funcao_autor, avatar_autor, legenda, url_imagem, categoria, quantidade_curtidas, quantidade_comentarios, criado_em, imagem_largura, imagem_altura';
+        const fallbackColumns =
+          'id, igreja_id, unidade_id, nome_celula, nome_autor, funcao_autor, avatar_autor, legenda, url_imagem, categoria, quantidade_curtidas, criado_em';
 
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          let legQuery = supabase
-            .from('feed_posts')
-            .select('*')
+        let buildQuery = (columns: string) => {
+          let q = supabase
+            .from('postagens_feed')
+            .select(columns)
             .eq('igreja_id', churchId);
-          if (cellId) legQuery = legQuery.eq('celula_id', cellId);
-          const legRes = await legQuery
-            .order('criado_em', { ascending: false })
-            .limit(limit);
-          postsData = legRes.data;
-          error = legRes.error;
-        }
 
-        if (!error && postsData) {
-          // Fetch all comments ONLY for the selected 10 posts
-          const postIds = postsData.map((p: any) => p.id);
-          let commentsByPost: Record<string, any[]> = {};
-
-          if (postIds.length > 0) {
-            let { data: commentsData, error: comErr } = await supabase
-              .from('comentarios_postagem')
-              .select('*')
-              .in('post_id', postIds)
-              .order('criado_em', { ascending: true });
-
-            if (comErr || !commentsData) {
-              const legCom = await supabase
-                .from('post_comments')
-                .select('*')
-                .in('post_id', postIds)
-                .order('criado_em', { ascending: true });
-              commentsData = legCom.data;
-            }
-
-            (commentsData || []).forEach((c: any) => {
-              if (!commentsByPost[c.post_id]) commentsByPost[c.post_id] = [];
-              commentsByPost[c.post_id].push({
-                id: c.id,
-                postId: c.post_id,
-                authorName: c.nome_autor,
-                authorRole: c.funcao_autor,
-                authorAvatar: c.avatar_autor,
-                content: c.conteudo,
-                createdAt: formatTime(c.criado_em),
-              });
-            });
+          if (cellId) {
+            q = q.or(`unidade_id.eq.${cellId},celula_id.eq.${cellId}`);
           }
 
-          const mappedPosts: FeedPost[] = postsData.map((p: any) => ({
+          // Filtro de paginação por cursor (criado_em desc, id desc)
+          if (cursor?.criado_em) {
+            q = q.lt('criado_em', cursor.criado_em);
+          }
+
+          return q
+            .order('criado_em', { ascending: false })
+            .order('id', { ascending: false })
+            .limit(pageSize + 1);
+        };
+
+        let { data: rawRows, error } = await buildQuery(fullColumns);
+
+        // Se colunas novas ainda não estiverem no cache do schema, recorre às colunas padrão
+        if (error && (error.code === '42703' || error.message?.includes('does not exist') || error.code === 'PGRST204')) {
+          const fallbackRes = await buildQuery(fallbackColumns);
+          rawRows = fallbackRes.data;
+          error = fallbackRes.error;
+        }
+
+        if (!error && rawRows) {
+          const rows: any[] = rawRows as any;
+          const hasMore = rows.length > pageSize;
+          const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+          const postIds = pageRows.map((p: any) => p.id);
+
+          // Verifica curtidas do usuário logado (via tabela curtidas se existir, com fallback para cache local)
+          const userLikedSet = new Set<string>(localLikedPosts);
+          if (userId && postIds.length > 0) {
+            try {
+              const { data: curtidas } = await supabase
+                .from('curtidas')
+                .select('post_id')
+                .in('post_id', postIds)
+                .eq('membro_id', userId);
+
+              if (curtidas && (curtidas as any).length > 0) {
+                (curtidas as any).forEach((c: any) => userLikedSet.add(c.post_id));
+              }
+            } catch {
+              // Tabela curtidas opcional
+            }
+          }
+
+          const mappedPosts: FeedPost[] = pageRows.map((p: any) => ({
             id: p.id,
             churchId: p.igreja_id,
             cellId: p.unidade_id || p.celula_id,
@@ -1753,34 +1764,132 @@ export const AppChurchService = {
             authorAvatar: p.avatar_autor,
             caption: p.legenda,
             imageUrl: p.url_imagem,
+            imageWidth: p.imagem_largura || undefined,
+            imageHeight: p.imagem_altura || undefined,
             category: p.categoria || 'Célula',
             likes: p.quantidade_curtidas || 0,
-            likedByCurrentUser: userLikedPosts.includes(p.id),
-            comments: commentsByPost[p.id] || [],
+            likedByCurrentUser: userLikedSet.has(p.id),
+            comments: [], // Carregamento sob demanda apenas ao abrir
+            commentsCount: p.quantidade_comentarios ?? 0,
             createdAt: formatTime(p.criado_em),
+            created_at_raw: p.criado_em,
           }));
 
-          saveToStorage(STORAGE_KEYS.POSTS, mappedPosts);
-          return mappedPosts;
+          const lastRow: any = pageRows[pageRows.length - 1];
+          const nextCursor =
+            hasMore && lastRow
+              ? { criado_em: lastRow.criado_em, id: lastRow.id }
+              : null;
+
+          return {
+            posts: mappedPosts,
+            nextCursor,
+            hasMore,
+          };
         }
       } catch (e) {
         console.warn('Erro ao buscar posts no Supabase:', e);
       }
     }
 
+    // Fallback Offline/Local
     const allPosts = loadFromStorage(STORAGE_KEYS.POSTS, INITIAL_FEED_POSTS);
     let filtered = allPosts.filter((p) => p.churchId === churchId);
     if (cellId) {
       filtered = filtered.filter((p) => p.cellId === cellId);
     }
-    return filtered.slice(0, limit).map((p) => ({
+    const pagePosts = filtered.slice(0, pageSize).map((p) => ({
       ...p,
-      likedByCurrentUser: userLikedPosts.includes(p.id),
+      likedByCurrentUser: localLikedPosts.includes(p.id),
+      commentsCount: p.comments?.length ?? 0,
     }));
+
+    return {
+      posts: pagePosts,
+      nextCursor: null,
+      hasMore: false,
+    };
+  },
+
+  /**
+   * Get Feed Posts - wrapper de compatibilidade
+   */
+  async getFeedPosts(
+    churchId: string,
+    cellId?: string,
+    userId?: string,
+    limit: number = 10
+  ): Promise<FeedPost[]> {
+    const res = await this.getFeedPostsPage({
+      churchId,
+      cellId,
+      userId,
+      pageSize: limit,
+    });
+    return res.posts;
+  },
+
+  /**
+   * Busca comentários paginados sob demanda para um post específico
+   */
+  async getPostComments(postId: string, limit = 20, offset = 0): Promise<PostComment[]> {
+    const formatTime = (isoString?: string) => {
+      if (!isoString) return 'Agora mesmo';
+      const d = new Date(isoString);
+      const diffMs = Date.now() - d.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins < 5) return 'Agora mesmo';
+      if (diffMins < 60) return `Há ${diffMins} min`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) return `Há ${diffHours} h`;
+      const diffDays = Math.floor(diffHours / 24);
+      if (diffDays < 7) return `Há ${diffDays} dias`;
+      return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    };
+
+    if (supabase) {
+      try {
+        let { data, error } = await supabase
+          .from('comentarios_postagem')
+          .select('id, post_id, nome_autor, funcao_autor, avatar_autor, conteudo, criado_em')
+          .eq('post_id', postId)
+          .order('criado_em', { ascending: true })
+          .range(offset, offset + limit - 1);
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          const leg = await supabase
+            .from('post_comments')
+            .select('id, post_id, nome_autor, funcao_autor, avatar_autor, conteudo, criado_em')
+            .eq('post_id', postId)
+            .order('criado_em', { ascending: true })
+            .range(offset, offset + limit - 1);
+          data = leg.data;
+        }
+
+        if (data) {
+          return data.map((c: any) => ({
+            id: c.id,
+            postId: c.post_id,
+            authorName: c.nome_autor,
+            authorRole: c.funcao_autor,
+            authorAvatar: c.avatar_autor,
+            content: c.conteudo,
+            createdAt: formatTime(c.criado_em),
+          }));
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar comentários do post:', err);
+      }
+    }
+
+    const allPosts = loadFromStorage(STORAGE_KEYS.POSTS, INITIAL_FEED_POSTS);
+    const post = allPosts.find((p) => p.id === postId);
+    return post?.comments || [];
   },
 
   /**
    * Create Feed Post directly in Supabase with valid UUID
+   * Grava apenas a URL pública e dimensões no banco; nunca grava base64.
    */
   async createFeedPost(
     post: Omit<FeedPost, 'id' | 'likes' | 'likedByCurrentUser' | 'comments' | 'createdAt'>
@@ -1792,8 +1901,16 @@ export const AppChurchService = {
       likes: 0,
       likedByCurrentUser: false,
       comments: [],
+      commentsCount: 0,
       createdAt: 'Agora mesmo',
     };
+
+    // Segurança: se for detectada string base64, previne gravação pesada no banco
+    let safeImageUrl = post.imageUrl;
+    if (safeImageUrl && safeImageUrl.startsWith('data:image')) {
+      console.warn('Alerta: Tentativa de gravar base64 no banco bloqueada. Utilize uploadFeedImage.');
+      safeImageUrl = undefined;
+    }
 
     if (supabase) {
       try {
@@ -1804,21 +1921,30 @@ export const AppChurchService = {
           nome_celula: post.cellName,
           nome_autor: post.authorName,
           funcao_autor: post.authorRole,
-          avatar_autor: post.authorAvatar || null,
+          avatar_autor: post.authorAvatar && !post.authorAvatar.startsWith('data:') ? post.authorAvatar : null,
           legenda: post.caption,
-          url_imagem: post.imageUrl || null,
+          url_imagem: safeImageUrl || null,
           categoria: post.category || 'Célula',
           quantidade_curtidas: 0,
+          quantidade_comentarios: 0,
+          imagem_largura: post.imageWidth || null,
+          imagem_altura: post.imageHeight || null,
         };
+
         let { error } = await supabase.from('postagens_feed').insert(ptPayload);
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.code === 'PGRST204')) {
+        if (error && (error.code === '42703' || error.message?.includes('does not exist') || error.code === 'PGRST204')) {
+          // Remove colunas extras se ainda não migradas no banco
+          delete ptPayload.imagem_largura;
+          delete ptPayload.imagem_altura;
+          delete ptPayload.quantidade_comentarios;
+          const retryRes = await supabase.from('postagens_feed').insert(ptPayload);
+          error = retryRes.error;
+        }
+
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
           const legPayload = { ...ptPayload, celula_id: post.cellId || null };
           delete legPayload.unidade_id;
-          const legRes = await supabase.from('feed_posts').insert(legPayload);
-          error = legRes.error;
-        }
-        if (error) {
-          console.warn('Supabase post insert warning:', error);
+          await supabase.from('feed_posts').insert(legPayload);
         }
       } catch (e) {
         console.warn('Erro ao inserir post no Supabase:', e);
@@ -1832,9 +1958,9 @@ export const AppChurchService = {
 
   /**
    * Toggle Like on Feed Post in Supabase & LocalStorage
-   * Allows user to like and undo/unlike their like seamlessly.
+   * Com tabela curtidas (post_id, membro_id) e atualização atômica do contador
    */
-  async toggleLikePost(postId: string, userId?: string): Promise<FeedPost[]> {
+  async toggleLikePost(postId: string, userId?: string, churchId?: string): Promise<{ liked: boolean; likesCount: number }> {
     const userLikesKey = userId ? `appchurch_likes_${userId}` : 'appchurch_likes_anon';
     const userLikedPosts: string[] =
       typeof window !== 'undefined' ? loadFromStorage<string[]>(userLikesKey, []) : [];
@@ -1853,15 +1979,15 @@ export const AppChurchService = {
     }
 
     const allPosts = loadFromStorage(STORAGE_KEYS.POSTS, INITIAL_FEED_POSTS);
-    let newLikes = 0;
+    let finalLikesCount = 0;
 
     const updated = allPosts.map((post) => {
       if (post.id === postId) {
-        newLikes = nextLiked ? post.likes + 1 : Math.max(0, post.likes - 1);
+        finalLikesCount = nextLiked ? post.likes + 1 : Math.max(0, post.likes - 1);
         return {
           ...post,
           likedByCurrentUser: nextLiked,
-          likes: newLikes,
+          likes: finalLikesCount,
         };
       }
       return post;
@@ -1870,35 +1996,52 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        let { error } = await supabase
-          .from('postagens_feed')
-          .update({ quantidade_curtidas: newLikes })
-          .eq('id', postId);
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          await supabase
-            .from('feed_posts')
-            .update({ quantidade_curtidas: newLikes })
-            .eq('id', postId);
+        // Tenta sincronizar com a tabela curtidas
+        if (userId) {
+          try {
+            if (nextLiked) {
+              await supabase.from('curtidas').insert({ post_id: postId, membro_id: userId });
+            } else {
+              await supabase.from('curtidas').delete().eq('post_id', postId).eq('membro_id', userId);
+            }
+          } catch {
+            // Tabela curtidas opcional
+          }
         }
+
+        // Atualização atômica na tabela postagens_feed
+        let { data: postRow } = await supabase
+          .from('postagens_feed')
+          .select('quantidade_curtidas')
+          .eq('id', postId)
+          .maybeSingle();
+
+        const currentDbLikes = postRow?.quantidade_curtidas ?? 0;
+        finalLikesCount = nextLiked ? currentDbLikes + 1 : Math.max(0, currentDbLikes - 1);
+
+        await supabase
+          .from('postagens_feed')
+          .update({ quantidade_curtidas: finalLikesCount })
+          .eq('id', postId);
       } catch (e) {
         console.warn('Erro ao atualizar curtida no Supabase:', e);
       }
     }
 
-    return updated;
+    return { liked: nextLiked, likesCount: finalLikesCount };
   },
 
   /**
-   * Add Comment to Feed Post in Supabase with UUID
+   * Add Comment to Feed Post in Supabase with UUID and atomic counter
    */
-  async addComment(postId: string, commentText: string, user: UserProfile): Promise<FeedPost[]> {
+  async addComment(postId: string, commentText: string, user: UserProfile): Promise<PostComment> {
     const commentId = generateUUID();
-    const newComment = {
+    const newComment: PostComment = {
       id: commentId,
       postId,
       authorName: user.name,
       authorRole: user.role,
-      authorAvatar: user.avatarUrl,
+      authorAvatar: user.avatarUrl && !user.avatarUrl.startsWith('data:') ? user.avatarUrl : undefined,
       content: commentText,
       createdAt: 'Agora mesmo',
     };
@@ -1910,12 +2053,23 @@ export const AppChurchService = {
           post_id: postId,
           nome_autor: user.name,
           funcao_autor: user.role,
-          avatar_autor: user.avatarUrl || null,
+          avatar_autor: newComment.authorAvatar || null,
           conteudo: commentText,
         };
-        let { error } = await supabase.from('comentarios_postagem').insert(ptComment);
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          await supabase.from('post_comments').insert(ptComment);
+        await supabase.from('comentarios_postagem').insert(ptComment);
+
+        // Atualiza contador em postagens_feed
+        const { data: postRow } = await supabase
+          .from('postagens_feed')
+          .select('quantidade_comentarios')
+          .eq('id', postId)
+          .maybeSingle();
+
+        if (postRow && typeof postRow.quantidade_comentarios === 'number') {
+          await supabase
+            .from('postagens_feed')
+            .update({ quantidade_comentarios: (postRow.quantidade_comentarios || 0) + 1 })
+            .eq('id', postId);
         }
       } catch (e) {
         console.warn('Erro ao adicionar comentário no Supabase:', e);
@@ -1927,27 +2081,39 @@ export const AppChurchService = {
       if (post.id === postId) {
         return {
           ...post,
-          comments: [...post.comments, newComment],
+          comments: [...(post.comments || []), newComment],
+          commentsCount: (post.commentsCount || post.comments?.length || 0) + 1,
         };
       }
       return post;
     });
     saveToStorage(STORAGE_KEYS.POSTS, updated);
-    return updated;
+    return newComment;
   },
 
   /**
    * Delete Comment from Feed Post in Supabase & Storage
    */
-  async deleteComment(postId: string, commentId: string): Promise<FeedPost[]> {
+  async deleteComment(postId: string, commentId: string): Promise<void> {
     if (supabase) {
       try {
-        let { error } = await supabase
+        await supabase
           .from('comentarios_postagem')
           .delete()
           .eq('id', commentId);
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          await supabase.from('post_comments').delete().eq('id', commentId);
+
+        // Decrementa contador atômico em postagens_feed
+        const { data: postRow } = await supabase
+          .from('postagens_feed')
+          .select('quantidade_comentarios')
+          .eq('id', postId)
+          .maybeSingle();
+
+        if (postRow && typeof postRow.quantidade_comentarios === 'number') {
+          await supabase
+            .from('postagens_feed')
+            .update({ quantidade_comentarios: Math.max(0, (postRow.quantidade_comentarios || 1) - 1) })
+            .eq('id', postId);
         }
       } catch (e) {
         console.warn('Erro ao excluir comentário no Supabase:', e);
@@ -1957,26 +2123,45 @@ export const AppChurchService = {
     const allPosts = loadFromStorage(STORAGE_KEYS.POSTS, INITIAL_FEED_POSTS);
     const updated = allPosts.map((post) => {
       if (post.id === postId) {
+        const nextComments = (post.comments || []).filter((c) => c.id !== commentId);
         return {
           ...post,
-          comments: (post.comments || []).filter((c) => c.id !== commentId),
+          comments: nextComments,
+          commentsCount: Math.max(0, (post.commentsCount || 1) - 1),
         };
       }
       return post;
     });
     saveToStorage(STORAGE_KEYS.POSTS, updated);
-    return updated;
   },
 
   /**
    * Delete Feed Post from Supabase & Storage
+   * Remove a imagem do bucket feed do Storage ao excluir o post.
    */
-  async deleteFeedPost(postId: string): Promise<FeedPost[]> {
+  async deleteFeedPost(postId: string, memberId?: string): Promise<void> {
     if (supabase) {
       try {
-        // Delete related comments first due to foreign key
+        // 1. Busca a URL da imagem para remoção no Supabase Storage
+        const { data: existingPost } = await supabase
+          .from('postagens_feed')
+          .select('url_imagem')
+          .eq('id', postId)
+          .maybeSingle();
+
+        if (existingPost?.url_imagem) {
+          await deleteFeedImage(existingPost.url_imagem, memberId, postId);
+        }
+
+        // 2. Remove curtidas e comentários relacionados
+        try {
+          await supabase.from('curtidas').delete().eq('post_id', postId);
+        } catch {
+          // opcional
+        }
         await supabase.from('comentarios_postagem').delete().eq('post_id', postId);
-        // Delete post
+
+        // 3. Remove a postagem do banco
         await supabase.from('postagens_feed').delete().eq('id', postId);
       } catch (e) {
         console.warn('Erro ao excluir post no Supabase:', e);
@@ -1986,7 +2171,6 @@ export const AppChurchService = {
     const allPosts = loadFromStorage(STORAGE_KEYS.POSTS, INITIAL_FEED_POSTS);
     const updated = allPosts.filter((p) => p.id !== postId);
     saveToStorage(STORAGE_KEYS.POSTS, updated);
-    return updated;
   },
 
   /**

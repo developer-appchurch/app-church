@@ -59,15 +59,47 @@ export function formatFileSize(bytes: number): string {
 
 /**
  * Carrega uma imagem de forma assíncrona com liberação segura de recursos
+ * Respeitando a orientação EXIF das câmeras móveis
  */
-function loadImageAsync(src: string): Promise<HTMLImageElement> {
+async function loadDrawableImage(
+  source: File | Blob | string,
+  sourceUrl: string
+): Promise<{ drawable: CanvasImageSource; width: number; height: number; cleanup?: () => void }> {
+  // Se o navegador suportar createImageBitmap com imageOrientation (Chrome, Edge, Safari, Firefox)
+  if (typeof window !== 'undefined' && 'createImageBitmap' in window) {
+    try {
+      let blob: Blob;
+      if (typeof source === 'string') {
+        const response = await fetch(source);
+        blob = await response.blob();
+      } else {
+        blob = source;
+      }
+      // 'from-image' garante que a orientação EXIF seja respeitada e rotacionada corretamente
+      const bitmap = await (window as any).createImageBitmap(blob, { imageOrientation: 'from-image' });
+      return {
+        drawable: bitmap,
+        width: bitmap.width,
+        height: bitmap.height,
+        cleanup: () => bitmap.close?.(),
+      };
+    } catch {
+      // Fallback para HTMLImageElement se createImageBitmap falhar
+    }
+  }
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.decoding = 'async';
-    img.onload = () => resolve(img);
+    img.onload = () =>
+      resolve({
+        drawable: img,
+        width: img.naturalWidth || img.width,
+        height: img.naturalHeight || img.height,
+      });
     img.onerror = (e) => reject(new Error('Falha ao carregar imagem para otimização: ' + e));
-    img.src = src;
+    img.src = sourceUrl;
   });
 }
 
@@ -108,11 +140,11 @@ export async function optimizeImageToWebP(
   }
 
   try {
-    const img = await loadImageAsync(imageSourceUrl);
+    const { drawable, width: imgWidth, height: imgHeight, cleanup } = await loadDrawableImage(source, imageSourceUrl);
 
     // Calcula dimensões proporcionais
-    let targetWidth = img.naturalWidth || img.width;
-    let targetHeight = img.naturalHeight || img.height;
+    let targetWidth = imgWidth;
+    let targetHeight = imgHeight;
 
     if (targetWidth <= 0 || targetHeight <= 0) {
       targetWidth = 800;
@@ -141,7 +173,10 @@ export async function optimizeImageToWebP(
     // Suavização de alta qualidade na redução
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+    ctx.drawImage(drawable, 0, 0, targetWidth, targetHeight);
+
+    // Libera recursos se for ImageBitmap
+    cleanup?.();
 
     // Tenta exportar primeiramente em image/webp
     let outputFormat: 'image/webp' | 'image/jpeg' = 'image/webp';
