@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { createAuthUserForMember } from '@/lib/supabase/authAdmin';
 import { Church, UserProfile, HierarchicalLevelInput, RegisterChurchInput, RegisterChurchResult, CellGroup } from '@/types';
 import crypto from 'crypto';
 
@@ -272,6 +274,22 @@ export async function POST(req: NextRequest) {
 
     pastorProfile.roleId = resolvedRoleId || 'b2000000-0000-0000-0000-000000000001';
 
+    // Cria o usuário correspondente no Supabase auth.users com confirmação ativa
+    let pastorAuthUserId: string | null = null;
+    try {
+      pastorAuthUserId = await createAuthUserForMember({
+        churchId,
+        memberId: pastorId,
+        name: input.pastorName.trim(),
+        login: cleanPastorLogin,
+        password: cleanPastorPass,
+        email: input.pastorEmail?.trim() || null,
+        role: 'Pastor',
+      });
+    } catch (authErr) {
+      console.warn('Aviso ao criar auth.users para pastor:', authErr);
+    }
+
     // 4. Cadastrar Pastor Titular na tabela 'membros' (ou fallback 'members')
     const pastorMemberPt: any = {
       id: pastorId,
@@ -282,6 +300,7 @@ export async function POST(req: NextRequest) {
       nome: input.pastorName.trim(),
       login: cleanPastorLogin,
       senha_hash: cleanPastorPass,
+      auth_user_id: pastorAuthUserId,
       telefone: input.pastorPhone?.trim() || null,
       email: input.pastorEmail?.trim() || null,
       bairro: 'Centro',

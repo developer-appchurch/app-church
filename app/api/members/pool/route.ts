@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { createAuthUserForMember, deleteAuthUserForMember } from '@/lib/supabase/authAdmin';
 import { AttendanceStatus } from '@/types';
 import crypto from 'crypto';
 
@@ -212,20 +214,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'O nome do membro é obrigatório.' }, { status: 400 });
     }
 
-    const supabase = getSupabaseServerClient();
+    const supabaseAdmin = getSupabaseAdminClient();
+    const supabase = supabaseAdmin || getSupabaseServerClient();
     if (!supabase) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
     const memberId = generateUUID();
-    const cleanLogin = name
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]/g, '')
-      .substring(0, 15) + Math.floor(100 + Math.random() * 900);
+    const cleanLogin = (
+      name
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '')
+        .substring(0, 15) + Math.floor(100 + Math.random() * 900)
+    ).trim();
 
     const validCellId = cellId && cellId.trim() !== '' ? cellId.trim() : null;
+    const cleanPass = '123456';
+
+    // Cria instantaneamente o usuário em auth.users para acesso imediato
+    let authUserId: string | null = null;
+    if (supabaseAdmin) {
+      authUserId = await createAuthUserForMember({
+        churchId,
+        memberId,
+        name: name.trim(),
+        login: cleanLogin,
+        password: cleanPass,
+        email: email?.trim() || null,
+        role,
+      });
+    }
 
     const payloadPt: any = {
       id: memberId,
@@ -234,14 +254,15 @@ export async function POST(req: NextRequest) {
       nome: name.trim(),
       funcao: role,
       login: cleanLogin,
-      senha_hash: '123456',
+      senha_hash: cleanPass,
+      auth_user_id: authUserId,
       bairro: neighborhood?.trim() || 'Centro',
       aniversario: '01/01',
       telefone: phone?.trim() || null,
       email: email?.trim() || null,
       status_frequencia: 'green',
       percentual_frequencia: 100,
-      url_avatar: `https://images.unsplash.com/photo-${1534528741775 + Math.floor(Math.random() * 1000)}?w=150`,
+      url_avatar: null,
       observacoes: notes?.trim() || (validCellId ? 'Cadastrado e vinculado à célula' : 'Cadastrado no Pool Geral da igreja'),
     };
 
@@ -254,6 +275,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (insertErr) {
+      if (authUserId) {
+        await deleteAuthUserForMember(authUserId);
+      }
       console.error('Erro ao cadastrar membro:', insertErr);
       return NextResponse.json({ error: `Falha ao cadastrar membro: ${insertErr.message}` }, { status: 500 });
     }
@@ -393,6 +417,70 @@ export async function PATCH(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('Erro na rota /api/members/pool PATCH:', err);
+    return NextResponse.json({ error: err?.message || 'Erro interno.' }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/members/pool
+ * Exclui o membro da congregação e remove automaticamente seu usuário do auth.users
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const memberId = searchParams.get('memberId') || searchParams.get('id');
+
+    if (!memberId) {
+      return NextResponse.json({ error: 'memberId é obrigatório.' }, { status: 400 });
+    }
+
+    const supabaseAdmin = getSupabaseAdminClient();
+    const supabase = supabaseAdmin || getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+    }
+
+    // Busca o auth_user_id do membro antes da exclusão
+    const { data: memberData } = await supabase
+      .from('membros')
+      .select('id, auth_user_id, unidade_id')
+      .eq('id', memberId)
+      .maybeSingle();
+
+    const authUserId = memberData?.auth_user_id;
+    const oldUnitId = memberData?.unidade_id;
+
+    // Exclui da tabela membros
+    let { error: delErr } = await supabase.from('membros').delete().eq('id', memberId);
+    if (delErr && (delErr.code === '42P01' || delErr.message?.includes('does not exist'))) {
+      const legDel = await supabase.from('members').delete().eq('id', memberId);
+      delErr = legDel.error;
+    }
+
+    if (delErr) {
+      console.error('Erro ao excluir membro:', delErr);
+      return NextResponse.json({ error: `Falha ao remover membro: ${delErr.message}` }, { status: 500 });
+    }
+
+    // Remove o usuário do auth.users
+    if (authUserId) {
+      await deleteAuthUserForMember(authUserId);
+    }
+
+    // Recalcula contadores de célula se aplicável
+    if (oldUnitId) {
+      try {
+        const { count } = await supabase
+          .from('membros')
+          .select('*', { count: 'exact', head: true })
+          .eq('unidade_id', oldUnitId);
+        await supabase.from('celulas').update({ quantidade_membros: count || 0 }).eq('unidade_id', oldUnitId);
+      } catch {}
+    }
+
+    return NextResponse.json({ success: true, deletedMemberId: memberId, authDeleted: Boolean(authUserId) });
+  } catch (err: any) {
+    console.error('Erro na rota /api/members/pool DELETE:', err);
     return NextResponse.json({ error: err?.message || 'Erro interno.' }, { status: 500 });
   }
 }

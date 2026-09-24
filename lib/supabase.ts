@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { deleteFeedImage } from './feedStorage';
 import { getBrowserSupabaseClient } from './supabase/client';
 import {
@@ -99,14 +99,9 @@ export const isSupabaseConfigured = Boolean(
   supabaseUrl && supabaseAnonKey && supabaseUrl.startsWith('http')
 );
 
-// Instantiate real Supabase client
+// Centralized browser Supabase client singleton from @supabase/ssr
 export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    })
+  ? getBrowserSupabaseClient()
   : null;
 
 // Local Storage Multi-Tenant Store keys for caching & offline tolerance
@@ -166,6 +161,13 @@ export interface DatabaseConnectionStatus {
 export const AppChurchService = {
   isConfigured: isSupabaseConfigured,
   supabaseUrl,
+
+  /**
+   * Obtém o usuário em cache local instantaneamente (0ms) para inicialização otimista
+   */
+  getCachedUser(): UserProfile | null {
+    return loadFromStorage<UserProfile | null>(STORAGE_KEYS.SESSION, null);
+  },
 
   /**
    * Diagnostic check verifying active connection to Supabase PostgreSQL database
@@ -258,6 +260,19 @@ export const AppChurchService = {
 
         if (data.user) {
           saveToStorage(STORAGE_KEYS.SESSION, data.user);
+
+          // Sincroniza a sessão no cliente do navegador se retornado
+          if (data.session && supabase) {
+            try {
+              await supabase.auth.setSession({
+                access_token: data.session.access_token,
+                refresh_token: data.session.refresh_token,
+              });
+            } catch (syncErr) {
+              console.warn('Aviso ao sincronizar token no cliente Supabase:', syncErr);
+            }
+          }
+
           return data.user;
         }
       } catch (err: any) {
@@ -1652,7 +1667,54 @@ export const AppChurchService = {
       roleId: validRoleId,
     };
 
-    if (supabase) {
+    // 1. Tenta criar através da API do servidor para provisionar o usuário no Supabase auth.users
+    let createdViaApi = false;
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      try {
+        const res = await fetch('/api/members/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            churchId: validChurchId,
+            name: newMember.name,
+            login: cleanLogin,
+            password: newMember.password || '123456',
+            role: newMember.role,
+            roleId: validRoleId,
+            cellId: validCellId,
+            neighborhood: newMember.neighborhood || 'Centro',
+            birthday: newMember.birthday || '01/01',
+            phone: newMember.phone || '',
+            email: newMember.email || '',
+            attendanceStatus: newMember.attendanceStatus || 'green',
+            attendancePercentage: newMember.attendancePercentage ?? 100,
+            avatarUrl: newMember.avatarUrl?.trim() || null,
+            notes: newMember.notes || null,
+          }),
+        });
+
+        const resData = await res.json();
+        if (res.ok && resData?.success && resData?.member) {
+          created.id = resData.member.id;
+          created.login = resData.member.login;
+          created.roleId = resData.member.roleId;
+          created.avatarUrl = resData.member.avatarUrl || '';
+          createdViaApi = true;
+        } else if (resData?.error) {
+          console.warn('[addMember API] Retornou erro:', resData.error);
+          if (resData.error.includes('já está')) {
+            throw new Error(resData.error);
+          }
+        }
+      } catch (apiErr: any) {
+        if (apiErr?.message && apiErr.message.includes('já está')) {
+          throw apiErr;
+        }
+        console.warn('[addMember] API de criação indisponível ou falhou, usando fallback direto:', apiErr);
+      }
+    }
+
+    if (!createdViaApi && supabase) {
       const ptPayload: any = {
         id: newId,
         igreja_id: validChurchId,
@@ -1667,7 +1729,7 @@ export const AppChurchService = {
         telefone: newMember.phone || '',
         status_frequencia: newMember.attendanceStatus || 'green',
         percentual_frequencia: newMember.attendancePercentage ?? 100,
-        url_avatar: newMember.avatarUrl || null,
+        url_avatar: newMember.avatarUrl?.trim() || null,
         observacoes: newMember.notes || null,
       };
 
@@ -1732,6 +1794,46 @@ export const AppChurchService = {
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     saveToStorage(STORAGE_KEYS.MEMBERS, [created, ...allMembers]);
     return created;
+  },
+
+  /**
+   * Exclui um membro do banco de dados e remove seu usuário do auth.users
+   */
+  async deleteMember(memberId: string): Promise<boolean> {
+    if (!memberId) return false;
+
+    // 1. Tenta excluir via API do servidor (remove de membros e de auth.users)
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      try {
+        const res = await fetch(`/api/members/create?memberId=${encodeURIComponent(memberId)}`, {
+          method: 'DELETE',
+        });
+        if (res.ok) {
+          const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+          saveToStorage(
+            STORAGE_KEYS.MEMBERS,
+            allMembers.filter((m: CellMember) => m.id !== memberId)
+          );
+          return true;
+        }
+      } catch (apiErr) {
+        console.warn('[deleteMember] Erro ao excluir via API:', apiErr);
+      }
+    }
+
+    // Fallback direto no Supabase
+    if (supabase) {
+      try {
+        await supabase.from('membros').delete().eq('id', memberId);
+      } catch {}
+    }
+
+    const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+    saveToStorage(
+      STORAGE_KEYS.MEMBERS,
+      allMembers.filter((m: CellMember) => m.id !== memberId)
+    );
+    return true;
   },
 
   /**

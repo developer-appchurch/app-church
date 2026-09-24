@@ -14,13 +14,18 @@ export default function LoginPage() {
   useEffect(() => {
     let isMounted = true;
     async function verifyAuth() {
+      // Checa se já existe usuário em cache para redirecionamento imediato (0ms)
+      const cached = AppChurchService.getCachedUser();
+      if (cached && isMounted) {
+        router.replace('/');
+        return;
+      }
+
       try {
         const user = await AppChurchService.getCurrentUser();
-        if (isMounted) {
-          if (user) {
-            router.replace('/');
-            return;
-          }
+        if (isMounted && user) {
+          router.replace('/');
+          return;
         }
       } catch (err) {
         console.warn('Erro ao verificar sessão na página /login:', err);

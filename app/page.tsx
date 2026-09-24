@@ -15,7 +15,6 @@ import {
   UserProfile,
 } from '../types';
 import { AppChurchService } from '../lib/supabase';
-import { getBrowserSupabaseClient } from '../lib/supabase/client';
 import { AppChurchLogo } from '../components/AppChurchLogo';
 import { LoginScreen } from '../components/LoginScreen';
 import { Header } from '../components/Header';
@@ -150,23 +149,37 @@ export default function Home() {
     []
   );
 
-  // Restauração da sessão no mount via Supabase Auth (Splash/Skeleton enquanto valida)
+  // Restauração da sessão no mount via Supabase Auth com leitura instantânea do cache local
   useEffect(() => {
     let isMounted = true;
     async function restoreSession() {
+      // 1. Verificação instantânea (0ms) do cache local para eliminar delay percebido
+      const cached = AppChurchService.getCachedUser();
+      if (cached && isMounted) {
+        setUser(cached);
+        setIsAuthenticated(true);
+        setIsCheckingSession(false);
+        loadChurchData(cached.churchId, cached.currentCellId, cached.id);
+      }
+
       try {
         const sessionUser = await AppChurchService.getCurrentUser();
         if (isMounted) {
           if (sessionUser) {
             setUser(sessionUser);
             setIsAuthenticated(true);
-            await loadChurchData(
+            loadChurchData(
               sessionUser.churchId,
               sessionUser.currentCellId,
               sessionUser.id
             );
           } else {
-            setIsAuthenticated(false);
+            // Se já há um usuário ativo no estado (ex: logou pelo formulário), não anula
+            setUser((prev) => {
+              if (prev) return prev;
+              setIsAuthenticated(false);
+              return null;
+            });
           }
         }
       } catch (err) {
@@ -208,14 +221,15 @@ export default function Home() {
     }
   };
 
-  // Login handler
-  const handleLoginSuccess = async (authenticatedUser: UserProfile) => {
+  // Login handler: transição imediata para a tela principal e carregamento assíncrono em segundo plano
+  const handleLoginSuccess = (authenticatedUser: UserProfile) => {
     setUser(authenticatedUser);
     setIsAuthenticated(true);
+    setIsCheckingSession(false);
     setActiveScreen('feed'); // Home is Feed
 
-    // Load data strictly for this user's church
-    await loadChurchData(
+    // Carrega dados da igreja em segundo plano sem travar a interface
+    loadChurchData(
       authenticatedUser.churchId,
       authenticatedUser.currentCellId,
       authenticatedUser.id

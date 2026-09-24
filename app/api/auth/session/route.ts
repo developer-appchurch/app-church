@@ -56,22 +56,60 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ authenticated: false, error: 'Database client indisponível' });
     }
 
-    // Busca membro vinculado por auth_user_id ou por metadata
+    // Busca membro vinculado com fallback multi-critério (id do app_metadata, auth_user_id, login, email)
     const membroIdFromMeta = authUser.app_metadata?.membro_id;
-    let query = supabaseAdmin.from('membros').select('*');
+    let memberRows: any[] | null = null;
 
     if (membroIdFromMeta) {
-      query = query.eq('id', membroIdFromMeta);
-    } else {
-      query = query.eq('auth_user_id', authUser.id);
+      const { data } = await supabaseAdmin.from('membros').select('*').eq('id', membroIdFromMeta).limit(1);
+      memberRows = data;
     }
 
-    const { data: memberRows } = await query.limit(1);
+    if (!memberRows || memberRows.length === 0) {
+      const { data } = await supabaseAdmin.from('membros').select('*').eq('auth_user_id', authUser.id).limit(1);
+      memberRows = data;
+    }
+
+    if (!memberRows || memberRows.length === 0) {
+      const userMetaLogin = authUser.user_metadata?.login;
+      if (userMetaLogin) {
+        const { data } = await supabaseAdmin.from('membros').select('*').ilike('login', userMetaLogin).limit(1);
+        memberRows = data;
+      }
+    }
+
+    if (!memberRows || memberRows.length === 0) {
+      if (authUser.email) {
+        const cleanEmail = authUser.email.toLowerCase();
+        // Tenta pelo email exato
+        let { data } = await supabaseAdmin.from('membros').select('*').ilike('email', cleanEmail).limit(1);
+        if (!data || data.length === 0) {
+          // Se for email sintético, extrai o login do prefixo do email
+          const syntheticUser = cleanEmail.split('@')[0];
+          const legRes = await supabaseAdmin.from('membros').select('*').or(`login.ilike.${syntheticUser},email.ilike.${syntheticUser}`).limit(1);
+          data = legRes.data;
+        }
+        memberRows = data;
+      }
+    }
+
     if (!memberRows || memberRows.length === 0) {
       return NextResponse.json({ authenticated: false, user: null });
     }
 
     const member = memberRows[0];
+
+    // Auto-cura: se membros.auth_user_id estiver vazio, vincula agora
+    if (member.auth_user_id !== authUser.id) {
+      try {
+        await supabaseAdmin
+          .from('membros')
+          .update({ auth_user_id: authUser.id })
+          .eq('id', member.id);
+      } catch (selfHealErr) {
+        console.warn('Aviso ao sincronizar auth_user_id em /api/auth/session:', selfHealErr);
+      }
+    }
     let churchName = 'Paz Church Sobral';
     if (member.igreja_id) {
       const { data: cData } = await supabaseAdmin

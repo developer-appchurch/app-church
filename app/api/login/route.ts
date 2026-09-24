@@ -189,6 +189,17 @@ export async function POST(req: NextRequest) {
     // =========================================================================
     const supabaseAdmin = getSupabaseAdminClient();
     if (!supabaseAdmin) {
+      const missingVars: string[] = [];
+      if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) missingVars.push('SUPABASE_SERVICE_ROLE_KEY');
+      if (!process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()) missingVars.push('NEXT_PUBLIC_SUPABASE_URL');
+      if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()) missingVars.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+
+      console.error(
+        `[Auth /api/login] Falha na inicialização do Supabase Admin. Variáveis ausentes no servidor: ${
+          missingVars.length > 0 ? missingVars.join(', ') : 'Nenhuma (verifique formato das chaves)'
+        }`
+      );
+
       return NextResponse.json(
         { error: 'Configuração do Supabase indisponível no servidor.' },
         { status: 500 }
@@ -238,10 +249,13 @@ export async function POST(req: NextRequest) {
       password: cleanPass,
     });
 
-    // Passo (b): Se falhar e o membro ainda não tiver auth_user_id (ou usuário não existir no Supabase Auth)
-    if (authResult.error && (!member.auth_user_id || authResult.error.message?.includes('Invalid login credentials'))) {
-      // Valida a senha antiga na tabela membros usando tempo constante / bcrypt
-      const isLegacyValid = verifyLegacyPassword(cleanPass, member.senha_hash);
+    let authUserId = member.auth_user_id;
+
+    // Passo (b): Se falhar a autenticação no Supabase Auth, valida senha legada na tabela membros e sincroniza
+    if (authResult.error) {
+      // Valida a senha na tabela membros (suporta senha_hash bcrypt e texto puro legado em senha_hash ou senha)
+      const storedPass = member.senha_hash || member.senha || null;
+      const isLegacyValid = verifyLegacyPassword(cleanPass, storedPass);
 
       if (!isLegacyValid) {
         recordAttempt(cleanLogin, loginAttempts);
@@ -251,9 +265,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Cria ou vincula o usuário no Supabase Auth usando a Service Role
-      let authUserId = member.auth_user_id;
-
+      // Se a senha na tabela membros é válida, sincroniza/atualiza o usuário no Supabase Auth
       if (!authUserId) {
         // Tenta criar usuário novo no Supabase Auth
         const { data: createData, error: createErr } = await supabaseAdmin.auth.admin.createUser({
@@ -266,16 +278,18 @@ export async function POST(req: NextRequest) {
           },
           user_metadata: {
             nome: member.nome,
-            login: member.login,
+            login: canonicalLogin,
           },
         });
 
         if (createErr) {
-          // Se o usuário já existia no Supabase Auth (ex: tentativa anterior), atualiza a senha
+          // Se o usuário já existia no Supabase Auth, busca e sincroniza a nova senha
           if (createErr.message?.includes('already registered') || createErr.status === 422) {
             const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
             const matched = existingUsers?.users?.find(
-              (u) => u.email?.toLowerCase() === syntheticEmail.toLowerCase()
+              (u) =>
+                u.email?.toLowerCase() === syntheticEmail.toLowerCase() ||
+                u.user_metadata?.login?.toLowerCase() === canonicalLogin
             );
             if (matched) {
               authUserId = matched.id;
@@ -285,6 +299,10 @@ export async function POST(req: NextRequest) {
                 app_metadata: {
                   igreja_id: member.igreja_id,
                   membro_id: member.id,
+                },
+                user_metadata: {
+                  nome: member.nome,
+                  login: canonicalLogin,
                 },
               });
             }
@@ -298,78 +316,113 @@ export async function POST(req: NextRequest) {
         } else if (createData?.user) {
           authUserId = createData.user.id;
         }
-
-        // Grava o vínculo membros.auth_user_id
-        if (authUserId) {
-          try {
-            await supabaseAdmin
-              .from('membros')
-              .update({ auth_user_id: authUserId })
-              .eq('id', member.id);
-          } catch (updateErr) {
-            console.warn('Aviso ao atualizar membros.auth_user_id:', updateErr);
-          }
+      } else {
+        // authUserId já existia, atualiza a senha no Supabase Auth para coincidir com a digitada
+        try {
+          await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+            password: cleanPass,
+            email_confirm: true,
+            app_metadata: {
+              igreja_id: member.igreja_id,
+              membro_id: member.id,
+            },
+            user_metadata: {
+              nome: member.nome,
+              login: canonicalLogin,
+            },
+          });
+        } catch (updateAuthErr) {
+          console.warn('Aviso ao atualizar senha no Supabase Auth:', updateAuthErr);
         }
       }
 
-      // Agora realiza o login com as credenciais criadas para gerar os cookies da sessão
+      // Garante vínculo membros.auth_user_id
+      if (authUserId && member.auth_user_id !== authUserId) {
+        try {
+          await supabaseAdmin
+            .from('membros')
+            .update({ auth_user_id: authUserId })
+            .eq('id', member.id);
+        } catch (updateErr) {
+          console.warn('Aviso ao atualizar membros.auth_user_id:', updateErr);
+        }
+      }
+
+      // Agora realiza o login com as credenciais sincronizadas para emitir a sessão
       authResult = await ssrClient.auth.signInWithPassword({
         email: syntheticEmail,
         password: cleanPass,
       });
 
       if (authResult.error) {
-        console.error('Erro ao fazer signInWithPassword após migração:', authResult.error);
+        console.error('Erro ao fazer signInWithPassword após sincronização:', authResult.error);
         return NextResponse.json(
           { error: `Falha ao autenticar sessão: ${authResult.error.message}` },
           { status: 500 }
         );
       }
-    } else if (authResult.error) {
-      // Membro já tinha auth_user_id ou erro legítimo de credenciais
-      recordAttempt(cleanLogin, loginAttempts);
-      return NextResponse.json(
-        { error: 'Credenciais inválidas. Verifique seu login e senha.' },
-        { status: 401 }
-      );
+    } else if (authResult.data?.user) {
+      // Login direto teve sucesso: garante que membros.auth_user_id e app_metadata estejam vinculados
+      const currentAuthId = authResult.data.user.id;
+      if (member.auth_user_id !== currentAuthId) {
+        try {
+          await supabaseAdmin
+            .from('membros')
+            .update({ auth_user_id: currentAuthId })
+            .eq('id', member.id);
+        } catch (updErr) {
+          console.warn('Aviso ao atualizar membros.auth_user_id após login direto:', updErr);
+        }
+      }
+
+      if (!authResult.data.user.app_metadata?.membro_id) {
+        try {
+          await supabaseAdmin.auth.admin.updateUserById(currentAuthId, {
+            app_metadata: {
+              igreja_id: member.igreja_id,
+              membro_id: member.id,
+            },
+            user_metadata: {
+              nome: member.nome,
+              login: canonicalLogin,
+            },
+          });
+        } catch (updMetaErr) {
+          console.warn('Aviso ao atualizar app_metadata do usuário:', updMetaErr);
+        }
+      }
     }
 
     // Sucesso no login: limpa tentativas de falha
     clearAttempts(cleanLogin, loginAttempts);
 
     // =========================================================================
-    // 5. MONTA PERFIL COMPLETO DO USUÁRIO PARA O APLICATIVO
+    // 5. MONTA PERFIL COMPLETO DO USUÁRIO PARA O APLICATIVO EM PARALELO
     // =========================================================================
-    let churchName = 'Paz Church Sobral';
-    if (member.igreja_id) {
-      const { data: churchData } = await supabaseAdmin
-        .from('igrejas')
-        .select('nome')
-        .eq('id', member.igreja_id)
-        .maybeSingle();
-
-      if (churchData?.nome) {
-        churchName = churchData.nome;
-      }
-    }
-
-    let sector = 'Setor Geral';
     const resolvedUnitId = member.unidade_id || member.celula_id;
-    if (resolvedUnitId) {
-      const { data: unitData } = await supabaseAdmin
-        .from('unidades')
-        .select('id, nome, pai_id')
-        .eq('id', resolvedUnitId)
-        .maybeSingle();
 
-      if (unitData?.pai_id) {
+    const [churchRes, unitRes] = await Promise.all([
+      member.igreja_id
+        ? supabaseAdmin.from('igrejas').select('nome').eq('id', member.igreja_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+      resolvedUnitId
+        ? supabaseAdmin.from('unidades').select('id, nome, pai_id').eq('id', resolvedUnitId).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    let churchName = churchRes.data?.nome || 'Paz Church Sobral';
+    let sector = 'Setor Geral';
+
+    const unitData = unitRes.data;
+    if (unitData) {
+      if (unitData.pai_id) {
         const { data: parentUnit } = await supabaseAdmin
           .from('unidades')
           .select('nome')
           .eq('id', unitData.pai_id)
           .maybeSingle();
         if (parentUnit?.nome) sector = parentUnit.nome;
-      } else if (unitData?.nome) {
+      } else if (unitData.nome) {
         sector = unitData.nome;
       }
     }

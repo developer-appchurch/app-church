@@ -16,6 +16,18 @@ export function getSupabaseServerClient(): SupabaseClient | null {
       ? envUrl
       : DEFAULT_SUPABASE_URL;
 
+  const missing: string[] = [];
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() && !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim()) {
+    missing.push('SUPABASE_SERVICE_ROLE_KEY ou NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  }
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL?.trim()) {
+    missing.push('NEXT_PUBLIC_SUPABASE_URL');
+  }
+
+  if (missing.length > 0) {
+    console.warn(`[Supabase Server] Variáveis de ambiente não detectadas no servidor (usando chave padrão se disponível): ${missing.join(', ')}`);
+  }
+
   if (!serviceKey || !url) return null;
 
   return createClient(url, serviceKey, {
