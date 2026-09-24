@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { deleteFeedImage } from './feedStorage';
+import { getBrowserSupabaseClient } from './supabase/client';
 import {
   Church,
   UserProfile,
@@ -139,6 +140,15 @@ const saveToStorage = <T>(key: string, value: T): void => {
   }
 };
 
+const removeFromStorage = (key: string): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // ignore
+  }
+};
+
 export interface DatabaseConnectionStatus {
   connected: boolean;
   isCloud: boolean;
@@ -218,8 +228,8 @@ export const AppChurchService = {
   },
 
   /**
-   * Authenticate user against Supabase members table (or local members cache)
-   * Acesso permitido EXCLUSIVAMENTE se login e senha estiverem presentes na tabela de membros.
+   * Authenticate user against Supabase members table & Supabase Auth
+   * Integração com /api/login para autenticação e sessão persistente via Supabase Auth
    */
   async login(loginInput: string, passwordInput: string): Promise<UserProfile> {
     const cleanLogin = loginInput.trim().toLowerCase();
@@ -232,7 +242,34 @@ export const AppChurchService = {
       throw new Error('Informe sua senha.');
     }
 
-    // 0. Super Administrador do Sistema AppChurch (Acesso Global para Gerenciar Igrejas)
+    // 1. Prioridade: Autenticação com Supabase Auth via endpoint SSR /api/login
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ login: cleanLogin, password: cleanPass }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Credenciais inválidas.');
+        }
+
+        if (data.user) {
+          saveToStorage(STORAGE_KEYS.SESSION, data.user);
+          return data.user;
+        }
+      } catch (err: any) {
+        // Se a API retornou erro específico de validação/rate limit/senha, repassa para o formulário
+        if (err.message && !err.message.includes('Failed to fetch') && !err.message.includes('NetworkError')) {
+          throw err;
+        }
+        console.warn('Endpoint /api/login indisponível, tentando fallback direto:', err);
+      }
+    }
+
+    // 0. Super Administrador do Sistema AppChurch (Fallback de Emergência)
     const isAdminLogin =
       cleanLogin === 'admin' ||
       cleanLogin === 'administrador' ||
@@ -451,6 +488,88 @@ export const AppChurchService = {
     };
     saveToStorage(STORAGE_KEYS.SESSION, memberUser);
     return memberUser;
+  },
+
+  /**
+   * Obtém o usuário atualmente autenticado via sessão Supabase Auth SSR
+   */
+  async getCurrentUser(): Promise<UserProfile | null> {
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch('/api/auth/session', {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.authenticated && data.user) {
+            saveToStorage(STORAGE_KEYS.SESSION, data.user);
+            return data.user;
+          } else {
+            // Sessão NÃO está autenticada no servidor
+            // Limpa expressamente caches locais para impedir loop de auto-login
+            removeFromStorage(STORAGE_KEYS.SESSION);
+            localStorage.removeItem('appchurch_session_uuid_v4');
+            localStorage.removeItem('appchurch_session_v3');
+            localStorage.removeItem('appchurch_session');
+            return null;
+          }
+        }
+      } catch (e) {
+        console.warn('Erro ao consultar /api/auth/session:', e);
+      }
+
+      // Se a sessão expirou ou não há usuário autenticado no servidor, retorna null
+      return null;
+    }
+    return null;
+  },
+
+  /**
+   * Realiza logout seguro no Supabase Auth, remove cookies e limpa o cache local
+   */
+  async logout(): Promise<void> {
+    if (typeof window !== 'undefined') {
+      try {
+        const browserClient = getBrowserSupabaseClient();
+        await browserClient.auth.signOut({ scope: 'local' });
+      } catch (err) {
+        console.warn('Aviso signOut no browser client:', err);
+      }
+
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+          },
+        });
+      } catch (e) {
+        console.warn('Aviso ao chamar /api/auth/logout:', e);
+      }
+
+      // Limpa todas as chaves de sessão possíveis do armazenamento local
+      removeFromStorage(STORAGE_KEYS.SESSION);
+      localStorage.removeItem('appchurch_session_uuid_v4');
+      localStorage.removeItem('appchurch_session_v3');
+      localStorage.removeItem('appchurch_session');
+
+      try {
+        for (let i = localStorage.length - 1; i >= 0; i--) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('sb-') || key.startsWith('appchurch_session'))) {
+            localStorage.removeItem(key);
+          }
+        }
+        sessionStorage.clear();
+      } catch {
+        // ignore
+      }
+    }
   },
 
   /**

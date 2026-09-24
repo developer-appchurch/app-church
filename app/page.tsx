@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   ActiveScreen,
   AttendanceStatus,
@@ -13,6 +15,8 @@ import {
   UserProfile,
 } from '../types';
 import { AppChurchService } from '../lib/supabase';
+import { getBrowserSupabaseClient } from '../lib/supabase/client';
+import { AppChurchLogo } from '../components/AppChurchLogo';
 import { LoginScreen } from '../components/LoginScreen';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
@@ -73,7 +77,11 @@ const ChurchHierarchyOverviewView = dynamic(
 );
 
 export default function Home() {
-  // Requirement 1: Tela inicial do aplicativo sempre será Login
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  // Estado de verificação de sessão (Splash/Skeleton inicial para não piscar tela de login)
+  const [isCheckingSession, setIsCheckingSession] = useState<boolean>(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   // Tela inicial após login direcionada para Minha Célula
@@ -142,6 +150,40 @@ export default function Home() {
     []
   );
 
+  // Restauração da sessão no mount via Supabase Auth (Splash/Skeleton enquanto valida)
+  useEffect(() => {
+    let isMounted = true;
+    async function restoreSession() {
+      try {
+        const sessionUser = await AppChurchService.getCurrentUser();
+        if (isMounted) {
+          if (sessionUser) {
+            setUser(sessionUser);
+            setIsAuthenticated(true);
+            await loadChurchData(
+              sessionUser.churchId,
+              sessionUser.currentCellId,
+              sessionUser.id
+            );
+          } else {
+            setIsAuthenticated(false);
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao restaurar sessão inicial:', err);
+      } finally {
+        if (isMounted) {
+          setIsCheckingSession(false);
+        }
+      }
+    }
+
+    restoreSession();
+    return () => {
+      isMounted = false;
+    };
+  }, [loadChurchData]);
+
   // Connection check on mount
   useEffect(() => {
     AppChurchService.checkConnection().then((status) => {
@@ -180,8 +222,15 @@ export default function Home() {
     );
   };
 
-  // Logout handler returning strictly to Login screen
-  const handleLogout = () => {
+  // Logout handler com signOut seguro no Supabase Auth, limpeza total de cache e retorno para a tela de login
+  const handleLogout = async () => {
+    try {
+      await AppChurchService.logout();
+    } catch (e) {
+      console.warn('Erro durante logout:', e);
+    }
+
+    queryClient.clear();
     setIsAuthenticated(false);
     setUser(null);
     setCells([]);
@@ -190,6 +239,9 @@ export default function Home() {
     setAnnouncements([]);
     setSelectedCellId('');
     setActiveScreen('feed');
+    setIsSidebarOpen(false);
+
+    router.replace('/login');
   };
 
   // Cell Members Management
@@ -342,6 +394,28 @@ export default function Home() {
       memberCount: members.length,
     };
 
+  // 0. Splash / Skeleton durante a validação da sessão para evitar piscar a tela de login
+  if (isCheckingSession) {
+    return (
+      <div className="min-h-screen bg-[#041e3a] flex flex-col items-center justify-center relative overflow-hidden font-sans select-none">
+        <div className="absolute -top-32 -left-32 w-80 h-80 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-20 -right-24 w-80 h-80 bg-sky-400/15 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex flex-col items-center justify-center z-10">
+          <div className="animate-pulse flex flex-col items-center">
+            <AppChurchLogo variant="light" className="h-[80px] mb-6" />
+            <div className="w-48 h-2.5 bg-blue-900/60 rounded-full overflow-hidden relative">
+              <div className="w-1/2 h-full bg-gradient-to-r from-sky-400 to-blue-500 rounded-full animate-[shimmer_1.5s_infinite]" />
+            </div>
+          </div>
+          <p className="text-sky-200/80 text-xs mt-4 font-medium tracking-wide">
+            Validando sessão segura...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // 1. Initial screen MUST be Login without church name, using generic platform logo
   if (!isAuthenticated || !user) {
     return (
@@ -363,6 +437,7 @@ export default function Home() {
         onToggleSidebar={() => setIsSidebarOpen(true)}
         onRefreshData={handleRefresh}
         isRefreshing={isRefreshing}
+        onLogout={handleLogout}
       />
 
       {/* Navigation Drawer */}

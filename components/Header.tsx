@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Menu } from 'lucide-react';
+import { Menu, LogOut } from 'lucide-react';
 import { UserProfile, CellGroup } from '../types';
 
 interface HeaderProps {
@@ -12,11 +12,13 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   onRefreshData?: () => void;
   isRefreshing?: boolean;
+  onLogout?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   user,
   onToggleSidebar,
+  onLogout,
 }) => {
   return (
     <header className="bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none">
@@ -44,6 +46,20 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Right section: Sair / Trocar Usuário */}
+          {onLogout && (
+            <button
+              id="btn-header-logout"
+              type="button"
+              onClick={onLogout}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-200 hover:text-white bg-rose-500/20 hover:bg-rose-600/30 border border-rose-400/30 transition-all cursor-pointer shadow-xs shrink-0"
+              title="Deslogar e trocar de conta"
+            >
+              <LogOut size={15} />
+              <span className="hidden sm:inline">Sair</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
