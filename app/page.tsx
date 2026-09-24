@@ -83,8 +83,8 @@ export default function Home() {
   const [isCheckingSession, setIsCheckingSession] = useState<boolean>(true);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
-  // Tela inicial após login direcionada para Minha Célula
-  const [activeScreen, setActiveScreen] = useState<ActiveScreen>('my_cell');
+  // Tela inicial após login direcionada para Feed de Notícias
+  const [activeScreen, setActiveScreen] = useState<ActiveScreen>('feed');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
 
   // Logged in user profile (contains churchId, churchName, role, sector, etc.)
@@ -199,6 +199,7 @@ export default function Home() {
         setUser(cached);
         setIsAuthenticated(true);
         setIsCheckingSession(false);
+        setActiveScreen('feed');
         loadChurchData(cached.churchId, cached.currentCellId, cached.id);
       }
 
@@ -208,6 +209,7 @@ export default function Home() {
           if (sessionUser) {
             setUser(sessionUser);
             setIsAuthenticated(true);
+            setActiveScreen('feed');
             loadChurchData(
               sessionUser.churchId,
               sessionUser.currentCellId,
