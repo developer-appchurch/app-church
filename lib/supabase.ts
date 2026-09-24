@@ -163,6 +163,34 @@ export const AppChurchService = {
   supabaseUrl,
 
   /**
+   * Limpa o cache local de dados (membros, células, posts, avisos) para sincronização limpa do banco
+   */
+  clearDataCache(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      removeFromStorage(STORAGE_KEYS.MEMBERS);
+      removeFromStorage(STORAGE_KEYS.CELLS);
+      removeFromStorage(STORAGE_KEYS.POSTS);
+      removeFromStorage(STORAGE_KEYS.ANNOUNCEMENTS);
+      removeFromStorage(STORAGE_KEYS.TRACKS);
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (
+          key &&
+          (key.startsWith('appchurch_members') ||
+            key.startsWith('appchurch_cells') ||
+            key.startsWith('appchurch_posts') ||
+            key.startsWith('appchurch_announcements'))
+        ) {
+          localStorage.removeItem(key);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  },
+
+  /**
    * Obtém o usuário em cache local instantaneamente (0ms) para inicialização otimista
    */
   getCachedUser(): UserProfile | null {
@@ -1278,11 +1306,25 @@ export const AppChurchService = {
     if (supabase) {
       try {
         // 1. Busca todas as unidades ativas da igreja
-        const { data: units, error: uErr } = await supabase
+        let unitQuery = supabase
           .from('unidades')
           .select('id, igreja_id, nome, pai_id')
-          .eq('igreja_id', churchId)
           .eq('ativo', true);
+
+        if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+          unitQuery = unitQuery.eq('igreja_id', churchId);
+        }
+
+        let { data: units, error: uErr } = await unitQuery;
+
+        if ((!units || units.length === 0) && churchId && churchId !== 'all') {
+          const allUnitsRes = await supabase
+            .from('unidades')
+            .select('id, igreja_id, nome, pai_id')
+            .eq('ativo', true);
+          units = allUnitsRes.data;
+          uErr = allUnitsRes.error;
+        }
 
         if (!uErr && units && units.length > 0) {
           const unitIds = units.map((u: any) => u.id);
@@ -1290,7 +1332,7 @@ export const AppChurchService = {
           // 2. Busca detalhes de células (dia, horário, endereço, etc.)
           const { data: celulasData } = await supabase
             .from('celulas')
-            .select('*')
+            .select('unidade_id, endereco, dia_reuniao, horario_reuniao, quantidade_membros')
             .in('unidade_id', unitIds);
 
           const celulaMap = new Map<string, any>();
@@ -1469,30 +1511,59 @@ export const AppChurchService = {
 
   /**
    * Get Members - STRICTLY filtered by churchId and optionally cellId
-   * Guarantees members are differentiated by the church they belong to.
+   * Usa projeção de colunas explícitas (sem senha_hash) para evitar erro de RLS/Column Security e nunca zera a lista em caso de falha.
    */
   async getMembers(churchId: string, cellId?: string): Promise<CellMember[]> {
+    const EXPLICIT_MEMBER_COLUMNS = 'id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
+    const EXPLICIT_LEGACY_COLUMNS = 'id, igreja_id, celula_id, funcao_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
+
     if (supabase) {
       try {
-        let query = supabase.from('membros').select('*').eq('igreja_id', churchId);
-        if (cellId) {
-          query = query.or(`unidade_id.eq.${cellId},celula_id.eq.${cellId}`);
-        }
-        let { data, error } = await query.order('nome');
+        let data: any[] | null = null;
+        let error: any = null;
 
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          let legQuery = supabase.from('members').select('*').eq('igreja_id', churchId);
+        let query = supabase.from('membros').select(EXPLICIT_MEMBER_COLUMNS);
+        if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+          query = query.eq('igreja_id', churchId);
+        }
+        if (cellId) {
+          query = query.eq('unidade_id', cellId);
+        }
+        const initialRes = await query.order('nome');
+        data = initialRes.data;
+        error = initialRes.error;
+
+        if (error) {
+          console.error('[AppChurchService.getMembers] Erro real retornado pelo Supabase (tabela membros):', {
+            code: error.code,
+            message: error.message,
+            details: error.details,
+            hint: error.hint,
+          });
+        }
+
+        // Se a tabela membros falhar ou não existir, tenta a tabela legacy members
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.code === '42703')) {
+          let legQuery = supabase.from('members').select(EXPLICIT_LEGACY_COLUMNS);
+          if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+            legQuery = legQuery.eq('igreja_id', churchId);
+          }
           if (cellId) legQuery = legQuery.eq('celula_id', cellId);
           const legRes = await legQuery.order('nome');
-          data = legRes.data;
-          error = legRes.error;
+          if (legRes.error) {
+            console.error('[AppChurchService.getMembers] Erro real retornado pela tabela legacy members:', legRes.error);
+          } else {
+            data = legRes.data;
+            error = null;
+          }
         }
 
-        if (!error && data) {
+        // Se a consulta foi bem sucedida e retornou dados do banco
+        if (!error && data && Array.isArray(data)) {
           const members: CellMember[] = data.map((m: any) => ({
             id: m.id,
-            churchId: m.igreja_id,
-            cellId: m.unidade_id || m.celula_id,
+            churchId: m.igreja_id || churchId,
+            cellId: m.unidade_id || m.celula_id || m.cell_id || '',
             roleId: m.papel_id || m.funcao_id,
             role: (m.funcao as UserRole) || 'Membro',
             name: m.nome,
@@ -1508,19 +1579,46 @@ export const AppChurchService = {
             auth_user_id: m.auth_user_id || undefined,
             notes: m.observacoes || '',
           }));
+
+          // Atualiza cache local apenas quando a consulta tem sucesso
           saveToStorage(STORAGE_KEYS.MEMBERS, members);
+
+          if (cellId) {
+            return members.filter((m) => m.cellId === cellId);
+          }
           return members;
         }
-      } catch (e) {
-        console.warn('Erro ao buscar membros no Supabase:', e);
+
+        // Se houve erro na consulta, mantém os dados anteriores do cache para NUNCA zerar a lista na UI
+        if (error) {
+          const cached = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, []);
+          if (cached && cached.length > 0) {
+            let filtered = cached;
+            if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+              filtered = filtered.filter((m) => m.churchId === churchId);
+            }
+            if (cellId) {
+              filtered = filtered.filter((m) => m.cellId === cellId);
+            }
+            console.warn('[AppChurchService.getMembers] Mantendo dados anteriores do cache devido a erro no banco.');
+            return filtered.length > 0 ? filtered : cached;
+          }
+        }
+      } catch (e: any) {
+        console.error('[AppChurchService.getMembers] Exceção ao consultar membros no Supabase:', e);
       }
     }
+
+    // Fallback de preservação de dados: nunca zera a lista se houver registros anteriores
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
-    let filtered = allMembers.filter((m) => m.churchId === churchId);
+    let filtered = allMembers;
+    if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+      filtered = filtered.filter((m) => m.churchId === churchId);
+    }
     if (cellId) {
       filtered = filtered.filter((m) => m.cellId === cellId);
     }
-    return filtered;
+    return filtered.length > 0 ? filtered : allMembers;
   },
 
   /**
@@ -1705,12 +1803,10 @@ export const AppChurchService = {
           createdViaApi = true;
         } else if (resData?.error) {
           console.warn('[addMember API] Retornou erro:', resData.error);
-          if (resData.error.includes('já está')) {
-            throw new Error(resData.error);
-          }
+          throw new Error(resData.error);
         }
       } catch (apiErr: any) {
-        if (apiErr?.message && apiErr.message.includes('já está')) {
+        if (apiErr?.message) {
           throw apiErr;
         }
         console.warn('[addMember] API de criação indisponível ou falhou, usando fallback direto:', apiErr);
@@ -2742,6 +2838,7 @@ export const AppChurchService = {
 
   /**
    * Save Leadership Track Progress to Supabase (membro_etapas_trilha + trilhas_lideranca) + local cache
+   * Garante que a unidade_id salva seja ESTRITAMENTE a unidade_id (célula) do próprio membro cadastrado.
    */
   async saveLeadershipProgress(
     memberId: string,
@@ -2751,78 +2848,57 @@ export const AppChurchService = {
   ): Promise<void> {
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     const targetMember = allMembers.find((m) => m.id === memberId);
+
     let resolvedChurchId = churchId || targetMember?.churchId;
     let resolvedCellId = cellId || targetMember?.cellId;
 
     if (supabase) {
       try {
-        // Se churchId ou cellId não foram passados ou são inválidos, busca os dados reais no banco
-        if (
-          !resolvedChurchId ||
-          !resolvedCellId ||
-          resolvedChurchId.startsWith('c1000000') ||
-          resolvedCellId.startsWith('e1000000')
-        ) {
-          let dbMem: any = null;
-          const { data: ptMem } = await supabase
-            .from('membros')
-            .select('igreja_id, unidade_id, celula_id')
+        // Consulta no banco de dados para obter a unidade_id e igreja_id REAIS do próprio membro
+        let dbMem: any = null;
+        const { data: ptMem } = await supabase
+          .from('membros')
+          .select('id, igreja_id, unidade_id, celula_id')
+          .eq('id', memberId)
+          .maybeSingle();
+
+        dbMem = ptMem;
+
+        if (!dbMem) {
+          const legMem = await supabase
+            .from('members')
+            .select('id, igreja_id, celula_id')
             .eq('id', memberId)
             .maybeSingle();
+          dbMem = legMem.data;
+        }
 
-          dbMem = ptMem;
-
-          if (!dbMem) {
-            const legMem = await supabase
-              .from('members')
-              .select('igreja_id, celula_id')
-              .eq('id', memberId)
-              .maybeSingle();
-            dbMem = legMem.data;
-          }
-
-          if (dbMem) {
-            if (dbMem.igreja_id) resolvedChurchId = dbMem.igreja_id;
-            if (dbMem.unidade_id || dbMem.celula_id) resolvedCellId = dbMem.unidade_id || dbMem.celula_id;
+        if (dbMem) {
+          if (dbMem.igreja_id) resolvedChurchId = dbMem.igreja_id;
+          if (dbMem.unidade_id || dbMem.celula_id) {
+            resolvedCellId = dbMem.unidade_id || dbMem.celula_id;
           }
         }
 
-        // Se cellId ainda for nulo (ex: pastor sem célula), obtém uma unidade/célula válida da igreja para satisfazer a foreign key
+        // Se cellId ainda for nulo (ex: membro sem célula no pool geral), tenta verificar unidades existentes
         if (!resolvedCellId || resolvedCellId.startsWith('e1000000')) {
-          const { data: firstUnit } = await supabase
-            .from('unidades')
-            .select('id')
-            .eq('igreja_id', resolvedChurchId || '')
-            .limit(1)
-            .maybeSingle();
-          if (firstUnit?.id) {
-            resolvedCellId = firstUnit.id;
-          } else {
-            const { data: firstCell } = await supabase
-              .from('cells')
-              .select('id')
-              .eq('igreja_id', resolvedChurchId || '')
-              .limit(1)
-              .maybeSingle();
-            if (firstCell?.id) {
-              resolvedCellId = firstCell.id;
-            }
+          if (targetMember?.cellId && !targetMember.cellId.startsWith('e1000000')) {
+            resolvedCellId = targetMember.cellId;
           }
         }
 
-        resolvedChurchId = resolvedChurchId || CHURCH_UUIDS.SOBRAL;
-        resolvedCellId = resolvedCellId || CELL_UUIDS.ADONAI;
+        resolvedChurchId = resolvedChurchId || targetMember?.churchId || CHURCH_UUIDS.SOBRAL;
 
         const completedCount = progress.steps.filter((s) => s.completed).length;
         const totalCount = progress.steps.length || 6;
         const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
-        // Upsert summary row into trilhas_lideranca with igreja_id and unidade_id
+        // Upsert summary row into trilhas_lideranca with membro's own igreja_id and unidade_id
         let { error: trackErr } = await supabase.from('trilhas_lideranca').upsert(
           {
             membro_id: memberId,
             igreja_id: resolvedChurchId,
-            unidade_id: resolvedCellId,
+            unidade_id: resolvedCellId || null,
             etapa_atual_id: progress.currentStepId,
             quantidade_etapas_concluidas: completedCount,
             quantidade_total_etapas: totalCount,
@@ -2838,7 +2914,7 @@ export const AppChurchService = {
             {
               membro_id: memberId,
               igreja_id: resolvedChurchId,
-              celula_id: resolvedCellId,
+              celula_id: resolvedCellId || null,
               etapa_atual_id: progress.currentStepId,
               quantidade_etapas_concluidas: completedCount,
               quantidade_total_etapas: totalCount,
@@ -2850,11 +2926,11 @@ export const AppChurchService = {
           );
         }
 
-        // Upsert step rows into membro_etapas_trilha with unidade_id
+        // Upsert step rows into membro_etapas_trilha with membro's own unidade_id
         if (progress.steps && progress.steps.length > 0) {
           const stepRowsPt = progress.steps.map((st) => ({
             membro_id: memberId,
-            unidade_id: resolvedCellId,
+            unidade_id: resolvedCellId || null,
             etapa_id: typeof st.id === 'number' ? st.id : parseInt(String(st.id), 10) || 1,
             concluida: Boolean(st.completed),
             concluida_em: st.completed ? (st.completedAt || new Date().toLocaleDateString('pt-BR')) : null,
@@ -2964,13 +3040,12 @@ export const AppChurchService = {
         }
         const defaultAnyCell = dbUnits && dbUnits.length > 0 ? dbUnits[0].id : CELL_UUIDS.ADONAI;
 
-        // 3. Constrói as linhas para inserção/atualização na tabela membro_etapas_trilha (com unidade_id)
+        // 3. Constrói as linhas para inserção/atualização na tabela membro_etapas_trilha com a unidade_id do próprio membro
         const stepRowsPt = memberIds.map((mId) => {
           const mem = memberMap.get(mId);
-          const resolvedChurch = churchId || mem?.igreja_id || CHURCH_UUIDS.SOBRAL;
-          let resolvedCell = mem?.unidade_id || mem?.celula_id;
-          if (!resolvedCell || resolvedCell.startsWith('e1000000')) {
-            resolvedCell = fallbackCellMap.get(resolvedChurch) || defaultAnyCell;
+          let resolvedCell = mem?.unidade_id || mem?.celula_id || null;
+          if (resolvedCell && resolvedCell.startsWith('e1000000')) {
+            resolvedCell = null;
           }
 
           return {
@@ -3010,13 +3085,13 @@ export const AppChurchService = {
           throw new Error(`Erro ao salvar no banco: ${upsertErr.message}`);
         }
 
-        // 5. Atualiza o resumo de progresso em trilhas_lideranca para cada membro (com unidade_id)
+        // 5. Atualiza o resumo de progresso em trilhas_lideranca para cada membro (com unidade_id do próprio membro)
         for (const mId of memberIds) {
           const mem = memberMap.get(mId);
           const resolvedChurch = churchId || mem?.igreja_id || CHURCH_UUIDS.SOBRAL;
-          let resolvedCell = mem?.unidade_id || mem?.celula_id;
-          if (!resolvedCell || resolvedCell.startsWith('e1000000')) {
-            resolvedCell = fallbackCellMap.get(resolvedChurch) || defaultAnyCell;
+          let resolvedCell = mem?.unidade_id || mem?.celula_id || null;
+          if (resolvedCell && resolvedCell.startsWith('e1000000')) {
+            resolvedCell = null;
           }
 
           let { data: allSteps } = await supabase

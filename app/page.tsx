@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import {
   ActiveScreen,
   AttendanceStatus,
@@ -115,33 +115,73 @@ export default function Home() {
   // Contexto da igreja selecionada para estruturação hierárquica
   const [targetChurchContext, setTargetChurchContext] = useState<{ id: string; name: string } | null>(null);
   const [hierarchyLevelIndex, setHierarchyLevelIndex] = useState<number>(0);
+  const [refreshErrorBanner, setRefreshErrorBanner] = useState<string>('');
+
+  // 1. React Query: Consulta de Células com keepPreviousData e enabled condicionado a churchId
+  const {
+    data: queriedCells,
+    refetch: refetchCells,
+  } = useQuery({
+    queryKey: ['church-cells', user?.churchId],
+    queryFn: async () => {
+      if (!user?.churchId) return [];
+      return AppChurchService.getCells(user.churchId);
+    },
+    enabled: Boolean(user?.churchId),
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60 * 2,
+  });
+
+  // 2. React Query: Consulta de Membros com keepPreviousData e enabled condicionado a churchId
+  const {
+    data: queriedMembers,
+    refetch: refetchMembers,
+  } = useQuery({
+    queryKey: ['church-members', user?.churchId],
+    queryFn: async () => {
+      if (!user?.churchId) return [];
+      return AppChurchService.getMembers(user.churchId);
+    },
+    enabled: Boolean(user?.churchId),
+    placeholderData: keepPreviousData,
+    staleTime: 1000 * 60 * 2,
+  });
+
+  // Combina dados em cache/estado com dados do React Query garantindo que NUNCA zere em falhas
+  const effectiveCells = (queriedCells && queriedCells.length > 0) ? queriedCells : cells;
+  const effectiveMembers = (queriedMembers && queriedMembers.length > 0) ? queriedMembers : members;
 
   // Load church data isolated by churchId
   const loadChurchData = useCallback(
     async (churchId: string, initialCellId?: string, currentUserId?: string) => {
       try {
-        const churchCells = await AppChurchService.getCells(churchId);
-        setCells(churchCells);
+        const [churchCells, churchMembers, churchPosts, churchAnnouncements] = await Promise.all([
+          AppChurchService.getCells(churchId),
+          AppChurchService.getMembers(churchId),
+          AppChurchService.getFeedPosts(churchId, undefined, currentUserId, 10),
+          AppChurchService.getAnnouncements(churchId),
+        ]);
 
-        const targetCellId =
-          initialCellId && churchCells.some((c) => c.id === initialCellId)
-            ? initialCellId
-            : churchCells[0]?.id || '';
-        setSelectedCellId(targetCellId);
+        if (churchCells && churchCells.length > 0) {
+          setCells(churchCells);
+          const targetCellId =
+            initialCellId && churchCells.some((c) => c.id === initialCellId)
+              ? initialCellId
+              : churchCells[0]?.id || '';
+          setSelectedCellId(targetCellId);
+        }
 
-        const churchMembers = await AppChurchService.getMembers(churchId);
-        setMembers(churchMembers);
+        if (churchMembers && churchMembers.length > 0) {
+          setMembers(churchMembers);
+        }
 
-        const churchPosts = await AppChurchService.getFeedPosts(
-          churchId,
-          undefined,
-          currentUserId,
-          10
-        );
-        setPosts(churchPosts);
+        if (churchPosts) {
+          setPosts(churchPosts);
+        }
 
-        const churchAnnouncements = await AppChurchService.getAnnouncements(churchId);
-        setAnnouncements(churchAnnouncements);
+        if (churchAnnouncements) {
+          setAnnouncements(churchAnnouncements);
+        }
       } catch (err) {
         console.warn('Erro ao carregar dados da igreja:', err);
       }
@@ -204,20 +244,47 @@ export default function Home() {
     });
   }, []);
 
-  // Refresh handler (re-queries Supabase / storage)
+  // Refresh handler (sincroniza com o banco sem apagar os dados da memória, mantendo estado anterior em caso de falha)
   const handleRefresh = async () => {
     if (!user) return;
     setIsRefreshing(true);
+    setRefreshErrorBanner('');
     try {
-      await loadChurchData(user.churchId, selectedCellId, user.id);
+      // 1. Invalida as queries do React Query (mantém os dados na tela graças ao keepPreviousData)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
+      ]);
+
+      // 2. Re-executa as buscas no banco diretamente
+      const [freshCells, freshMembers] = await Promise.all([
+        AppChurchService.getCells(user.churchId),
+        AppChurchService.getMembers(user.churchId),
+      ]);
+
+      if (freshCells && freshCells.length > 0) {
+        setCells(freshCells);
+      }
+      if (freshMembers && freshMembers.length > 0) {
+        setMembers(freshMembers);
+      }
+
+      await Promise.all([
+        AppChurchService.getFeedPosts(user.churchId, undefined, user.id, 10).then(setPosts),
+        AppChurchService.getAnnouncements(user.churchId).then(setAnnouncements),
+      ]);
+
       const status = await AppChurchService.checkConnection();
       setConnectionStatus(status);
-    } catch (err) {
-      console.warn('Refresh error:', err);
+    } catch (err: any) {
+      console.error('[handleRefresh] Erro ao sincronizar dados com o Supabase:', err);
+      setRefreshErrorBanner('Não foi possível conectar ao banco de dados neste momento. Os dados anteriores foram mantidos.');
     } finally {
       setTimeout(() => {
         setIsRefreshing(false);
-      }, 600);
+      }, 400);
     }
   };
 
@@ -258,10 +325,39 @@ export default function Home() {
     router.replace('/login');
   };
 
-  // Cell Members Management
+  // Cell Members Management: Atualização instantânea da galeria e sincronização automática
   const handleAddMember = async (newMemberData: Omit<CellMember, 'id'>) => {
     const created = await AppChurchService.addMember(newMemberData);
-    setMembers((prev) => [created, ...prev]);
+
+    // 1. Atualização otimista imediata no cache do React Query (0ms delay na galeria)
+    if (user?.churchId) {
+      queryClient.setQueryData(['church-members', user.churchId], (old: CellMember[] | undefined) => {
+        const list = old || [];
+        return [created, ...list.filter((m) => m.id !== created.id)];
+      });
+    }
+
+    // 2. Atualização imediata no estado local de membros
+    setMembers((prev) => [created, ...prev.filter((m) => m.id !== created.id)]);
+
+    // 3. Atualização otimista da contagem da célula ativa
+    if (created.cellId) {
+      setCells((prev) =>
+        prev.map((c) =>
+          c.id === created.cellId ? { ...c, memberCount: (c.memberCount || 0) + 1 } : c
+        )
+      );
+    }
+
+    // 4. Revalidação em segundo plano sem necessidade de clique manual
+    if (user?.churchId) {
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
+      ]).catch((err) => console.warn('Aviso na invalidação de queries pós-cadastro:', err));
+    }
   };
 
   const handleUpdateAttendance = async (
@@ -284,7 +380,7 @@ export default function Home() {
     progress: LeadershipTrackProgress
   ) => {
     const resolvedChurchId = selectedMemberForTrack?.churchId || user?.churchId;
-    const resolvedCellId = selectedMemberForTrack?.cellId || currentCell?.id;
+    const resolvedCellId = selectedMemberForTrack?.cellId || undefined;
     await AppChurchService.saveLeadershipProgress(memberId, progress, resolvedChurchId, resolvedCellId);
 
     const completedCount = progress.steps.filter((s) => s.completed).length;
@@ -395,17 +491,17 @@ export default function Home() {
 
   // Current active cell
   const currentCell: CellGroup =
-    cells.find((c) => c.id === selectedCellId) ||
-    cells[0] || {
+    effectiveCells.find((c) => c.id === selectedCellId) ||
+    effectiveCells[0] || {
       id: 'cell-pending',
       churchId: user?.churchId || 'church-default',
-      name: cells.length === 0 ? 'Nenhuma Célula Cadastrada' : 'Adonai',
+      name: effectiveCells.length === 0 ? 'Nenhuma Célula Cadastrada' : 'Adonai',
       leaderName: user?.name || 'Pastor Titular',
-      sectorName: cells.length === 0 ? 'Pendente' : 'Setor Geral',
-      address: cells.length === 0 ? 'Pendente de cadastro' : 'Rua Sumaré, 245 - Junco',
+      sectorName: effectiveCells.length === 0 ? 'Pendente' : 'Setor Geral',
+      address: effectiveCells.length === 0 ? 'Pendente de cadastro' : 'Rua Sumaré, 245 - Junco',
       meetingDay: 'Quinta-feira',
       meetingTime: '19:30',
-      memberCount: members.length,
+      memberCount: effectiveMembers.length,
     };
 
   // 0. Splash / Skeleton durante a validação da sessão para evitar piscar a tela de login
@@ -445,7 +541,7 @@ export default function Home() {
       {/* Top Header replicating user screenshot */}
       <Header
         user={user}
-        cells={cells}
+        cells={effectiveCells}
         selectedCellId={selectedCellId}
         onSelectCell={setSelectedCellId}
         onToggleSidebar={() => setIsSidebarOpen(true)}
@@ -453,6 +549,21 @@ export default function Home() {
         isRefreshing={isRefreshing}
         onLogout={handleLogout}
       />
+
+      {refreshErrorBanner && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center justify-between text-xs text-amber-800 animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={15} className="text-amber-600 shrink-0" />
+            <span>{refreshErrorBanner}</span>
+          </div>
+          <button
+            onClick={() => setRefreshErrorBanner('')}
+            className="text-amber-700 hover:text-amber-900 p-1 cursor-pointer"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Navigation Drawer */}
       <Sidebar
@@ -487,11 +598,11 @@ export default function Home() {
 
         {activeScreen === 'my_cell' && (
           <MyCellView
-            members={members}
+            members={effectiveMembers}
             cell={currentCell}
             churchName={user.churchName}
             currentUser={user}
-            cells={cells}
+            cells={effectiveCells}
             onSelectCell={setSelectedCellId}
             onOpenLeadershipTrack={(member) => setSelectedMemberForTrack(member)}
             onAddMember={handleAddMember}
@@ -501,17 +612,17 @@ export default function Home() {
 
         {activeScreen === 'leadership_track' && (
           <LeadershipOverviewView
-            members={members}
+            members={effectiveMembers}
             currentCell={currentCell}
             currentUser={user}
-            cells={cells}
+            cells={effectiveCells}
             onSelectCell={setSelectedCellId}
             onOpenMemberTrack={(member) => setSelectedMemberForTrack(member)}
           />
         )}
 
         {activeScreen === 'reports' && (
-          <WeeklyReportView currentCell={currentCell} members={members} />
+          <WeeklyReportView currentCell={currentCell} members={effectiveMembers} />
         )}
 
         {activeScreen === 'hierarchy_units' && user && (

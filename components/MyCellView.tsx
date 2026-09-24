@@ -699,6 +699,14 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       setIsCheckingLogin(false);
     }
 
+    // Validação de senha: se informada, deve ter no mínimo 6 caracteres para autenticação
+    const cleanPassword = newPassword.trim();
+    if (cleanPassword && cleanPassword.length < 6) {
+      setFormError('A senha de acesso deve ter no mínimo 6 caracteres para permitir o login no autenticador.');
+      setIsSubmitting(false);
+      return;
+    }
+
     // Validação estrita de nível de hierarquia
     const targetRoleObj = availableRoles.find((r) => r.name === effectiveRole);
     if (targetRoleObj && targetRoleObj.hierarchyLevel > userHierarchyLevel) {
@@ -711,7 +719,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       await onAddMember({
         name: newName.trim(),
         login: effectiveLogin,
-        password: newPassword.trim() || '123456',
+        password: cleanPassword || '123456',
         role: effectiveRole,
         roleId: targetRoleObj?.id,
         neighborhood: newNeighborhood.trim(), // Deixa em branco caso o usuário não informe
@@ -1322,7 +1330,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 bg-white focus:outline-none focus:border-[#052447]"
                     />
                     <p className="mt-1 text-[10px] text-slate-500">
-                      Senha para este membro entrar na aplicação.
+                      Mínimo 6 caracteres. Deixe em branco para usar o padrão (123456).
                     </p>
                   </div>
                 </div>

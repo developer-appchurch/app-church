@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Menu, LogOut } from 'lucide-react';
+import { Menu, RotateCw } from 'lucide-react';
 import { UserProfile, CellGroup } from '../types';
 
 interface HeaderProps {
@@ -18,7 +18,8 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   user,
   onToggleSidebar,
-  onLogout,
+  onRefreshData,
+  isRefreshing = false,
 }) => {
   return (
     <header className="bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none">
@@ -47,17 +48,20 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Right section: Sair / Trocar Usuário */}
-          {onLogout && (
+          {/* Right section: Botão de Refresh / Sincronização direta com o Banco */}
+          {onRefreshData && (
             <button
               id="btn-header-logout"
               type="button"
-              onClick={onLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-200 hover:text-white bg-rose-500/20 hover:bg-rose-600/30 border border-rose-400/30 transition-all cursor-pointer shadow-xs shrink-0"
-              title="Deslogar e trocar de conta"
+              onClick={onRefreshData}
+              disabled={isRefreshing}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-sky-200 hover:text-white bg-sky-500/20 hover:bg-sky-600/30 active:scale-95 border border-sky-400/30 transition-all cursor-pointer shadow-xs shrink-0 disabled:opacity-60"
+              title="Atualizar dados diretamente do banco de dados"
             >
-              <LogOut size={15} />
-              <span className="hidden sm:inline">Sair</span>
+              <RotateCw size={15} className={isRefreshing ? 'animate-spin text-sky-300' : ''} />
+              <span className="hidden sm:inline">
+                {isRefreshing ? 'Atualizando...' : 'Atualizar Banco'}
+              </span>
             </button>
           )}
         </div>

@@ -287,7 +287,12 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       const cellName = targetCellObj?.name || resData.cellName || 'Célula';
 
       // Invalida cache do React Query para atualização instantânea
-      await queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
+      ]);
 
       setActionSuccessBanner(
         `Membro "${selectedMemberToAssign.name}" vinculado com sucesso à "${cellName}"!`
@@ -327,7 +332,12 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         throw new Error(resData?.error || 'Falha ao desvincular membro.');
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
+      ]);
       setActionSuccessBanner(`"${member.name}" foi movido para o cadastro geral (sem célula).`);
     } catch (err: any) {
       console.error('Erro ao desvincular membro:', err);
@@ -355,7 +365,12 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         throw new Error(resData?.error || 'Falha ao excluir membro.');
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
+      ]);
       setActionSuccessBanner(`"${member.name}" e seu acesso de login foram excluídos com sucesso.`);
     } catch (err: any) {
       console.error('Erro ao excluir membro:', err);
@@ -396,7 +411,12 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         throw new Error(resData?.error || 'Falha ao cadastrar membro.');
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
+      ]);
 
       setActionSuccessBanner(
         `Membro "${newMemberName.trim()}" cadastrado com sucesso ${

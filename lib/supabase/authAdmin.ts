@@ -22,9 +22,16 @@ export function getSyntheticMemberEmail(login: string): string {
  * com confirmação de email automática (email_confirm: true) para permitir login imediato.
  * Suporta Admin API (service role) com fallback para Auth SignUp (anon/server key).
  */
-export async function createAuthUserForMember(params: CreateMemberAuthParams): Promise<string | null> {
+export async function createAuthUserForMember(params: CreateMemberAuthParams): Promise<string> {
   const cleanLogin = (params.login || '').trim().toLowerCase();
-  const rawPass = (params.password || '').trim() || '123456';
+  let rawPass = (params.password || '').trim();
+
+  if (!rawPass) {
+    rawPass = '123456';
+  } else if (rawPass.length < 6) {
+    throw new Error('A senha deve conter no mínimo 6 caracteres para autenticação no Supabase.');
+  }
+
   const syntheticEmail = getSyntheticMemberEmail(cleanLogin);
 
   // 1. Tenta via Supabase Admin Client (Service Role Key)
@@ -52,7 +59,11 @@ export async function createAuthUserForMember(params: CreateMemberAuthParams): P
 
       // Se o usuário já existia no auth.users, atualiza a senha e metadata
       if (createErr && (createErr.message?.includes('already') || createErr.message?.includes('exists') || createErr.status === 422)) {
-        const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+        const { data: listData, error: listErr } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        if (listErr) {
+          console.error('[createAuthUserForMember] Erro ao listar usuários no admin:', listErr);
+        }
+
         const existingUser = listData?.users?.find(
           (u) =>
             u.email?.toLowerCase() === syntheticEmail.toLowerCase() ||
@@ -60,7 +71,7 @@ export async function createAuthUserForMember(params: CreateMemberAuthParams): P
         );
 
         if (existingUser) {
-          await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
+          const { data: updatedUser, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(existingUser.id, {
             password: rawPass,
             email_confirm: true,
             app_metadata: {
@@ -75,11 +86,28 @@ export async function createAuthUserForMember(params: CreateMemberAuthParams): P
               login: cleanLogin,
             },
           });
+
+          if (updateErr) {
+            console.error('[createAuthUserForMember] Erro ao atualizar senha do usuário existente no auth:', updateErr);
+            throw new Error(`Falha ao sincronizar autenticador: ${updateErr.message}`);
+          }
+
+          if (updatedUser?.user?.id) {
+            return updatedUser.user.id;
+          }
           return existingUser.id;
         }
       }
+
+      if (createErr) {
+        console.error('[createAuthUserForMember] Erro no admin.createUser:', createErr);
+        throw new Error(`Falha ao criar credencial no Supabase Auth: ${createErr.message}`);
+      }
     } catch (err: any) {
       console.warn('[createAuthUserForMember] Falha no admin.createUser, tentando fallback:', err);
+      if (err.message && !err.message.includes('admin.createUser')) {
+        throw err;
+      }
     }
   }
 
@@ -107,7 +135,7 @@ export async function createAuthUserForMember(params: CreateMemberAuthParams): P
 
       // Se o usuário já estava cadastrado, tenta obter o id via signIn
       if (signUpErr) {
-        const { data: signInData } = await serverClient.auth.signInWithPassword({
+        const { data: signInData, error: signInErr } = await serverClient.auth.signInWithPassword({
           email: syntheticEmail,
           password: rawPass,
         });
@@ -115,13 +143,17 @@ export async function createAuthUserForMember(params: CreateMemberAuthParams): P
         if (signInData?.user?.id) {
           return signInData.user.id;
         }
+        if (signInErr) {
+          throw new Error(`Falha na autenticação do membro: ${signInErr.message}`);
+        }
       }
-    } catch (fallbackErr) {
+    } catch (fallbackErr: any) {
       console.error('[createAuthUserForMember] Exceção no fallback de auth:', fallbackErr);
+      throw fallbackErr;
     }
   }
 
-  return null;
+  throw new Error('Supabase Auth indisponível para vincular autenticador.');
 }
 
 /**

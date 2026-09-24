@@ -78,19 +78,34 @@ export async function POST(req: NextRequest) {
     const validChurchId = churchId && String(churchId).trim() !== '' ? String(churchId).trim() : null;
     const cleanPass = (password || '123456').trim();
 
-    // 1. Cria usuário correspondente na tabela auth.users com confirmação ativa
-    let authUserId: string | null = null;
-    authUserId = await createAuthUserForMember({
-      churchId: validChurchId,
-      memberId,
-      name: name.trim(),
-      login: cleanLogin,
-      password: cleanPass,
-      email: email?.trim() || null,
-      role,
-    });
+    if (cleanPass.length < 6) {
+      return NextResponse.json(
+        { error: 'A senha de acesso deve ter no mínimo 6 caracteres para permitir o login.' },
+        { status: 400 }
+      );
+    }
 
-    // 2. Insere na tabela membros
+    // 1. Cria ou sincroniza PRIMEIRO o usuário na tabela auth.users com confirmação ativa
+    let authUserId: string;
+    try {
+      authUserId = await createAuthUserForMember({
+        churchId: validChurchId,
+        memberId,
+        name: name.trim(),
+        login: cleanLogin,
+        password: cleanPass,
+        email: email?.trim() || null,
+        role,
+      });
+    } catch (authErr: any) {
+      console.error('[POST /api/members/create] Falha ao criar autenticador no auth.users:', authErr);
+      return NextResponse.json(
+        { error: `Falha ao provisionar autenticador: ${authErr.message || 'Erro no Supabase Auth'}` },
+        { status: 400 }
+      );
+    }
+
+    // 2. Insere na tabela membros com o auth_user_id devidamente vinculado
     const ptPayload: any = {
       id: memberId,
       igreja_id: validChurchId,
