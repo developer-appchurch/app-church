@@ -456,11 +456,20 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
         currentCell?.churchId ||
         levelMembers[0]?.churchId;
 
+      // Mapeia o cellId (unidade_id) exato de cada membro selecionado
+      const memberCellMap: Record<string, string> = {};
+      [...levelMembers, ...members].forEach((m) => {
+        if (m.id && m.cellId && !memberCellMap[m.id]) {
+          memberCellMap[m.id] = m.cellId;
+        }
+      });
+
       await AppChurchService.batchCompleteStep(
         idsToComplete,
         selectedStageFilter,
         resolvedChurchId,
-        currentUser?.name
+        currentUser?.name,
+        memberCellMap
       );
 
       // Atualiza imediatamente o mapa local de status das etapas para refletir na interface

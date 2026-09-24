@@ -2846,19 +2846,19 @@ export const AppChurchService = {
     churchId?: string,
     cellId?: string
   ): Promise<void> {
-    const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+    const allMembers = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     const targetMember = allMembers.find((m) => m.id === memberId);
 
     let resolvedChurchId = churchId || targetMember?.churchId;
-    let resolvedCellId = cellId || targetMember?.cellId;
+    let resolvedCellId = cellId || targetMember?.cellId || null;
 
     if (supabase) {
       try {
-        // Consulta no banco de dados para obter a unidade_id e igreja_id REAIS do próprio membro
+        // 1. Consulta no banco de dados para obter a unidade_id e igreja_id REAIS do próprio membro
         let dbMem: any = null;
         const { data: ptMem } = await supabase
           .from('membros')
-          .select('id, igreja_id, unidade_id, celula_id')
+          .select('id, igreja_id, unidade_id')
           .eq('id', memberId)
           .maybeSingle();
 
@@ -2880,11 +2880,9 @@ export const AppChurchService = {
           }
         }
 
-        // Se cellId ainda for nulo (ex: membro sem célula no pool geral), tenta verificar unidades existentes
-        if (!resolvedCellId || resolvedCellId.startsWith('e1000000')) {
-          if (targetMember?.cellId && !targetMember.cellId.startsWith('e1000000')) {
-            resolvedCellId = targetMember.cellId;
-          }
+        // 2. Se o banco não tiver unidade_id, usa o cellId do targetMember em memória
+        if (!resolvedCellId && targetMember?.cellId) {
+          resolvedCellId = targetMember.cellId;
         }
 
         resolvedChurchId = resolvedChurchId || targetMember?.churchId || CHURCH_UUIDS.SOBRAL;
@@ -2943,6 +2941,14 @@ export const AppChurchService = {
             .from('membro_etapas_trilha')
             .upsert(stepRowsPt, { onConflict: 'membro_id,etapa_id' });
 
+          if (stepsErr && (stepsErr.code === '42P01' || stepsErr.message?.includes('does not exist'))) {
+            // Tenta tabela com nome no singular se existir
+            const resSingular = await supabase
+              .from('membro_etapa_trilha')
+              .upsert(stepRowsPt, { onConflict: 'membro_id,etapa_id' });
+            stepsErr = resSingular.error;
+          }
+
           if (stepsErr && (stepsErr.code === '42P01' || stepsErr.message?.includes('does not exist') || stepsErr.message?.includes('unidade_id') || stepsErr.code === 'PGRST204')) {
             const stepRowsLeg = stepRowsPt.map((st) => ({
               membro_id: st.membro_id,
@@ -2992,30 +2998,33 @@ export const AppChurchService = {
 
   /**
    * Conclui uma etapa do trilho para múltiplos membros em lote (grava diretamente no Supabase)
+   * Garante que a unidade_id salva para cada membro seja estritamente a unidade/célula à qual o membro pertence.
    */
   async batchCompleteStep(
     memberIds: string[],
     stepId: string | number,
     churchId?: string,
-    validatedBy?: string
+    validatedBy?: string,
+    memberCellMapOverride?: Record<string, string>
   ): Promise<void> {
     if (!memberIds || memberIds.length === 0) return;
 
     const dateStr = new Date().toLocaleDateString('pt-BR');
     const numericStepId = typeof stepId === 'number' ? stepId : parseInt(String(stepId), 10) || 1;
+    const allMembers = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
 
     if (supabase) {
       try {
-        // 1. Busca dados dos membros selecionados no Supabase
+        // 1. Busca dados dos membros selecionados na tabela membros
         let dbMembers: any[] | null = null;
         const { data: ptMembers, error: memErr } = await supabase
           .from('membros')
-          .select('id, unidade_id, celula_id, igreja_id')
+          .select('id, unidade_id, igreja_id')
           .in('id', memberIds);
 
         dbMembers = ptMembers;
 
-        if (memErr && (memErr.code === '42P01' || memErr.message?.includes('does not exist'))) {
+        if (memErr && (memErr.code === '42P01' || memErr.message?.includes('does not exist') || memErr.code === '42703')) {
           const legMem = await supabase
             .from('members')
             .select('id, celula_id, igreja_id')
@@ -3028,25 +3037,17 @@ export const AppChurchService = {
           dbMembers.forEach((m: any) => memberMap.set(m.id, m));
         }
 
-        // 2. Busca células/unidades disponíveis para fallback caso algum membro não tenha unidade vinculada
-        const { data: dbUnits } = await supabase.from('unidades').select('id, igreja_id');
-        const fallbackCellMap = new Map<string, string>();
-        if (dbUnits) {
-          dbUnits.forEach((c: any) => {
-            if (c.igreja_id && !fallbackCellMap.has(c.igreja_id)) {
-              fallbackCellMap.set(c.igreja_id, c.id);
-            }
-          });
-        }
-        const defaultAnyCell = dbUnits && dbUnits.length > 0 ? dbUnits[0].id : CELL_UUIDS.ADONAI;
-
-        // 3. Constrói as linhas para inserção/atualização na tabela membro_etapas_trilha com a unidade_id do próprio membro
+        // 2. Constrói as linhas para inserção/atualização na tabela membro_etapas_trilha com a unidade_id do próprio membro
         const stepRowsPt = memberIds.map((mId) => {
           const mem = memberMap.get(mId);
-          let resolvedCell = mem?.unidade_id || mem?.celula_id || null;
-          if (resolvedCell && resolvedCell.startsWith('e1000000')) {
-            resolvedCell = null;
-          }
+          const localMem = allMembers.find((m) => m.id === mId);
+          const overrideCell = memberCellMapOverride?.[mId];
+
+          // Prioridade da unidade_id:
+          // 1º banco de dados membros.unidade_id
+          // 2º map override vindo do componente
+          // 3º memória local/cache do membro
+          let resolvedCell = mem?.unidade_id || mem?.celula_id || overrideCell || localMem?.cellId || null;
 
           return {
             membro_id: mId,
@@ -3059,10 +3060,18 @@ export const AppChurchService = {
           };
         });
 
-        // 4. Executa o upsert em lote na tabela membro_etapas_trilha
+        // 3. Executa o upsert em lote na tabela membro_etapas_trilha
         let { error: upsertErr } = await supabase
           .from('membro_etapas_trilha')
           .upsert(stepRowsPt, { onConflict: 'membro_id,etapa_id' });
+
+        if (upsertErr && (upsertErr.code === '42P01' || upsertErr.message?.includes('does not exist'))) {
+          // Tenta tabela com nome singular membro_etapa_trilha caso configurada no banco
+          const resSingular = await supabase
+            .from('membro_etapa_trilha')
+            .upsert(stepRowsPt, { onConflict: 'membro_id,etapa_id' });
+          upsertErr = resSingular.error;
+        }
 
         if (upsertErr && (upsertErr.code === '42P01' || upsertErr.message?.includes('does not exist') || upsertErr.message?.includes('unidade_id') || upsertErr.code === 'PGRST204')) {
           const stepRowsLeg = stepRowsPt.map((st) => ({
@@ -3085,19 +3094,26 @@ export const AppChurchService = {
           throw new Error(`Erro ao salvar no banco: ${upsertErr.message}`);
         }
 
-        // 5. Atualiza o resumo de progresso em trilhas_lideranca para cada membro (com unidade_id do próprio membro)
+        // 4. Atualiza o resumo de progresso em trilhas_lideranca para cada membro com a unidade_id do próprio membro
         for (const mId of memberIds) {
           const mem = memberMap.get(mId);
-          const resolvedChurch = churchId || mem?.igreja_id || CHURCH_UUIDS.SOBRAL;
-          let resolvedCell = mem?.unidade_id || mem?.celula_id || null;
-          if (resolvedCell && resolvedCell.startsWith('e1000000')) {
-            resolvedCell = null;
-          }
+          const localMem = allMembers.find((m) => m.id === mId);
+          const overrideCell = memberCellMapOverride?.[mId];
+          const resolvedChurch = churchId || mem?.igreja_id || localMem?.churchId || CHURCH_UUIDS.SOBRAL;
+          let resolvedCell = mem?.unidade_id || mem?.celula_id || overrideCell || localMem?.cellId || null;
 
           let { data: allSteps } = await supabase
             .from('membro_etapas_trilha')
             .select('etapa_id, concluida')
             .eq('membro_id', mId);
+
+          if (!allSteps) {
+            const legSteps = await supabase
+              .from('membro_etapa_trilha')
+              .select('etapa_id, concluida')
+              .eq('membro_id', mId);
+            allSteps = legSteps.data;
+          }
 
           if (!allSteps) {
             const legSteps = await supabase
@@ -3148,7 +3164,7 @@ export const AppChurchService = {
           }
         }
       } catch (err: any) {
-        console.error('Erro no batchCompleteStep Supabase:', err);
+        console.error('Erro no batchCompleteStep:', err);
         throw err;
       }
     }
