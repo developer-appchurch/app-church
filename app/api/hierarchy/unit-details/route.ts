@@ -1,0 +1,182 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseServerClient } from '@/lib/supabaseServer';
+
+export interface UnitDetailResponse {
+  id: string;
+  name: string;
+  levelTypeId: string;
+  levelTypeName: string;
+  levelOrder: number;
+  parentId: string | null;
+  parentName?: string;
+  isActive: boolean;
+  meetingDay?: string;
+  meetingTime?: string;
+  neighborhood?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  memberCount: number;
+  leaders: Array<{
+    id: string;
+    name: string;
+    role?: string;
+    avatarUrl?: string;
+    phone?: string;
+  }>;
+  members?: Array<{
+    id: string;
+    name: string;
+    role?: string;
+    avatarUrl?: string;
+    phone?: string;
+  }>;
+  cobertura?: Array<{
+    id: string;
+    name: string;
+    role?: string;
+  }>;
+}
+
+/**
+ * GET /api/hierarchy/unit-details?unitId=...&churchId=...
+ * Carregamento sob demanda (lazy) de detalhes pesados:
+ * endereço, coordenadas, líderes, membros vinculados e cobertura
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const unitId = searchParams.get('unitId');
+    const churchId = searchParams.get('churchId');
+
+    if (!unitId || !churchId) {
+      return NextResponse.json(
+        { error: 'unitId e churchId são parâmetros obrigatórios.' },
+        { status: 400 }
+      );
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+    }
+
+    // 1. Busca unidade base
+    const { data: unit, error: unitErr } = await supabase
+      .from('unidades')
+      .select('id, igreja_id, nivel_tipo_id, pai_id, nome, ativo, criado_em')
+      .eq('id', unitId)
+      .eq('igreja_id', churchId)
+      .maybeSingle();
+
+    if (unitErr || !unit) {
+      return NextResponse.json({ error: 'Unidade não encontrada.' }, { status: 404 });
+    }
+
+    // 2. Busca paralela de detalhes específicos sob demanda
+    const [
+      levelRes,
+      parentRes,
+      celulaRes,
+      leadersRes,
+      membersRes,
+      coverageRes,
+    ] = await Promise.all([
+      supabase.from('nivel_tipo').select('nome, ordem').eq('id', unit.nivel_tipo_id).maybeSingle(),
+      unit.pai_id ? supabase.from('unidades').select('nome').eq('id', unit.pai_id).maybeSingle() : Promise.resolve({ data: null }),
+      supabase.from('celulas').select('*').eq('unidade_id', unitId).maybeSingle(),
+      supabase
+        .from('unidade_lideres')
+        .select('pessoa_id, papel, ativo')
+        .eq('unidade_id', unitId)
+        .eq('ativo', true),
+      supabase
+        .from('membros')
+        .select('id, nome, funcao, url_avatar, telefone')
+        .eq('unidade_id', unitId),
+      supabase
+        .from('unidade_cobertura')
+        .select('unidade_principal_id, unidade_cobertura_id')
+        .or(`unidade_principal_id.eq.${unitId},unidade_cobertura_id.eq.${unitId}`)
+        .maybeSingle(),
+    ]);
+
+    // Resolução de cobertura
+    let coberturaList: Array<{ id: string; name: string; role?: string }> = [];
+    if (coverageRes?.data) {
+      const cov = coverageRes.data as { unidade_principal_id?: string; unidade_cobertura_id?: string };
+      const otherUnitId = cov.unidade_principal_id === unitId ? cov.unidade_cobertura_id : cov.unidade_principal_id;
+      if (otherUnitId) {
+        const { data: cUnit } = await supabase
+          .from('unidades')
+          .select('nome')
+          .eq('id', otherUnitId)
+          .maybeSingle();
+
+        coberturaList = [
+          {
+            id: otherUnitId,
+            name: cUnit?.nome || 'Unidade Cobertura',
+            role: 'Cobertura Ministerial',
+          },
+        ];
+      }
+    }
+
+    // Resolução de nomes dos líderes
+    const leaderIds = (leadersRes.data || []).map((l: any) => l.pessoa_id);
+    let leaderDetails: any[] = [];
+    if (leaderIds.length > 0) {
+      const { data: lMembers } = await supabase
+        .from('membros')
+        .select('id, nome, funcao, url_avatar, telefone')
+        .in('id', leaderIds);
+
+      const leaderRoleMap = new Map<string, string>();
+      (leadersRes.data || []).forEach((l: any) => leaderRoleMap.set(l.pessoa_id, l.papel || 'Líder'));
+
+      leaderDetails = (lMembers || []).map((m: any) => ({
+        id: m.id,
+        name: m.nome,
+        role: leaderRoleMap.get(m.id) || m.funcao || 'Líder',
+        avatarUrl: m.url_avatar,
+        phone: m.telefone,
+      }));
+    }
+
+    const celData = celulaRes.data;
+    const membersList = (membersRes.data || []).map((m: any) => ({
+      id: m.id,
+      name: m.nome,
+      role: m.funcao || 'Membro',
+      avatarUrl: m.url_avatar,
+      phone: m.telefone,
+    }));
+
+    const response: UnitDetailResponse = {
+      id: unit.id,
+      name: unit.nome,
+      levelTypeId: unit.nivel_tipo_id,
+      levelTypeName: levelRes.data?.nome || 'Unidade',
+      levelOrder: levelRes.data?.ordem || 0,
+      parentId: unit.pai_id,
+      parentName: parentRes.data?.nome,
+      isActive: unit.ativo !== false,
+      meetingDay: celData?.dia_semana,
+      meetingTime: celData?.horario,
+      neighborhood: celData?.bairro,
+      address: celData?.endereco,
+      latitude: celData?.latitude ? Number(celData.latitude) : undefined,
+      longitude: celData?.longitude ? Number(celData.longitude) : undefined,
+      memberCount: membersList.length,
+      leaders: leaderDetails,
+      members: membersList,
+      cobertura: coberturaList,
+    };
+
+    return NextResponse.json({ success: true, details: response });
+  } catch (err: any) {
+    console.error('Erro ao buscar detalhes da unidade:', err);
+    return NextResponse.json({ error: err?.message || 'Erro ao buscar detalhes.' }, { status: 500 });
+  }
+}

@@ -216,7 +216,6 @@ export type ActiveScreen =
   | 'feed'
   | 'my_cell'
   | 'leadership_track'
-  | 'meetings'
   | 'reports'
   | 'register_church'
   | 'hierarchy_units'

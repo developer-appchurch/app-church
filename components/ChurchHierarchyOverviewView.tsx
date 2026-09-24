@@ -70,6 +70,11 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
         setUnits(fetchedUnits);
         setMembers(fetchedPool.members);
         setUnlinkedCount(fetchedPool.counts.unlinked);
+
+        // Iniciar a árvore recolhida (Passo 7): por padrão recolhe todas as unidades que têm filhos
+        const initialCollapsed = new Set<string>();
+        fetchedUnits.forEach((u) => initialCollapsed.add(u.id));
+        setCollapsedNodeIds(initialCollapsed);
       } catch (err: any) {
         console.error('Erro ao carregar visão geral da igreja:', err);
       } finally {
@@ -128,16 +133,25 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
     return leaderIds.size;
   }, [units]);
 
-  // Montagem da árvore a partir das unidades raiz (sem pai ou pertencentes ao nível 1)
+  // Montagem da árvore a partir das unidades raiz usando Map por pai_id (Passo 1: O(N))
   const treeRoots = useMemo(() => {
     if (!rootLevel) return [];
 
+    // Mapeamento indexado por parentId: parentId -> OrganizationalUnit[]
+    const childrenByParentId = new Map<string, OrganizationalUnit[]>();
+    units.forEach((u) => {
+      const pId = u.parentId || '__ROOT__';
+      const list = childrenByParentId.get(pId) || [];
+      list.push(u);
+      childrenByParentId.set(pId, list);
+    });
+
     const rootUnits = units.filter(
-      (u) => u.levelTypeId === rootLevel.id || !u.parentId
+      (u) => !u.parentId || u.levelTypeId === rootLevel.id
     );
 
     const buildSubtree = (parentUnit: OrganizationalUnit): TreeNode => {
-      const childrenUnits = units.filter((u) => u.parentId === parentUnit.id);
+      const childrenUnits = childrenByParentId.get(parentUnit.id) || [];
       return {
         unit: parentUnit,
         children: childrenUnits.map(buildSubtree),
@@ -341,17 +355,22 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
 
   if (isLoading) {
     return (
-      <div className="min-h-[500px] flex flex-col items-center justify-center p-8 text-slate-500">
-        <Loader2 size={36} className="animate-spin text-[#052447] mb-3" />
-        <p className="text-sm font-semibold">Carregando organograma da igreja...</p>
+      <div className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4">
+          <div className="min-h-[400px] flex flex-col items-center justify-center p-8 text-slate-500 bg-white rounded-xl sm:rounded-2xl border border-slate-200/90 shadow-2xs">
+            <Loader2 size={36} className="animate-spin text-[#052447] mb-3" />
+            <p className="text-sm font-semibold">Carregando organograma da igreja...</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Header */}
-      <div className="bg-[#04213d] text-white rounded-2xl p-5 sm:p-6 shadow-md border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+    <div id="screen-church-overview" className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full overflow-x-hidden">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 pb-4 space-y-4">
+        {/* Header */}
+        <div className="bg-[#04213d] text-white rounded-xl sm:rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
             <Network size={24} />
@@ -381,7 +400,7 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
               className="px-3.5 py-2.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer border border-amber-400/30"
             >
               <Users size={14} />
-              <span>Pool Geral ({unlinkedCount} sem célula)</span>
+              <span>Nossos Membros ({unlinkedCount} sem célula)</span>
             </button>
           )}
           {onNavigateAddUnit && (
@@ -507,6 +526,7 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
             {filteredTreeRoots.map((rootNode) => renderTreeNode(rootNode, 0))}
           </div>
         )}
+        </div>
       </div>
     </div>
   );

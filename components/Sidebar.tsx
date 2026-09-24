@@ -140,15 +140,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Award,
     },
     {
-      id: 'meetings' as ActiveScreen,
-      label: 'Encontros & Reuniões',
-      sublabel: 'Datas, Horários & Local',
-      icon: Calendar,
-    },
-    {
       id: 'reports' as ActiveScreen,
       label: 'Relatório Semanal',
-      sublabel: 'Lançar presença e secretaria',
+      sublabel: 'Lançar relatório de presença',
       icon: FileText,
     },
     {

@@ -18,7 +18,6 @@ import { Sidebar } from '../components/Sidebar';
 import { MyCellView } from '../components/MyCellView';
 import { FeedView } from '../components/FeedView';
 import { LeadershipOverviewView } from '../components/LeadershipOverviewView';
-import { MeetingsCalendarView } from '../components/MeetingsCalendarView';
 import { WeeklyReportView } from '../components/WeeklyReportView';
 import { LeadershipTrackModal } from '../components/LeadershipTrackModal';
 import { ConnectionBadge } from '../components/ConnectionBadge';
@@ -66,29 +65,37 @@ export default function Home() {
   const [hierarchyLevelIndex, setHierarchyLevelIndex] = useState<number>(0);
 
   // Load church data isolated by churchId
-  const loadChurchData = useCallback(async (churchId: string, initialCellId?: string) => {
-    try {
-      const churchCells = await AppChurchService.getCells(churchId);
-      setCells(churchCells);
+  const loadChurchData = useCallback(
+    async (churchId: string, initialCellId?: string, currentUserId?: string) => {
+      try {
+        const churchCells = await AppChurchService.getCells(churchId);
+        setCells(churchCells);
 
-      const targetCellId =
-        initialCellId && churchCells.some((c) => c.id === initialCellId)
-          ? initialCellId
-          : churchCells[0]?.id || '';
-      setSelectedCellId(targetCellId);
+        const targetCellId =
+          initialCellId && churchCells.some((c) => c.id === initialCellId)
+            ? initialCellId
+            : churchCells[0]?.id || '';
+        setSelectedCellId(targetCellId);
 
-      const churchMembers = await AppChurchService.getMembers(churchId);
-      setMembers(churchMembers);
+        const churchMembers = await AppChurchService.getMembers(churchId);
+        setMembers(churchMembers);
 
-      const churchPosts = await AppChurchService.getFeedPosts(churchId);
-      setPosts(churchPosts);
+        const churchPosts = await AppChurchService.getFeedPosts(
+          churchId,
+          undefined,
+          currentUserId,
+          10
+        );
+        setPosts(churchPosts);
 
-      const churchAnnouncements = await AppChurchService.getAnnouncements(churchId);
-      setAnnouncements(churchAnnouncements);
-    } catch (err) {
-      console.warn('Erro ao carregar dados da igreja:', err);
-    }
-  }, []);
+        const churchAnnouncements = await AppChurchService.getAnnouncements(churchId);
+        setAnnouncements(churchAnnouncements);
+      } catch (err) {
+        console.warn('Erro ao carregar dados da igreja:', err);
+      }
+    },
+    []
+  );
 
   // Connection check on mount
   useEffect(() => {
@@ -102,7 +109,7 @@ export default function Home() {
     if (!user) return;
     setIsRefreshing(true);
     try {
-      await loadChurchData(user.churchId, selectedCellId);
+      await loadChurchData(user.churchId, selectedCellId, user.id);
       const status = await AppChurchService.checkConnection();
       setConnectionStatus(status);
     } catch (err) {
@@ -121,7 +128,11 @@ export default function Home() {
     setActiveScreen('feed'); // Home is Feed
 
     // Load data strictly for this user's church
-    await loadChurchData(authenticatedUser.churchId, authenticatedUser.currentCellId);
+    await loadChurchData(
+      authenticatedUser.churchId,
+      authenticatedUser.currentCellId,
+      authenticatedUser.id
+    );
   };
 
   // Logout handler returning strictly to Login screen
@@ -188,7 +199,7 @@ export default function Home() {
 
   // Feed Post Actions
   const handleLikePost = async (postId: string) => {
-    const updated = await AppChurchService.toggleLikePost(postId);
+    const updated = await AppChurchService.toggleLikePost(postId, user?.id);
     setPosts(updated.filter((p) => p.churchId === user?.churchId));
   };
 
@@ -196,6 +207,11 @@ export default function Home() {
     if (!user) return;
     const updated = await AppChurchService.addComment(postId, commentText, user);
     setPosts(updated.filter((p) => p.churchId === user.churchId));
+  };
+
+  const handleDeleteComment = async (postId: string, commentId: string) => {
+    const updated = await AppChurchService.deleteComment(postId, commentId);
+    setPosts(updated.filter((p) => p.churchId === user?.churchId));
   };
 
   const handleCreatePost = async (
@@ -291,38 +307,6 @@ export default function Home() {
 
       {/* Main Dynamic View */}
       <main className="flex-1">
-        {/* Banner Direcionando para o Cadastro dos Níveis Organizacionais antes das Células */}
-        {cells.length === 0 && (
-          <div className="max-w-5xl mx-auto px-4 pt-4">
-            <div className="bg-sky-50 border border-sky-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
-              <div className="flex items-start gap-3">
-                <div className="p-2.5 bg-sky-100 text-sky-950 rounded-xl shrink-0 mt-0.5">
-                  <Layers size={24} />
-                </div>
-                <div>
-                  <h3 className="text-sm sm:text-base font-bold text-sky-950">
-                    Estruturação da Hierarquia Organizacional
-                  </h3>
-                  <p className="text-xs sm:text-sm text-sky-900 mt-1 max-w-2xl leading-relaxed">
-                    Sua igreja ainda não possui células cadastradas. Cadastre primeiro os níveis superiores da denominação (iniciando pelo 1º nível) antes de criar as células correspondentes.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setHierarchyLevelIndex(0);
-                  setActiveScreen('hierarchy_units');
-                }}
-                className="px-5 py-3 bg-[#052447] hover:bg-[#073366] text-white rounded-xl text-xs sm:text-sm font-bold shadow-md transition flex items-center justify-center gap-2 cursor-pointer shrink-0"
-              >
-                <Layers size={16} />
-                <span>Cadastrar Níveis Organizacionais</span>
-              </button>
-            </div>
-          </div>
-        )}
-
         {activeScreen === 'feed' && (
           <FeedView
             posts={posts}
@@ -332,6 +316,7 @@ export default function Home() {
             churchName={user.churchName}
             onLikePost={handleLikePost}
             onAddComment={handleAddComment}
+            onDeleteComment={handleDeleteComment}
             onDeletePost={handleDeletePost}
             onCreatePost={handleCreatePost}
             onCreateAnnouncement={handleCreateAnnouncement}
@@ -362,10 +347,6 @@ export default function Home() {
             onSelectCell={setSelectedCellId}
             onOpenMemberTrack={(member) => setSelectedMemberForTrack(member)}
           />
-        )}
-
-        {activeScreen === 'meetings' && (
-          <MeetingsCalendarView currentCell={currentCell} />
         )}
 
         {activeScreen === 'reports' && (

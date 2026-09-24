@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Layers,
   Plus,
@@ -54,6 +55,22 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const effectiveChurchId = targetChurchId || user.churchId;
   const effectiveChurchName = targetChurchName || user.churchName || 'Igreja';
 
+  const queryClient = useQueryClient();
+
+  // Cachear nivel_tipo com React Query (Passo 5)
+  const { data: cachedLevels = [], isLoading: isLoadingLevels } = useQuery({
+    queryKey: ['churchLevels', effectiveChurchId],
+    queryFn: () => AppChurchService.getChurchLevels(effectiveChurchId),
+    staleTime: 1000 * 60 * 10, // 10 minutos
+  });
+
+  // Cachear árvore / unidades planas com React Query (Passo 5)
+  const { data: cachedUnits = [], isLoading: isLoadingUnits } = useQuery({
+    queryKey: ['churchUnits', effectiveChurchId],
+    queryFn: () => AppChurchService.getUnits(effectiveChurchId, undefined, 'flat'),
+    staleTime: 1000 * 60 * 5, // 5 minutos
+  });
+
   const [levels, setLevels] = useState<ChurchHierarchicalLevel[]>([]);
   const [activeLevelId, setActiveLevelId] = useState<string>('');
   const [units, setUnits] = useState<OrganizationalUnit[]>([]);
@@ -96,6 +113,34 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   // Search filter for unit list
   const [searchTerm, setSearchTerm] = useState<string>('');
 
+  // Detalhes pesados carregados sob demanda (Passo 2)
+  const [expandedUnitId, setExpandedUnitId] = useState<string | null>(null);
+  const [unitDetailsMap, setUnitDetailsMap] = useState<Record<string, any>>({});
+  const [loadingDetailUnitId, setLoadingDetailUnitId] = useState<string | null>(null);
+
+  const toggleUnitExpand = async (unitId: string) => {
+    if (expandedUnitId === unitId) {
+      setExpandedUnitId(null);
+      return;
+    }
+    setExpandedUnitId(unitId);
+
+    // Se ainda não carregou os detalhes pesados, busca sob demanda
+    if (!unitDetailsMap[unitId]) {
+      setLoadingDetailUnitId(unitId);
+      try {
+        const details = await AppChurchService.getUnitDetails(unitId, effectiveChurchId);
+        if (details) {
+          setUnitDetailsMap((prev) => ({ ...prev, [unitId]: details }));
+        }
+      } catch (err) {
+        console.error('Erro ao carregar detalhes sob demanda:', err);
+      } finally {
+        setLoadingDetailUnitId(null);
+      }
+    }
+  };
+
   // Regra de Desbloqueio: Nível 0 é livre; Nível N só é liberado se o Nível N-1 já tiver pelo menos 1 unidade criada
   const isLevelUnlocked = (index: number) => {
     if (index === 0) return true;
@@ -109,27 +154,26 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
     async function fetchData() {
       try {
-        const [fetchedLevels, fetchedUnits, fetchedMembers] = await Promise.all([
-          AppChurchService.getChurchLevels(effectiveChurchId),
-          AppChurchService.getUnits(effectiveChurchId),
+        const [currentLvs, currentUnits, fetchedMembers] = await Promise.all([
+          cachedLevels.length > 0 ? Promise.resolve(cachedLevels) : AppChurchService.getChurchLevels(effectiveChurchId),
+          cachedUnits.length > 0 ? Promise.resolve(cachedUnits) : AppChurchService.getUnits(effectiveChurchId, undefined, 'flat'),
           AppChurchService.getMembers(effectiveChurchId),
         ]);
 
         if (!isMounted) return;
-        setLevels(fetchedLevels);
-        setUnits(fetchedUnits);
+        setLevels(currentLvs);
+        setUnits(currentUnits);
         setChurchMembers(fetchedMembers);
 
-        if (fetchedLevels.length > 0) {
-          // Garante que não inicia num nível bloqueado
-          let targetIndex = Math.min(initialLevelIndex, fetchedLevels.length - 1);
+        if (currentLvs.length > 0) {
+          let targetIndex = Math.min(initialLevelIndex, currentLvs.length - 1);
           while (targetIndex > 0) {
-            const prevLvl = fetchedLevels[targetIndex - 1];
-            const prevUnitsCount = fetchedUnits.filter((u) => u.levelTypeId === prevLvl.id).length;
+            const prevLvl = currentLvs[targetIndex - 1];
+            const prevUnitsCount = currentUnits.filter((u) => u.levelTypeId === prevLvl.id).length;
             if (prevUnitsCount > 0) break;
             targetIndex--;
           }
-          setActiveLevelId(fetchedLevels[targetIndex].id);
+          setActiveLevelId(currentLvs[targetIndex].id);
         }
       } catch (err: any) {
         console.error('Erro ao carregar dados de hierarquia:', err);
@@ -150,7 +194,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [effectiveChurchId, initialLevelIndex]);
+  }, [effectiveChurchId, initialLevelIndex, cachedLevels, cachedUnits]);
 
   // Nível ativo atual
   const activeLevel = useMemo(() => {
@@ -269,11 +313,28 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
             return {
               ...u,
               leaders: result.leaders,
+              leaderCount: result.leaders.length,
             };
           }
           return u;
         })
       );
+
+      // Atualiza imediatamente no cache do React Query
+      queryClient.setQueryData(
+        ['churchUnits', effectiveChurchId],
+        (old: OrganizationalUnit[] | undefined) => {
+          if (!old) return old;
+          return old.map((u) =>
+            u.id === unitToBindLeaders.id
+              ? { ...u, leaders: result.leaders, leaderCount: result.leaders.length }
+              : u
+          );
+        }
+      );
+
+      // Invalidação pontual no React Query para sincronizar
+      queryClient.invalidateQueries({ queryKey: ['churchUnits', effectiveChurchId] });
 
       setSuccessBanner(
         result.leaders.length > 0
@@ -373,8 +434,11 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         meetingTime: isLeafLevel ? meetingTime : undefined,
       });
 
-      // Atualiza lista de unidades no estado local
+      // Atualiza lista de unidades no estado local (Otimista)
       setUnits((prev) => [createdUnit, ...prev]);
+
+      // Invalidar cache do React Query apenas após criar ou editar (Passo 5)
+      queryClient.invalidateQueries({ queryKey: ['churchUnits', effectiveChurchId] });
 
       setSuccessBanner(
         `${activeLevel.name} "${createdUnit.name}" cadastrado(a) com sucesso!`
@@ -405,17 +469,22 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
   if (isLoading) {
     return (
-      <div className="min-h-[500px] flex flex-col items-center justify-center p-8 text-slate-500">
-        <Loader2 size={36} className="animate-spin text-[#052447] mb-3" />
-        <p className="text-sm font-semibold">Carregando estrutura organizacional da igreja...</p>
+      <div className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4">
+          <div className="min-h-[400px] flex flex-col items-center justify-center p-8 text-slate-500 bg-white rounded-xl sm:rounded-2xl border border-slate-200/90 shadow-2xs">
+            <Loader2 size={36} className="animate-spin text-[#052447] mb-3" />
+            <p className="text-sm font-semibold">Carregando estrutura organizacional da igreja...</p>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Header com Contexto da Igreja */}
-      <div className="bg-[#04213d] text-white rounded-2xl p-5 sm:p-6 shadow-md border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+    <div id="screen-hierarchy-units" className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full overflow-x-hidden">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 pb-4 space-y-4">
+        {/* Header com Contexto da Igreja */}
+        <div className="bg-[#04213d] text-white rounded-xl sm:rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
             <Layers size={24} />
@@ -457,7 +526,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
               className="px-3.5 py-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer border border-sky-400/30"
             >
               <Users size={14} />
-              <span>Pool Geral de Membros</span>
+              <span>Nossos Membros</span>
             </button>
           )}
         </div>
@@ -1009,6 +1078,92 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                           )}
                         </div>
                       )}
+                      {/* Botão para ver Detalhes Sob Demanda (Passo 2) */}
+                      <div className="pt-2 border-t border-slate-200/60 mt-2 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => toggleUnitExpand(unit.id)}
+                          className="text-[11px] font-bold text-sky-800 hover:text-sky-950 flex items-center gap-1 cursor-pointer bg-sky-50/60 hover:bg-sky-100/80 px-2.5 py-1 rounded-lg border border-sky-200/60 transition"
+                        >
+                          {loadingDetailUnitId === unit.id ? (
+                            <Loader2 size={12} className="animate-spin text-sky-700" />
+                          ) : (
+                            <ChevronRight
+                              size={13}
+                              className={`text-sky-700 transition-transform ${
+                                expandedUnitId === unit.id ? 'rotate-90' : ''
+                              }`}
+                            />
+                          )}
+                          <span>
+                            {expandedUnitId === unit.id
+                              ? 'Ocultar Detalhes'
+                              : 'Ver Detalhes (Sob Demanda)'}
+                          </span>
+                        </button>
+                      </div>
+
+                      {/* Painel de Detalhes Carregados Sob Demanda */}
+                      {expandedUnitId === unit.id && (
+                        <div className="mt-2.5 p-3 bg-white rounded-xl border border-sky-100 shadow-2xs space-y-2 text-xs animate-in fade-in">
+                          {loadingDetailUnitId === unit.id ? (
+                            <div className="py-4 flex items-center justify-center gap-2 text-slate-500 text-xs">
+                              <Loader2 size={14} className="animate-spin text-sky-600" />
+                              <span>Carregando detalhes sob demanda...</span>
+                            </div>
+                          ) : unitDetailsMap[unit.id] ? (
+                            (() => {
+                              const d = unitDetailsMap[unit.id];
+                              return (
+                                <div className="space-y-2 text-slate-700">
+                                  {d.address && (
+                                    <p className="flex items-center gap-1.5 text-[11px]">
+                                      <MapPin size={12} className="text-slate-400 shrink-0" />
+                                      <span><strong>Endereço:</strong> {d.address}</span>
+                                    </p>
+                                  )}
+                                  {d.latitude && d.longitude && (
+                                    <p className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                                      <Compass size={12} className="text-slate-400 shrink-0" />
+                                      <span>Coordenadas: {d.latitude.toFixed(4)}, {d.longitude.toFixed(4)}</span>
+                                    </p>
+                                  )}
+                                  {d.cobertura && d.cobertura.length > 0 && (
+                                    <p className="flex items-center gap-1.5 text-[11px]">
+                                      <ShieldCheck size={12} className="text-indigo-500 shrink-0" />
+                                      <span><strong>Supervisão:</strong> {d.cobertura.map((c: any) => c.name).join(', ')}</span>
+                                    </p>
+                                  )}
+                                  {d.members && d.members.length > 0 && (
+                                    <div className="pt-1.5 border-t border-slate-100">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                        Membros Vinculados ({d.members.length}):
+                                      </span>
+                                      <div className="flex flex-wrap gap-1">
+                                        {d.members.slice(0, 5).map((m: any) => (
+                                          <span
+                                            key={m.id}
+                                            className="px-2 py-0.5 bg-slate-100 text-[10px] font-medium rounded text-slate-700"
+                                          >
+                                            {m.name}
+                                          </span>
+                                        ))}
+                                        {d.members.length > 5 && (
+                                          <span className="px-2 py-0.5 bg-slate-100 text-[10px] text-slate-500 rounded">
+                                            +{d.members.length - 5} membros
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })()
+                          ) : (
+                            <p className="text-[11px] text-slate-400">Nenhum detalhe adicional encontrado.</p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -1367,6 +1522,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

@@ -1,5 +1,6 @@
 import type {Metadata, Viewport} from 'next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
+import { AppQueryProvider } from '@/components/AppQueryProvider';
 import './globals.css'; // Global styles
 
 export const metadata: Metadata = {
@@ -28,7 +29,9 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
     <html lang="pt-BR">
       <body suppressHydrationWarning>
-        {children}
+        <AppQueryProvider>
+          {children}
+        </AppQueryProvider>
         <SpeedInsights />
       </body>
     </html>

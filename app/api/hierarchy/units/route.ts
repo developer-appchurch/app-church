@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const churchId = searchParams.get('churchId');
     const levelTypeId = searchParams.get('levelTypeId');
+    const mode = searchParams.get('mode') || 'full'; // 'flat' | 'full'
 
     if (!churchId) {
       return NextResponse.json({ error: 'Parâmetro churchId é obrigatório.' }, { status: 400 });
@@ -29,7 +30,112 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    // 1. Buscar níveis da igreja
+    // 1. Modo Plano Ultrarrápido (Passo 1): Retorna lista plana de unidades (id, pai_id, nivel_tipo_id, nome, ativo)
+    if (mode === 'flat') {
+      let flatQuery = supabase
+        .from('unidades')
+        .select('id, pai_id, nivel_tipo_id, nome, ativo, igreja_id')
+        .eq('igreja_id', churchId)
+        .eq('ativo', true)
+        .order('nome', { ascending: true });
+
+      if (levelTypeId) {
+        flatQuery = flatQuery.eq('nivel_tipo_id', levelTypeId);
+      }
+
+      // Buscar também contagens e líderes em lote (Passo 3: RPC / GROUP BY batch sem subconsultas nem view cells)
+      const [unitsRes, memberCountsRes, leadersBatchRes] = await Promise.all([
+        flatQuery,
+        supabase
+          .from('membros')
+          .select('unidade_id')
+          .eq('igreja_id', churchId)
+          .not('unidade_id', 'is', null),
+        supabase
+          .from('unidade_lideres')
+          .select('unidade_id, pessoa_id, papel')
+          .eq('ativo', true),
+      ]);
+
+      if (unitsRes.error) {
+        return NextResponse.json({ error: unitsRes.error.message }, { status: 500 });
+      }
+
+      const rows = unitsRes.data || [];
+
+      // Contagem em lote de membros
+      const countMap = new Map<string, number>();
+      (memberCountsRes.data || []).forEach((m: any) => {
+        if (m.unidade_id) {
+          countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
+        }
+      });
+
+      // Líderes em lote: buscar detalhes dos líderes vinculados a qualquer unidade
+      const activeLeaderRows = leadersBatchRes.data || [];
+      const leaderPessoaIds = Array.from(
+        new Set(activeLeaderRows.map((l: any) => l.pessoa_id).filter(Boolean))
+      );
+
+      const leaderMemberMap = new Map<string, any>();
+      if (leaderPessoaIds.length > 0) {
+        const ptMembersRes = await supabase
+          .from('membros')
+          .select('id, nome, funcao, url_avatar, telefone')
+          .in('id', leaderPessoaIds);
+
+        if (ptMembersRes.data && ptMembersRes.data.length > 0) {
+          ptMembersRes.data.forEach((m: any) => leaderMemberMap.set(m.id, m));
+        }
+
+        const missingIds = leaderPessoaIds.filter((id) => !leaderMemberMap.has(id));
+        if (missingIds.length > 0) {
+          const legMembersRes = await supabase
+            .from('members')
+            .select('id, nome, funcao, url_avatar, telefone')
+            .in('id', missingIds);
+          (legMembersRes.data || []).forEach((m: any) => leaderMemberMap.set(m.id, m));
+        }
+      }
+
+      const unitLeadersMap = new Map<string, any[]>();
+      activeLeaderRows.forEach((l: any) => {
+        const mem = leaderMemberMap.get(l.pessoa_id);
+        const leaderObj = {
+          id: l.pessoa_id,
+          name: mem?.nome || 'Líder',
+          role: l.papel || mem?.funcao || 'Líder',
+          avatarUrl: mem?.url_avatar,
+          phone: mem?.telefone,
+        };
+        const list = unitLeadersMap.get(l.unidade_id) || [];
+        list.push(leaderObj);
+        unitLeadersMap.set(l.unidade_id, list);
+      });
+
+      const flatUnits = rows.map((u: any) => {
+        const unitLeaders = unitLeadersMap.get(u.id) || [];
+        return {
+          id: u.id,
+          parentId: u.pai_id || null,
+          levelTypeId: u.nivel_tipo_id,
+          name: u.nome,
+          isActive: u.ativo !== false,
+          churchId: u.igreja_id,
+          memberCount: countMap.get(u.id) || 0,
+          leaders: unitLeaders,
+          leaderCount: unitLeaders.length,
+        };
+      });
+
+      return NextResponse.json({
+        success: true,
+        units: flatUnits,
+      });
+    }
+
+    // 2. Modo Completo com resolução em lote (Compatibilidade)
+    // Buscar níveis da igreja
     const { data: levels } = await supabase
       .from('nivel_tipo')
       .select('id, nome, ordem')
@@ -41,7 +147,6 @@ export async function GET(req: NextRequest) {
       levelsMap.set(lvl.id, { nome: lvl.nome, ordem: lvl.ordem });
     });
 
-    // 2. Buscar unidades
     let unitsQuery = supabase
       .from('unidades')
       .select('id, igreja_id, nivel_tipo_id, pai_id, nome, ativo, criado_em')
@@ -65,23 +170,10 @@ export async function GET(req: NextRequest) {
 
     // Mapeamento de nomes de todas as unidades para obter nome do pai
     const unitNameMap = new Map<string, string>();
-    const { data: allUnitsForNames } = await supabase
-      .from('unidades')
-      .select('id, nome')
-      .eq('igreja_id', churchId);
-    (allUnitsForNames || []).forEach((u: any) => unitNameMap.set(u.id, u.nome));
+    unitsData.forEach((u: any) => unitNameMap.set(u.id, u.nome));
 
-    // 3. Buscar detalhes de células (para folhas)
+    // Buscar líderes vinculados em unidade_lideres
     const unitIds = unitsData.map((u: any) => u.id);
-    const { data: celulasData } = await supabase
-      .from('celulas')
-      .select('*')
-      .in('unidade_id', unitIds);
-
-    const celulaMap = new Map<string, any>();
-    (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
-
-    // 4. Buscar líderes vinculados em unidade_lideres
     const { data: lideresData } = await supabase
       .from('unidade_lideres')
       .select('unidade_id, pessoa_id, papel')
@@ -96,15 +188,7 @@ export async function GET(req: NextRequest) {
         .select('id, nome, funcao, url_avatar, telefone')
         .in('id', leaderPessoaIds);
 
-      if (ptMembersRes.error || !ptMembersRes.data || ptMembersRes.data.length === 0) {
-        const legMembersRes = await supabase
-          .from('members')
-          .select('id, nome, funcao, url_avatar, telefone')
-          .in('id', leaderPessoaIds);
-        if (legMembersRes.data) {
-          legMembersRes.data.forEach((m: any) => leaderMemberMap.set(m.id, m));
-        }
-      } else {
+      if (ptMembersRes.data) {
         ptMembersRes.data.forEach((m: any) => leaderMemberMap.set(m.id, m));
       }
     }
@@ -123,37 +207,22 @@ export async function GET(req: NextRequest) {
       leadersMap.set(l.unidade_id, existing);
     });
 
-    // 5. Contagem de membros por célula
+    // Contagem de membros por unidade/célula
     let countMap = new Map<string, number>();
-    let { data: memberCounts, error: memCountErr } = await supabase
+    let { data: memberCounts } = await supabase
       .from('membros')
       .select('unidade_id')
       .eq('igreja_id', churchId)
       .not('unidade_id', 'is', null);
 
-    if (memCountErr || !memberCounts) {
-      const { data: legMemberCounts } = await supabase
-        .from('members')
-        .select('celula_id')
-        .eq('igreja_id', churchId)
-        .not('celula_id', 'is', null);
-      (legMemberCounts || []).forEach((m: any) => {
-        if (m.celula_id) {
-          countMap.set(m.celula_id, (countMap.get(m.celula_id) || 0) + 1);
-        }
-      });
-    } else {
-      memberCounts.forEach((m: any) => {
-        if (m.unidade_id) {
-          countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
-        }
-      });
-    }
+    (memberCounts || []).forEach((m: any) => {
+      if (m.unidade_id) {
+        countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
+      }
+    });
 
-    // 6. Formata retorno
     const formattedUnits: OrganizationalUnit[] = unitsData.map((u: any) => {
       const lvl = levelsMap.get(u.nivel_tipo_id) || { nome: 'Unidade', ordem: 99 };
-      const celDetails = celulaMap.get(u.id);
       const unitLeaders = leadersMap.get(u.id) || [];
       const memberCount = countMap.get(u.id) || 0;
 
@@ -168,12 +237,6 @@ export async function GET(req: NextRequest) {
         parentName: u.pai_id ? unitNameMap.get(u.pai_id) || 'Unidade Superior' : undefined,
         isActive: u.ativo !== false,
         leaders: unitLeaders,
-        meetingDay: celDetails?.dia_semana,
-        meetingTime: celDetails?.horario,
-        neighborhood: celDetails?.bairro,
-        address: celDetails?.endereco,
-        latitude: celDetails?.latitude ? Number(celDetails.latitude) : undefined,
-        longitude: celDetails?.longitude ? Number(celDetails.longitude) : undefined,
         memberCount,
         createdAt: u.criado_em,
       };

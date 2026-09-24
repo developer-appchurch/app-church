@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
-import { CellMember, UserRole, AttendanceStatus } from '@/types';
+import { AttendanceStatus } from '@/types';
 import crypto from 'crypto';
 
 function generateUUID(): string {
@@ -14,11 +14,36 @@ function generateUUID(): string {
   });
 }
 
+export interface MemberListItem {
+  id: string;
+  name: string;
+  role: string;
+  cellId: string | null;
+  cellName: string;
+  neighborhood: string;
+  phone?: string;
+  avatarUrl?: string;
+  isUnlinked: boolean;
+}
+
+/**
+ * GET /api/members/pool
+ * 
+ * Implementa:
+ * 1. Paginação por cursor / limit (25 itens por página com cursor baseado em (nome, id))
+ * 2. SELECT APENAS das colunas estritamente necessárias (id, nome, funcao, papel_id, unidade_id, bairro, telefone, url_avatar). Sem email, status_frequencia, percentual_frequencia ou senha_hash.
+ * 3. Busca e filtros no servidor (search, filter: all|unlinked|linked)
+ * 4. Consulta direta das tabelas novas (membros, unidades) em join ou lote único sem cascata N+1
+ */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const churchId = searchParams.get('churchId');
     const filter = searchParams.get('filter') || 'all'; // 'all' | 'unlinked' | 'linked'
+    const search = (searchParams.get('search') || '').trim();
+    const cursorName = searchParams.get('cursorName') || null;
+    const cursorId = searchParams.get('cursorId') || null;
+    const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '25', 10), 1), 100);
 
     if (!churchId) {
       return NextResponse.json({ error: 'churchId é obrigatório.' }, { status: 400 });
@@ -29,20 +54,36 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    // Executa em paralelo a busca de membros e a busca de unidades/células para máxima performance
-    const [membersRes, unitsRes] = await Promise.all([
+    // 1. Consulta em lote único e paralelo:
+    // Query de membros com projeção restrita (sem senha_hash, email, status_frequencia, percentual_frequencia) + contadores + unidades
+    const isFirstPage = !cursorName && !cursorId;
+
+    const [membersRes, unitsRes, countsRes] = await Promise.all([
       (() => {
+        // SELECT estrito sem senha_hash, email, status_frequencia ou percentual_frequencia
         let q = supabase
           .from('membros')
-          .select('id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, observacoes')
-          .eq('igreja_id', churchId)
-          .order('nome', { ascending: true });
+          .select('id, nome, funcao, papel_id, unidade_id, bairro, telefone, url_avatar')
+          .eq('igreja_id', churchId);
 
         if (filter === 'unlinked') {
           q = q.is('unidade_id', null);
         } else if (filter === 'linked') {
           q = q.not('unidade_id', 'is', null);
         }
+
+        if (search) {
+          // Busca trigram / ilike no servidor
+          q = q.or(`nome.ilike.%${search}%,bairro.ilike.%${search}%,telefone.ilike.%${search}%`);
+        }
+
+        // Paginação por cursor: (nome > cursorName) ou (nome = cursorName e id > cursorId)
+        if (cursorName && cursorId) {
+          q = q.or(`nome.gt."${cursorName}",and(nome.eq."${cursorName}",id.gt."${cursorId}")`);
+        }
+
+        q = q.order('nome', { ascending: true }).order('id', { ascending: true }).limit(limit + 1);
+
         return q;
       })(),
       supabase
@@ -50,84 +91,99 @@ export async function GET(req: NextRequest) {
         .select('id, nome')
         .eq('igreja_id', churchId)
         .eq('ativo', true),
+      isFirstPage
+        ? Promise.all([
+            supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId),
+            supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId).is('unidade_id', null),
+            supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId).not('unidade_id', 'is', null),
+          ])
+        : Promise.resolve(null),
     ]);
 
-    let membersData = membersRes.data;
+    let membersData: any[] | null = membersRes.data;
     let queryError = membersRes.error;
 
-    // Fallback rápido se a tabela ainda for a legada
+    // Fallback rápido se a tabela ainda for legada
     if (queryError && (queryError.code === '42P01' || queryError.message?.includes('does not exist') || queryError.message?.includes('unidade_id'))) {
       let fallbackQuery = supabase
         .from('members')
-        .select('*')
-        .eq('igreja_id', churchId)
-        .order('nome', { ascending: true });
+        .select('id, nome, funcao, celula_id, bairro, telefone, url_avatar')
+        .eq('igreja_id', churchId);
 
       if (filter === 'unlinked') {
         fallbackQuery = fallbackQuery.is('celula_id', null);
       } else if (filter === 'linked') {
         fallbackQuery = fallbackQuery.not('celula_id', 'is', null);
       }
+
+      if (search) {
+        fallbackQuery = fallbackQuery.ilike('nome', `%${search}%`);
+      }
+
+      if (cursorName && cursorId) {
+        fallbackQuery = fallbackQuery.or(`nome.gt."${cursorName}",and(nome.eq."${cursorName}",id.gt."${cursorId}")`);
+      }
+
+      fallbackQuery = fallbackQuery.order('nome', { ascending: true }).order('id', { ascending: true }).limit(limit + 1);
       const fallbackRes = await fallbackQuery;
       membersData = fallbackRes.data;
       queryError = fallbackRes.error;
     }
 
     if (queryError) {
-      console.error('Erro ao buscar membros:', queryError);
+      console.error('Erro ao buscar membros no pool:', queryError);
       return NextResponse.json({ error: queryError.message }, { status: 500 });
     }
 
-    // Mapa de unidades em memória para acesso O(1)
-    const cellMap = new Map<string, string>();
+    // Mapa de unidades em memória para acesso O(1) imediato
+    const unitMap = new Map<string, string>();
     (unitsRes.data || []).forEach((u: any) => {
-      cellMap.set(u.id, u.nome);
+      unitMap.set(u.id, u.nome);
     });
 
-    let unlinkedCount = 0;
-    let linkedCount = 0;
+    const rows = membersData || [];
+    const hasNextPage = rows.length > limit;
+    const pagedRows = hasNextPage ? rows.slice(0, limit) : rows;
 
-    const members: (CellMember & { isUnlinked: boolean; cellName?: string })[] = (
-      membersData || []
-    ).map((m: any) => {
-      const effectiveCellId = m.unidade_id || m.celula_id || '';
-      const isUnlinked = !effectiveCellId;
+    const lastItem = pagedRows.length > 0 ? pagedRows[pagedRows.length - 1] : null;
+    const nextCursor = hasNextPage && lastItem
+      ? { cursorName: lastItem.nome, cursorId: lastItem.id }
+      : null;
 
-      if (isUnlinked) {
-        unlinkedCount++;
-      } else {
-        linkedCount++;
-      }
+    const members: MemberListItem[] = pagedRows.map((m: any) => {
+      const effectiveUnitId = m.unidade_id || m.celula_id || null;
+      const isUnlinked = !effectiveUnitId;
+      const cellName = effectiveUnitId ? unitMap.get(effectiveUnitId) || 'Célula Vinculada' : 'Sem Célula (Geral)';
 
       return {
         id: m.id,
-        churchId: m.igreja_id,
-        cellId: effectiveCellId,
-        isUnlinked,
-        cellName: effectiveCellId ? cellMap.get(effectiveCellId) || 'Célula Vinculada' : 'Sem Célula (Geral)',
         name: m.nome,
-        login: m.login || '',
-        role: (m.funcao as UserRole) || 'Membro',
-        roleId: m.papel_id || m.funcao_id,
+        role: m.funcao || 'Membro',
+        cellId: effectiveUnitId,
+        cellName,
         neighborhood: m.bairro || 'Centro',
-        birthday: m.aniversario || '01/01',
         phone: m.telefone || '',
-        email: m.email || '',
-        attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
-        attendancePercentage: m.percentual_frequencia ?? 100,
-        avatarUrl: m.url_avatar,
-        notes: m.observacoes || '',
+        avatarUrl: m.url_avatar || undefined,
+        isUnlinked,
       };
     });
+
+    // Contadores
+    let counts = { total: 0, unlinked: 0, linked: 0 };
+    if (countsRes && countsRes.length === 3) {
+      counts = {
+        total: countsRes[0].count || 0,
+        unlinked: countsRes[1].count || 0,
+        linked: countsRes[2].count || 0,
+      };
+    }
 
     return NextResponse.json({
       success: true,
       members,
-      counts: {
-        total: members.length,
-        unlinked: unlinkedCount,
-        linked: linkedCount,
-      },
+      nextCursor,
+      hasNextPage,
+      counts,
     });
   } catch (err: any) {
     console.error('Erro na rota /api/members/pool GET:', err);
@@ -258,10 +314,9 @@ export async function PATCH(req: NextRequest) {
     // Se cellId foi passado, valida se corresponde a uma célula (nível folha) da igreja
     let targetCellName = '';
     if (validCellId) {
-      // 1. Verificar em celulas/unidades
       const { data: unitCheck } = await supabase
         .from('unidades')
-        .select('id, nome, nivel_tipo_id')
+        .select('id, nome')
         .eq('id', validCellId)
         .eq('igreja_id', churchId)
         .maybeSingle();

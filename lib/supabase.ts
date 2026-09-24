@@ -854,10 +854,10 @@ export const AppChurchService = {
   /**
    * Obtém as unidades organizacionais de um nível ou de todos os níveis da igreja
    */
-  async getUnits(churchId: string, levelTypeId?: string): Promise<OrganizationalUnit[]> {
+  async getUnits(churchId: string, levelTypeId?: string, mode: 'flat' | 'full' = 'flat'): Promise<OrganizationalUnit[]> {
     if (typeof window !== 'undefined') {
       try {
-        let url = `/api/hierarchy/units?churchId=${churchId}`;
+        let url = `/api/hierarchy/units?churchId=${churchId}&mode=${mode}`;
         if (levelTypeId) url += `&levelTypeId=${levelTypeId}`;
         const res = await fetch(url);
         const data = await res.json();
@@ -869,6 +869,24 @@ export const AppChurchService = {
       }
     }
     return [];
+  },
+
+  /**
+   * Obtém detalhes pesados (endereço, líderes, membros, coordenadas) sob demanda
+   */
+  async getUnitDetails(unitId: string, churchId: string): Promise<any> {
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch(`/api/hierarchy/unit-details?unitId=${unitId}&churchId=${churchId}`);
+        const data = await res.json();
+        if (res.ok && data?.details) {
+          return data.details;
+        }
+      } catch (err) {
+        console.warn('Falha ao buscar detalhes sob demanda:', err);
+      }
+    }
+    return null;
   },
 
   /**
@@ -1621,8 +1639,14 @@ export const AppChurchService = {
 
   /**
    * Get Feed Posts - filtered by churchId and optionally cellId
+   * Performance-optimized: Strictly limited to the latest 10 posts, ordered from newest to oldest.
    */
-  async getFeedPosts(churchId: string, cellId?: string): Promise<FeedPost[]> {
+  async getFeedPosts(
+    churchId: string,
+    cellId?: string,
+    userId?: string,
+    limit: number = 10
+  ): Promise<FeedPost[]> {
     const formatTime = (isoString?: string) => {
       if (!isoString) return 'Agora mesmo';
       const d = new Date(isoString);
@@ -1637,24 +1661,38 @@ export const AppChurchService = {
       return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
     };
 
+    const userLikesKey = userId ? `appchurch_likes_${userId}` : 'appchurch_likes_anon';
+    const userLikedPosts: string[] =
+      typeof window !== 'undefined' ? loadFromStorage<string[]>(userLikesKey, []) : [];
+
     if (supabase) {
       try {
-        let query = supabase.from('postagens_feed').select('*').eq('igreja_id', churchId);
+        let query = supabase
+          .from('postagens_feed')
+          .select('*')
+          .eq('igreja_id', churchId);
         if (cellId) {
           query = query.or(`unidade_id.eq.${cellId},celula_id.eq.${cellId}`);
         }
-        let { data: postsData, error } = await query.order('criado_em', { ascending: false });
+        let { data: postsData, error } = await query
+          .order('criado_em', { ascending: false })
+          .limit(limit);
 
         if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          let legQuery = supabase.from('feed_posts').select('*').eq('igreja_id', churchId);
+          let legQuery = supabase
+            .from('feed_posts')
+            .select('*')
+            .eq('igreja_id', churchId);
           if (cellId) legQuery = legQuery.eq('celula_id', cellId);
-          const legRes = await legQuery.order('criado_em', { ascending: false });
+          const legRes = await legQuery
+            .order('criado_em', { ascending: false })
+            .limit(limit);
           postsData = legRes.data;
           error = legRes.error;
         }
 
         if (!error && postsData) {
-          // Fetch all comments for these posts
+          // Fetch all comments ONLY for the selected 10 posts
           const postIds = postsData.map((p: any) => p.id);
           let commentsByPost: Record<string, any[]> = {};
 
@@ -1700,7 +1738,7 @@ export const AppChurchService = {
             imageUrl: p.url_imagem,
             category: p.categoria || 'Célula',
             likes: p.quantidade_curtidas || 0,
-            likedByCurrentUser: false,
+            likedByCurrentUser: userLikedPosts.includes(p.id),
             comments: commentsByPost[p.id] || [],
             createdAt: formatTime(p.criado_em),
           }));
@@ -1718,7 +1756,10 @@ export const AppChurchService = {
     if (cellId) {
       filtered = filtered.filter((p) => p.cellId === cellId);
     }
-    return filtered;
+    return filtered.slice(0, limit).map((p) => ({
+      ...p,
+      likedByCurrentUser: userLikedPosts.includes(p.id),
+    }));
   },
 
   /**
@@ -1773,19 +1814,36 @@ export const AppChurchService = {
   },
 
   /**
-   * Toggle Like on Feed Post in Supabase
+   * Toggle Like on Feed Post in Supabase & LocalStorage
+   * Allows user to like and undo/unlike their like seamlessly.
    */
-  async toggleLikePost(postId: string): Promise<FeedPost[]> {
+  async toggleLikePost(postId: string, userId?: string): Promise<FeedPost[]> {
+    const userLikesKey = userId ? `appchurch_likes_${userId}` : 'appchurch_likes_anon';
+    const userLikedPosts: string[] =
+      typeof window !== 'undefined' ? loadFromStorage<string[]>(userLikesKey, []) : [];
+    const isCurrentlyLiked = userLikedPosts.includes(postId);
+    const nextLiked = !isCurrentlyLiked;
+
+    if (typeof window !== 'undefined') {
+      if (nextLiked) {
+        saveToStorage(userLikesKey, [...userLikedPosts, postId]);
+      } else {
+        saveToStorage(
+          userLikesKey,
+          userLikedPosts.filter((id) => id !== postId)
+        );
+      }
+    }
+
     const allPosts = loadFromStorage(STORAGE_KEYS.POSTS, INITIAL_FEED_POSTS);
     let newLikes = 0;
 
     const updated = allPosts.map((post) => {
       if (post.id === postId) {
-        const isLiked = post.likedByCurrentUser;
-        newLikes = isLiked ? Math.max(0, post.likes - 1) : post.likes + 1;
+        newLikes = nextLiked ? post.likes + 1 : Math.max(0, post.likes - 1);
         return {
           ...post,
-          likedByCurrentUser: !isLiked,
+          likedByCurrentUser: nextLiked,
           likes: newLikes,
         };
       }
@@ -1853,6 +1911,38 @@ export const AppChurchService = {
         return {
           ...post,
           comments: [...post.comments, newComment],
+        };
+      }
+      return post;
+    });
+    saveToStorage(STORAGE_KEYS.POSTS, updated);
+    return updated;
+  },
+
+  /**
+   * Delete Comment from Feed Post in Supabase & Storage
+   */
+  async deleteComment(postId: string, commentId: string): Promise<FeedPost[]> {
+    if (supabase) {
+      try {
+        let { error } = await supabase
+          .from('comentarios_postagem')
+          .delete()
+          .eq('id', commentId);
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+          await supabase.from('post_comments').delete().eq('id', commentId);
+        }
+      } catch (e) {
+        console.warn('Erro ao excluir comentário no Supabase:', e);
+      }
+    }
+
+    const allPosts = loadFromStorage(STORAGE_KEYS.POSTS, INITIAL_FEED_POSTS);
+    const updated = allPosts.map((post) => {
+      if (post.id === postId) {
+        return {
+          ...post,
+          comments: (post.comments || []).filter((c) => c.id !== commentId),
         };
       }
       return post;

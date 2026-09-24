@@ -28,6 +28,7 @@ interface FeedViewProps {
   churchName: string;
   onLikePost: (postId: string) => void;
   onAddComment: (postId: string, commentText: string) => void;
+  onDeleteComment?: (postId: string, commentId: string) => void;
   onDeletePost: (postId: string) => void;
   onCreatePost: (
     newPost: Omit<FeedPost, 'id' | 'likes' | 'likedByCurrentUser' | 'comments' | 'createdAt'>
@@ -48,6 +49,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
   churchName,
   onLikePost,
   onAddComment,
+  onDeleteComment,
   onDeletePost,
   onCreatePost,
 }) => {
@@ -64,38 +66,47 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
   const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
   const [postToDelete, setPostToDelete] = useState<string | null>(null);
+  const [commentToDelete, setCommentToDelete] = useState<{ postId: string; commentId: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // RBAC for creating posts:
   // "somente algumas funções como Líder de Setor, Líder de Célula, Pastor(a), Líder de Área, Líder em Treinamento tenha a possiblidade de postar"
   const userRoleNormalized = (currentUser.role || '').toLowerCase();
+  const isUserPastor =
+    userRoleNormalized.includes('pastor') ||
+    userRoleNormalized.includes('pastora') ||
+    userRoleNormalized.includes('administrador') ||
+    currentUser.login === 'admin' ||
+    currentUser.isSystemAdmin === true;
+
   const canUserPost =
     userRoleNormalized.includes('líder de setor') ||
     userRoleNormalized.includes('lider de setor') ||
     userRoleNormalized.includes('líder de célula') ||
     userRoleNormalized.includes('lider de celula') ||
-    userRoleNormalized.includes('pastor') ||
-    userRoleNormalized.includes('pastora') ||
     userRoleNormalized.includes('líder de área') ||
     userRoleNormalized.includes('lider de area') ||
     userRoleNormalized.includes('líder em treinamento') ||
     userRoleNormalized.includes('lider em treinamento') ||
-    userRoleNormalized.includes('administrador') ||
-    currentUser.login === 'admin';
+    isUserPastor;
 
   // RBAC for deleting posts:
-  // "opção de excluir um post, ela dada somente ao próprio usuário que postou, ao usuário administrador e a função ao membro na função de Pastor(a)"
+  // "O usuário só pode apagar o post dele e comentários dele, a menos que a função seja pastor, ai ele pode apagar qualquer postagem ou comentário."
   const canUserDeletePost = (post: FeedPost): boolean => {
+    if (isUserPastor) return true;
     const currentUserName = (currentUser.name || '').trim().toLowerCase();
     const postAuthorName = (post.authorName || '').trim().toLowerCase();
-    const isAuthor = Boolean(postAuthorName && postAuthorName === currentUserName);
+    return Boolean(postAuthorName && postAuthorName === currentUserName);
+  };
 
-    const role = (currentUser.role || '').toLowerCase();
-    const isAdmin = role.includes('administrador') || currentUser.login === 'admin';
-    const isPastor = role.includes('pastor') || role.includes('pastora');
-
-    return isAuthor || isAdmin || isPastor;
+  // RBAC for deleting comments:
+  // "O usuário só pode apagar o post dele e comentários dele, a menos que a função seja pastor, ai ele pode apagar qualquer postagem ou comentário."
+  const canUserDeleteComment = (comment: { authorName: string }): boolean => {
+    if (isUserPastor) return true;
+    const currentUserName = (currentUser.name || '').trim().toLowerCase();
+    const commentAuthorName = (comment.authorName || '').trim().toLowerCase();
+    return Boolean(commentAuthorName && commentAuthorName === currentUserName);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -181,12 +192,12 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 Feed de Notícias
               </h2>
               <p className="text-xs text-slate-500">
-                {churchName} • {currentCell.name}
+                {churchName} • {currentCell.name} (Últimas 10 publicações)
               </p>
             </div>
           </div>
           <span className="text-xs text-slate-400 font-medium">
-            {posts.length} {posts.length === 1 ? 'publicação' : 'publicações'}
+            {posts.length} {posts.length === 1 ? 'publicação recente' : 'publicações recentes'}
           </span>
         </div>
 
@@ -437,6 +448,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     <button
                       type="button"
                       onClick={() => onLikePost(post.id)}
+                      title={post.likedByCurrentUser ? 'Clique para desfazer curtida (descurtir)' : 'Curtir publicação'}
                       className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-xl hover:bg-slate-50 transition cursor-pointer ${
                         post.likedByCurrentUser ? 'text-rose-600 font-bold' : 'text-slate-600'
                       }`}
@@ -445,7 +457,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                         size={18}
                         className={post.likedByCurrentUser ? 'fill-rose-600 text-rose-600' : ''}
                       />
-                      <span>{post.likedByCurrentUser ? 'Curtido' : 'Curtir'}</span>
+                      <span>{post.likedByCurrentUser ? 'Curtido (Desfazer)' : 'Curtir'}</span>
                     </button>
                     <button
                       type="button"
@@ -465,7 +477,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     {post.comments.length > 0 && (
                       <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
                         {post.comments.map((comment) => (
-                          <div key={comment.id} className="flex items-start gap-2 text-xs">
+                          <div key={comment.id} className="flex items-start gap-2 text-xs group">
                             <div className="w-7 h-7 rounded-full bg-slate-300 overflow-hidden shrink-0 mt-0.5 relative">
                               <Image
                                 src={
@@ -481,13 +493,31 @@ export const FeedView: React.FC<FeedViewProps> = ({
                               />
                             </div>
                             <div className="bg-white p-2.5 rounded-xl border border-slate-200/70 flex-1 shadow-2xs">
-                              <div className="flex items-center justify-between">
+                              <div className="flex items-center justify-between gap-1">
                                 <span className="font-bold text-slate-900">
                                   {comment.authorName}
                                 </span>
-                                <span className="text-[10px] text-slate-400">
-                                  {comment.createdAt}
-                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] text-slate-400">
+                                    {comment.createdAt}
+                                  </span>
+                                  {canUserDeleteComment(comment) && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setCommentToDelete({
+                                          postId: post.id,
+                                          commentId: comment.id,
+                                        })
+                                      }
+                                      className="text-slate-400 hover:text-rose-600 p-1 rounded hover:bg-rose-50 transition cursor-pointer"
+                                      title="Apagar comentário"
+                                      aria-label="Apagar comentário"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                               <p className="text-slate-700 mt-0.5">{comment.content}</p>
                             </div>
@@ -554,6 +584,44 @@ export const FeedView: React.FC<FeedViewProps> = ({
               <button
                 type="button"
                 onClick={confirmDeletePost}
+                className="flex-1 px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition cursor-pointer"
+              >
+                Sim, excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação para Excluir Comentário */}
+      {commentToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in select-none">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden border border-slate-200 p-5 text-center">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+              <AlertTriangle size={24} />
+            </div>
+            <h3 className="font-bold text-base text-slate-900 mb-1">
+              Excluir comentário?
+            </h3>
+            <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+              Esta ação removerá este comentário definitivamente.
+            </p>
+            <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setCommentToDelete(null)}
+                className="flex-1 px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (commentToDelete && onDeleteComment) {
+                    onDeleteComment(commentToDelete.postId, commentToDelete.commentId);
+                  }
+                  setCommentToDelete(null);
+                }}
                 className="flex-1 px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition cursor-pointer"
               >
                 Sim, excluir
