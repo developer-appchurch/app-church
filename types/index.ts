@@ -143,6 +143,8 @@ export interface CellMember {
   attendanceStatus: AttendanceStatus;
   attendancePercentage: number;
   avatarUrl?: string;
+  authUserId?: string;
+  auth_user_id?: string;
   notes?: string;
   trackProgress?: {
     currentStepId: number;

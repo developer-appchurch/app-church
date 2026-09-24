@@ -1503,7 +1503,9 @@ export const AppChurchService = {
             email: m.email || '',
             attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
             attendancePercentage: m.percentual_frequencia ?? 100,
-            avatarUrl: m.url_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+            avatarUrl: m.url_avatar || '',
+            authUserId: m.auth_user_id || undefined,
+            auth_user_id: m.auth_user_id || undefined,
             notes: m.observacoes || '',
           }));
           saveToStorage(STORAGE_KEYS.MEMBERS, members);
@@ -1699,6 +1701,7 @@ export const AppChurchService = {
           created.login = resData.member.login;
           created.roleId = resData.member.roleId;
           created.avatarUrl = resData.member.avatarUrl || '';
+          created.authUserId = resData.member.authUserId || undefined;
           createdViaApi = true;
         } else if (resData?.error) {
           console.warn('[addMember API] Retornou erro:', resData.error);
@@ -1715,6 +1718,30 @@ export const AppChurchService = {
     }
 
     if (!createdViaApi && supabase) {
+      let fallbackAuthId: string | null = null;
+      try {
+        const synthEmail = `${cleanLogin.replace(/[^a-z0-9._-]/g, '_')}@membros.appchurch.local`;
+        const { data: signData } = await supabase.auth.signUp({
+          email: synthEmail,
+          password: newMember.password?.trim() || '123456',
+          options: {
+            data: {
+              nome: newMember.name,
+              login: cleanLogin,
+              igreja_id: validChurchId,
+              membro_id: newId,
+              role: newMember.role,
+            },
+          },
+        });
+        if (signData?.user?.id) {
+          fallbackAuthId = signData.user.id;
+          created.authUserId = fallbackAuthId;
+        }
+      } catch (authErr) {
+        console.warn('Aviso no fallback direto de signUp:', authErr);
+      }
+
       const ptPayload: any = {
         id: newId,
         igreja_id: validChurchId,
@@ -1723,7 +1750,8 @@ export const AppChurchService = {
         funcao: newMember.role,
         nome: newMember.name,
         login: cleanLogin,
-        senha_hash: newMember.password?.trim() || null,
+        senha_hash: newMember.password?.trim() || '123456',
+        auth_user_id: fallbackAuthId,
         bairro: newMember.neighborhood || '',
         aniversario: newMember.birthday || '',
         telefone: newMember.phone || '',

@@ -80,17 +80,15 @@ export async function POST(req: NextRequest) {
 
     // 1. Cria usuário correspondente na tabela auth.users com confirmação ativa
     let authUserId: string | null = null;
-    if (supabaseAdmin) {
-      authUserId = await createAuthUserForMember({
-        churchId: validChurchId,
-        memberId,
-        name: name.trim(),
-        login: cleanLogin,
-        password: cleanPass,
-        email: email?.trim() || null,
-        role,
-      });
-    }
+    authUserId = await createAuthUserForMember({
+      churchId: validChurchId,
+      memberId,
+      name: name.trim(),
+      login: cleanLogin,
+      password: cleanPass,
+      email: email?.trim() || null,
+      role,
+    });
 
     // 2. Insere na tabela membros
     const ptPayload: any = {

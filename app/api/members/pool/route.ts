@@ -235,17 +235,15 @@ export async function POST(req: NextRequest) {
 
     // Cria instantaneamente o usuário em auth.users para acesso imediato
     let authUserId: string | null = null;
-    if (supabaseAdmin) {
-      authUserId = await createAuthUserForMember({
-        churchId,
-        memberId,
-        name: name.trim(),
-        login: cleanLogin,
-        password: cleanPass,
-        email: email?.trim() || null,
-        role,
-      });
-    }
+    authUserId = await createAuthUserForMember({
+      churchId,
+      memberId,
+      name: name.trim(),
+      login: cleanLogin,
+      password: cleanPass,
+      email: email?.trim() || null,
+      role,
+    });
 
     const payloadPt: any = {
       id: memberId,
