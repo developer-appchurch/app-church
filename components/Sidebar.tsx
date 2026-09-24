@@ -134,16 +134,22 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: 'Principal',
     },
     {
+      id: 'reports' as ActiveScreen,
+      label: 'Relatório Semanal',
+      sublabel: 'Lançar relatório de presença',
+      icon: FileText,
+    },
+    {
       id: 'leadership_track' as ActiveScreen,
       label: 'Trilho de Liderança',
       sublabel: 'Visão Geral do Discipulado',
       icon: Award,
     },
     {
-      id: 'reports' as ActiveScreen,
-      label: 'Relatório Semanal',
-      sublabel: 'Lançar relatório de presença',
-      icon: FileText,
+      id: 'member_pool' as ActiveScreen,
+      label: 'Nossos Membros',
+      sublabel: 'Gestão geral & vínculo de membros',
+      icon: Users,
     },
     {
       id: 'hierarchy_units' as ActiveScreen,
@@ -151,12 +157,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sublabel: 'Cadastro por nível (Área, Setor, Célula)',
       icon: Layers,
       badge: 'Estrutura',
-    },
-    {
-      id: 'member_pool' as ActiveScreen,
-      label: 'Nossos Membros',
-      sublabel: 'Gestão geral & vínculo de membros',
-      icon: Users,
     },
     {
       id: 'church_overview' as ActiveScreen,

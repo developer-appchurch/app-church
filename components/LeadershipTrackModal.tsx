@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { CellMember, LeadershipTrackProgress, LeadershipTrackStep } from '../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { CellMember, LeadershipTrackProgress, LeadershipTrackStep, UserProfile, Role } from '../types';
 import { AppChurchService } from '../lib/supabase';
 import {
   CheckCircle2,
@@ -25,6 +25,8 @@ interface LeadershipTrackModalProps {
   churchId?: string;
   churchName?: string;
   cellName: string;
+  currentUser?: UserProfile | null;
+  userHierarchyLevel?: number;
   validatorName?: string;
   onClose: () => void;
   onSaveProgress?: (memberId: string, progress: LeadershipTrackProgress) => void;
@@ -35,6 +37,8 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   churchId,
   churchName,
   cellName,
+  currentUser,
+  userHierarchyLevel: propHierarchyLevel,
   validatorName,
   onClose,
   onSaveProgress,
@@ -46,8 +50,78 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   const [memberNotes, setMemberNotes] = useState(member?.notes || '');
   const [savedAlert, setSavedAlert] = useState(false);
   const [expandedStepNoteId, setExpandedStepNoteId] = useState<number | string | null>(null);
+  const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
 
-  // Carrega as etapas vinculadas à igreja específica e o status real do membro da tabela membro_etapas_trilha
+  // Carrega funções do banco para resolução dinâmica do nível hierárquico
+  useEffect(() => {
+    let isMounted = true;
+    async function loadRoles() {
+      try {
+        const roles = await AppChurchService.getRoles();
+        if (isMounted && roles && roles.length > 0) {
+          setAvailableRoles(roles);
+        }
+      } catch (e) {
+        console.warn('Erro ao carregar roles no LeadershipTrackModal:', e);
+      }
+    }
+    loadRoles();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Fechar modal com a tecla Escape (cancela etapas não salvas)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
+  // Nível hierárquico do usuário logado
+  const userHierarchyLevel = useMemo(() => {
+    if (propHierarchyLevel !== undefined) {
+      return propHierarchyLevel;
+    }
+    if (!currentUser) return 1;
+    if (currentUser.isSystemAdmin || currentUser.role === 'Administrador' || currentUser.login === 'admin') {
+      return 999;
+    }
+
+    if (availableRoles.length > 0) {
+      const matched = availableRoles.find(
+        (r) =>
+          (currentUser.roleId && r.id === currentUser.roleId) ||
+          r.name?.toLowerCase() === currentUser.role?.toLowerCase() ||
+          r.slug?.toLowerCase() === currentUser.role?.toLowerCase() ||
+          (currentUser.role &&
+            (r.name?.toLowerCase().includes(currentUser.role.toLowerCase()) ||
+              currentUser.role.toLowerCase().includes(r.name?.toLowerCase())))
+      );
+      if (matched) {
+        return matched.hierarchyLevel;
+      }
+    }
+
+    const roleLower = (currentUser.role || '').toLowerCase();
+    if (roleLower.includes('pastor')) return 7;
+    if (roleLower.includes('distrito')) return 6;
+    if (roleLower.includes('rede')) return 5;
+    if (roleLower.includes('área') || roleLower.includes('area')) return 4;
+    if (roleLower.includes('setor')) return 3;
+    if (roleLower.includes('célula') || roleLower.includes('celula')) return 2;
+    if (roleLower.includes('treinamento') || roleLower.includes('discipulador')) return 2;
+    return 1;
+  }, [currentUser, propHierarchyLevel, availableRoles]);
+
+  // Apenas níveis hierárquicos superiores a 1 têm permissão de concluir etapas e salvar
+  const canEdit = userHierarchyLevel > 1;
+
+  // Carrega as etapas vinculadas à igreja específica e o status real do membro
   useEffect(() => {
     if (!member) return;
 
@@ -88,7 +162,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   const defaultValidator = validatorName || 'Líder Responsável';
 
   const toggleStep = (stepId: number | string) => {
-    if (!track) return;
+    if (!track || !canEdit) return;
 
     const updatedSteps = track.steps.map((s) => {
       if (String(s.id) === String(stepId)) {
@@ -120,7 +194,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   };
 
   const handleStepNoteChange = (stepId: number | string, noteText: string) => {
-    if (!track) return;
+    if (!track || !canEdit) return;
     setTrack({
       ...track,
       steps: track.steps.map((s) =>
@@ -188,12 +262,18 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   return (
     <div
       id="leadership-track-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 select-none"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) {
+          onClose();
+        }
+      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200 select-none cursor-pointer"
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col max-h-[92vh] border border-slate-200"
+        className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full overflow-hidden flex flex-col max-h-[92vh] border border-slate-200 cursor-default"
         role="dialog"
         aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
       >
         {/* Header with Dark Navy branding */}
         <div className="bg-[#052447] text-white p-4 sm:p-6 flex items-start justify-between relative shrink-0">
@@ -202,30 +282,11 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
               <LeadershipBadgeIcon className="w-6 h-6 sm:w-8 sm:h-8 text-sky-300" size={28} />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[11px] sm:text-xs uppercase tracking-wider font-semibold text-sky-300 bg-sky-950/60 px-2 py-0.5 rounded">
-                  Trilho de Liderança
-                </span>
-                {churchName && (
-                  <span className="text-[11px] sm:text-xs text-sky-200 flex items-center gap-1 font-medium bg-white/10 px-2 py-0.5 rounded">
-                    <Building2 size={11} /> {churchName}
-                  </span>
-                )}
-                <span className="text-[11px] sm:text-xs text-slate-300 truncate">Célula {cellName}</span>
-              </div>
-              <h2 className="text-lg sm:text-2xl font-bold mt-1 text-white truncate">{member.name}</h2>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-200 mt-1">
-                <span className="flex items-center gap-1 font-medium bg-white/10 px-2 py-0.5 rounded-full">
+              <h2 className="text-lg sm:text-2xl font-bold text-white truncate">{member.name}</h2>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-200 mt-1">
+                <span className="flex items-center gap-1 font-medium bg-white/10 px-2.5 py-0.5 rounded-full">
                   <User size={12} /> {member.role}
                 </span>
-                <span className="flex items-center gap-1">
-                  <MapPin size={12} /> {member.neighborhood || 'Bairro não informado'}
-                </span>
-                {member.birthday && (
-                  <span className="flex items-center gap-1">
-                    <Calendar size={12} /> Níver: {member.birthday}
-                  </span>
-                )}
               </div>
             </div>
           </div>
@@ -265,7 +326,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <Award size={16} /> Etapas do Trilho (etapa_trilhos)
+            <Award size={16} /> Etapas do Trilho
           </button>
           <button
             onClick={() => setActiveTab('notes')}
@@ -292,7 +353,9 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
             <div className="space-y-3">
               <div className="text-xs text-slate-500 mb-2 font-medium flex items-center justify-between">
                 <span>
-                  Etapas cadastradas para esta igreja. Clique na etapa para marcar a conclusão do membro:
+                  {canEdit
+                    ? 'Etapas cadastradas para esta congregação. Clique na etapa para marcar a conclusão do membro:'
+                    : 'Etapas cadastradas para esta congregação (Modo de visualização):'}
                 </span>
               </div>
 
@@ -305,31 +368,49 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                     key={step.id}
                     className={`rounded-xl border transition select-none ${
                       step.completed
-                        ? 'bg-emerald-50/70 border-emerald-200 text-slate-800 hover:bg-emerald-100/60'
+                        ? 'bg-emerald-50/70 border-emerald-200 text-slate-800'
                         : isCurrent
-                        ? 'bg-sky-50/50 border-sky-200 hover:border-sky-300'
-                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        ? 'bg-sky-50/50 border-sky-200'
+                        : 'bg-white border-slate-200'
+                    } ${
+                      canEdit
+                        ? step.completed
+                          ? 'hover:bg-emerald-100/60 cursor-pointer'
+                          : isCurrent
+                          ? 'hover:border-sky-300 cursor-pointer'
+                          : 'hover:border-slate-300 hover:bg-slate-50 cursor-pointer'
+                        : 'cursor-default'
                     }`}
                   >
                     <div
-                      onClick={() => toggleStep(step.id)}
-                      className="p-3.5 flex items-start gap-3.5 cursor-pointer"
+                      onClick={() => canEdit && toggleStep(step.id)}
+                      className={`p-3.5 flex items-start gap-3.5 ${canEdit ? 'cursor-pointer' : 'cursor-default'}`}
                     >
-                      <button
-                        type="button"
-                        className="mt-0.5 text-emerald-600 focus:outline-none cursor-pointer shrink-0"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleStep(step.id);
-                        }}
-                        aria-label={step.completed ? 'Marcar como não concluída' : 'Marcar como concluída'}
-                      >
-                        {step.completed ? (
-                          <CheckCircle2 className="w-6 h-6 text-emerald-600 fill-emerald-100" />
-                        ) : (
-                          <Circle className="w-6 h-6 text-slate-300 hover:text-slate-400" />
-                        )}
-                      </button>
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          className="mt-0.5 text-emerald-600 focus:outline-none cursor-pointer shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleStep(step.id);
+                          }}
+                          aria-label={step.completed ? 'Marcar como não concluída' : 'Marcar como concluída'}
+                        >
+                          {step.completed ? (
+                            <CheckCircle2 className="w-6 h-6 text-emerald-600 fill-emerald-100" />
+                          ) : (
+                            <Circle className="w-6 h-6 text-slate-300 hover:text-slate-400" />
+                          )}
+                        </button>
+                      ) : (
+                        <div className="mt-0.5 shrink-0">
+                          {step.completed ? (
+                            <CheckCircle2 className="w-6 h-6 text-emerald-600 fill-emerald-100" />
+                          ) : (
+                            <Circle className="w-6 h-6 text-slate-300" />
+                          )}
+                        </div>
+                      )}
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -358,7 +439,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                                 e.stopPropagation();
                                 setExpandedStepNoteId(isExpanded ? null : step.id);
                               }}
-                              className={`p-1 rounded text-slate-400 hover:text-slate-600 transition ${
+                              className={`p-1 rounded text-slate-400 hover:text-slate-600 transition cursor-pointer ${
                                 step.notes ? 'text-sky-700 bg-sky-100' : ''
                               }`}
                               title="Adicionar anotação para esta etapa"
@@ -382,31 +463,23 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Campo expansível de anotação e validação na etapa */}
+                    {/* Campo expansível de anotação na etapa */}
                     {isExpanded && (
                       <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-100 bg-white/70 space-y-2.5">
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            Validado por (membro_etapas_trilha.validado_por):
-                          </label>
-                          <input
-                            type="text"
-                            value={step.validatedBy || ''}
-                            onChange={(e) => handleStepValidatorChange(step.id, e.target.value)}
-                            placeholder={`Ex: ${validatorName || 'Pr. Paulo, Líder de Célula...'}`}
-                            className="w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            Observações específicas desta etapa (membro_etapas_trilha.observacoes):
+                            Observações desta etapa:
                           </label>
                           <input
                             type="text"
                             value={step.notes || ''}
+                            readOnly={!canEdit}
+                            disabled={!canEdit}
                             onChange={(e) => handleStepNoteChange(step.id, e.target.value)}
-                            placeholder="Ex: Concluiu com louvor, batizado pelo Pr. Paulo..."
-                            className="w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white"
+                            placeholder={canEdit ? 'Ex: Concluiu com louvor, batizado pelo Pr. Paulo...' : 'Nenhuma observação informada.'}
+                            className={`w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none text-slate-800 ${
+                              canEdit ? 'bg-white focus:border-sky-800' : 'bg-slate-100 cursor-default'
+                            }`}
                           />
                         </div>
                       </div>
@@ -423,10 +496,14 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                 </label>
                 <textarea
                   value={memberNotes}
+                  readOnly={!canEdit}
+                  disabled={!canEdit}
                   onChange={(e) => setMemberNotes(e.target.value)}
-                  placeholder="Ex: Teve uma conversa importante sobre batismo; participou do jejum de 21 dias; orar pela família..."
+                  placeholder={canEdit ? 'Ex: Teve uma conversa importante sobre batismo; participou do jejum de 21 dias; orar pela família...' : 'Nenhuma anotação de discipulado registrada.'}
                   rows={5}
-                  className="w-full text-sm p-3 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 focus:ring-1 focus:ring-sky-800 text-slate-800"
+                  className={`w-full text-sm p-3 rounded-xl border border-slate-300 focus:outline-none text-slate-800 ${
+                    canEdit ? 'bg-white focus:border-sky-800 focus:ring-1 focus:ring-sky-800' : 'bg-slate-100 cursor-default'
+                  }`}
                 />
               </div>
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs text-slate-600 space-y-2">
@@ -455,12 +532,10 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
         {/* Footer */}
         <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between shrink-0">
           <div className="text-xs text-slate-500">
-            {savedAlert ? (
+            {savedAlert && (
               <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                <Check size={14} /> Progresso e validação gravados com sucesso na tabela membro_etapas_trilha!
+                <Check size={14} /> Progresso gravado com sucesso!
               </span>
-            ) : (
-              'Os dados e o validador da etapa ficam salvos na tabela membro_etapas_trilha.'
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -469,22 +544,24 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
               disabled={isSaving}
               className="px-4 py-2 text-xs font-medium text-slate-600 hover:text-slate-800 rounded-lg hover:bg-slate-200 transition cursor-pointer disabled:opacity-50"
             >
-              Cancelar
+              {canEdit ? 'Cancelar' : 'Fechar'}
             </button>
-            <button
-              id="btn-save-leadership-track"
-              onClick={handleSave}
-              disabled={isSaving || isLoading}
-              className="px-5 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" /> Salvando...
-                </>
-              ) : (
-                'Salvar Trilho'
-              )}
-            </button>
+            {canEdit && (
+              <button
+                id="btn-save-leadership-track"
+                onClick={handleSave}
+                disabled={isSaving || isLoading}
+                className="px-5 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" /> Salvando...
+                  </>
+                ) : (
+                  'Salvar Trilho'
+                )}
+              </button>
+            )}
           </div>
         </div>
       </div>

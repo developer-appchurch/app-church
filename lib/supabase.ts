@@ -1160,9 +1160,13 @@ export const AppChurchService = {
           const celulaMap = new Map<string, any>();
           (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
 
-          // 3. Mapeia nomes das unidades superiores (setor / distrito)
+          // 3. Mapeia nomes das unidades superiores (setor / distrito / área)
           const parentNameMap = new Map<string, string>();
-          units.forEach((u: any) => parentNameMap.set(u.id, u.nome));
+          const parentIdMap = new Map<string, string>();
+          units.forEach((u: any) => {
+            parentNameMap.set(u.id, u.nome);
+            if (u.pai_id) parentIdMap.set(u.id, u.pai_id);
+          });
 
           // 4. Busca líderes atribuídos em unidade_lideres
           const { data: leadersData } = await supabase
@@ -1182,7 +1186,13 @@ export const AppChurchService = {
           }
 
           const leaderMap = new Map<string, string>();
+          const leadersByUnit = new Map<string, string[]>();
           (leadersData || []).forEach((l: any) => {
+            if (l.unidade_id && l.pessoa_id) {
+              const list = leadersByUnit.get(l.unidade_id) || [];
+              list.push(l.pessoa_id);
+              leadersByUnit.set(l.unidade_id, list);
+            }
             const memName = leaderMemberMap.get(l.pessoa_id);
             if (memName && !leaderMap.has(l.unidade_id)) {
               leaderMap.set(l.unidade_id, memName);
@@ -1209,6 +1219,8 @@ export const AppChurchService = {
           const cells: CellGroup[] = targetUnits.map((u: any) => {
             const cInfo = celulaMap.get(u.id);
             const parentName = u.pai_id ? parentNameMap.get(u.pai_id) : 'Setor Geral';
+            const grandparentId = u.pai_id ? parentIdMap.get(u.pai_id) : null;
+            const areaName = grandparentId ? parentNameMap.get(grandparentId) : undefined;
             return {
               id: u.id,
               churchId: u.igreja_id,
@@ -1219,6 +1231,11 @@ export const AppChurchService = {
               meetingDay: cInfo?.dia_reuniao || 'Quinta-feira',
               meetingTime: cInfo?.horario_reuniao || '19:30',
               memberCount: countMap.get(u.id) || cInfo?.quantidade_membros || 0,
+              parentUnitId: u.pai_id || null,
+              parentName: parentName || undefined,
+              areaName: areaName || undefined,
+              areaUnitId: grandparentId || null,
+              leaderMemberIds: leadersByUnit.get(u.id) || [],
             };
           });
 

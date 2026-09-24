@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile, Role } from '../types';
+import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile, Role, OrganizationalUnit } from '../types';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 import { AppChurchService } from '../lib/supabase';
 import {
@@ -175,72 +175,267 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       : (assignableRoles[0].name as UserRole);
   }, [assignableRoles, newRole]);
 
-  // -------------------------------------------------------------
-  // CONTROLE DO SELETOR HIERÁRQUICO CONTEXTUAL
-  // Apenas a partir do penúltimo nível da estrutura da igreja:
-  // Líder de Setor (penúltimo nível) -> Acesso às células do seu setor
-  // Pastor / Supervisor / Administrador -> Acesso organizado por setores
-  // -------------------------------------------------------------
-  const canAccessCellSelector = useMemo(() => {
-    if (!currentUser) return false;
-    const privilegedRoles: UserRole[] = [
-      'Líder de Setor',
-      'Supervisor',
-      'Pastor',
-      'Administrador',
-    ];
-    return (
-      privilegedRoles.includes(currentUser.role) ||
-      !!currentUser.isPrivileged ||
-      !!currentUser.isSystemAdmin
-    );
-  }, [currentUser]);
+  // Carrega unidades organizacionais para mapeamento da estrutura hierárquica
+  const [units, setUnits] = useState<OrganizationalUnit[]>([]);
 
-  // Se o usuário é exclusivamente Líder de Setor (penúltimo nível)
-  const isSectorLeaderOnly = useMemo(() => {
+  useEffect(() => {
+    let isMounted = true;
+    async function loadUnits() {
+      if (!currentUser?.churchId) return;
+      try {
+        const fetchedUnits = await AppChurchService.getUnits(currentUser.churchId);
+        if (isMounted && fetchedUnits && fetchedUnits.length > 0) {
+          setUnits(fetchedUnits);
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar unidades no MyCellView:', err);
+      }
+    }
+    loadUnits();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.churchId]);
+
+  // -------------------------------------------------------------
+  // CONTROLE DO SELETOR HIERÁRQUICO CONTEXTUAL & COBERTURA
+  // Regras de negócio de cobertura de liderança:
+  // - Pastor / Administrador / Supervisor: Acesso a todas as células da congregação.
+  // - Líder de Área: Acesso a todas as células da sua área de cobertura.
+  // - Líder de Setor: Acesso a cada uma das células do seu setor.
+  // - Líder de Célula: Acesso apenas às células que lidera ou está vinculado.
+  // - Membro: Acesso restrito à célula que pertence.
+  // -------------------------------------------------------------
+
+  const userRoleNormalized = useMemo(() => {
+    return (currentUser?.role || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+  }, [currentUser?.role]);
+
+  const isPastorOrAdmin = useMemo(() => {
     if (!currentUser) return false;
     return (
-      currentUser.role === 'Líder de Setor' &&
-      !currentUser.isSystemAdmin
+      currentUser.isSystemAdmin === true ||
+      currentUser.role === 'Administrador' ||
+      currentUser.login === 'admin' ||
+      userRoleNormalized.includes('pastor') ||
+      userRoleNormalized.includes('supervisor')
     );
-  }, [currentUser]);
+  }, [currentUser, userRoleNormalized]);
 
-  // Filtro de Setor para Pastores/Supervisores (evita lista gigantesca e desordenada)
+  const isAreaLeader = useMemo(() => {
+    if (isPastorOrAdmin || !currentUser) return false;
+    return (
+      userRoleNormalized.includes('area') ||
+      userRoleNormalized.includes('distrito') ||
+      userRoleNormalized.includes('rede')
+    );
+  }, [isPastorOrAdmin, currentUser, userRoleNormalized]);
+
+  const isSectorLeader = useMemo(() => {
+    if (isPastorOrAdmin || isAreaLeader || !currentUser) return false;
+    return userRoleNormalized.includes('setor');
+  }, [isPastorOrAdmin, isAreaLeader, currentUser, userRoleNormalized]);
+
+  const isCellLeader = useMemo(() => {
+    if (isPastorOrAdmin || isAreaLeader || isSectorLeader || !currentUser) return false;
+    return (
+      userRoleNormalized.includes('celula') ||
+      userRoleNormalized.includes('treinamento') ||
+      userRoleNormalized.includes('discipulador')
+    );
+  }, [isPastorOrAdmin, isAreaLeader, isSectorLeader, currentUser, userRoleNormalized]);
+
+  // Filtro de Setor para quem tem múltiplos setores sob cobertura (Pastores e Líderes de Área)
   const [selectedSectorFilter, setSelectedSectorFilter] = useState<string>('todos');
 
-  // Lista de todos os setores únicos identificados
-  const availableSectors = useMemo(() => {
-    if (!cells || cells.length === 0) return [];
-    const set = new Set<string>();
-    cells.forEach((c) => {
-      const sec = c.sectorName?.trim();
-      set.add(sec || 'Geral');
-    });
-    return Array.from(set).sort();
-  }, [cells]);
-
-  // Células acessíveis baseadas no nível e permissão do usuário
+  // Células acessíveis baseadas estritamente na cobertura de liderança do usuário (Ordenadas A-Z)
   const accessibleCells = useMemo(() => {
+    const sortAZ = (list: CellGroup[]) =>
+      [...list].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+
     if (!cells || cells.length === 0) return [cell];
 
-    // Para Líder de Setor: filtrar apenas células vinculadas ao seu setor
-    if (isSectorLeaderOnly) {
-      const userSector = currentUser?.sector?.trim().toLowerCase();
-      const filtered = cells.filter((c) => {
-        const sec = (c.sectorName || 'Geral').trim().toLowerCase();
-        return userSector ? sec === userSector || sec.includes(userSector) || userSector.includes(sec) : true;
+    // 1. Pastor / Administrador / Supervisor: Todas as células
+    if (isPastorOrAdmin) {
+      return sortAZ(cells);
+    }
+
+    // 2. Líder de Área: Todas as células da sua área
+    if (isAreaLeader) {
+      if (units && units.length > 0) {
+        const userAreas = units.filter((u) => {
+          const isAreaType =
+            u.levelTypeName?.toLowerCase().includes('area') ||
+            u.levelTypeName?.toLowerCase().includes('distrito') ||
+            u.levelTypeName?.toLowerCase().includes('rede');
+          const isLeader = u.leaders?.some(
+            (l) => l.id === currentUser?.id || l.name?.toLowerCase() === currentUser?.name?.toLowerCase()
+          );
+          const matchesSector =
+            currentUser?.sector &&
+            (u.name.toLowerCase().includes(currentUser.sector.toLowerCase()) ||
+              currentUser.sector.toLowerCase().includes(u.name.toLowerCase()));
+          return isAreaType && (isLeader || matchesSector);
+        });
+
+        if (userAreas.length > 0) {
+          const areaIds = new Set(userAreas.map((a) => a.id));
+          const childSectors = units.filter((u) => u.parentId && areaIds.has(u.parentId));
+          const sectorIds = new Set(childSectors.map((s) => s.id));
+          const sectorNames = new Set(childSectors.map((s) => s.name.toLowerCase()));
+
+          const areaCells = cells.filter((c) => {
+            if (c.parentUnitId && sectorIds.has(c.parentUnitId)) return true;
+            if (c.areaUnitId && areaIds.has(c.areaUnitId)) return true;
+            if (c.sectorName && sectorNames.has(c.sectorName.toLowerCase())) return true;
+            if (c.areaName && userAreas.some((a) => a.name.toLowerCase() === c.areaName?.toLowerCase())) return true;
+            return false;
+          });
+
+          if (areaCells.length > 0) return sortAZ(areaCells);
+        }
+      }
+
+      // Fallback para Área
+      const userAreaName = (currentUser?.sector || '').toLowerCase();
+      const matched = cells.filter((c) => {
+        if (c.areaName && userAreaName.includes(c.areaName.toLowerCase())) return true;
+        if (c.sectorName && userAreaName.includes(c.sectorName.toLowerCase())) return true;
+        return false;
       });
-      return filtered.length > 0 ? filtered : cells;
+      return sortAZ(matched.length > 0 ? matched : cells);
     }
 
-    // Para Pastor / Supervisor: filtrar de acordo com o setor selecionado para não ficar uma lista imensa
-    if (selectedSectorFilter !== 'todos') {
-      const filtered = cells.filter((c) => (c.sectorName || 'Geral') === selectedSectorFilter);
-      return filtered.length > 0 ? filtered : cells;
+    // 3. Líder de Setor: Cada uma das células do seu setor
+    if (isSectorLeader) {
+      if (units && units.length > 0) {
+        const userSectors = units.filter((u) => {
+          const isSecType = u.levelTypeName?.toLowerCase().includes('setor');
+          const isLeader = u.leaders?.some(
+            (l) => l.id === currentUser?.id || l.name?.toLowerCase() === currentUser?.name?.toLowerCase()
+          );
+          const matchesSecName =
+            currentUser?.sector &&
+            (u.name.toLowerCase() === currentUser.sector.toLowerCase() ||
+              u.name.toLowerCase().includes(currentUser.sector.toLowerCase()) ||
+              currentUser.sector.toLowerCase().includes(u.name.toLowerCase()));
+          const matchesActiveCellSec =
+            cell.sectorName &&
+            (u.name.toLowerCase() === cell.sectorName.toLowerCase() ||
+              u.name.toLowerCase().includes(cell.sectorName.toLowerCase()));
+          return isSecType && (isLeader || matchesSecName || matchesActiveCellSec);
+        });
+
+        if (userSectors.length > 0) {
+          const sectorIds = new Set(userSectors.map((s) => s.id));
+          const sectorNames = new Set(userSectors.map((s) => s.name.toLowerCase()));
+
+          const sectorCells = cells.filter((c) => {
+            if (c.parentUnitId && sectorIds.has(c.parentUnitId)) return true;
+            if (c.sectorName && sectorNames.has(c.sectorName.toLowerCase())) return true;
+            return false;
+          });
+
+          if (sectorCells.length > 0) return sortAZ(sectorCells);
+        }
+      }
+
+      // Fallback robusto por comparação de nomes de setor
+      const userSecClean = (currentUser?.sector || '').trim().toLowerCase();
+      const activeCellSecClean = (cell.sectorName || '').trim().toLowerCase();
+
+      const matched = cells.filter((c) => {
+        const cSecClean = (c.sectorName || '').trim().toLowerCase();
+        // Célula ativa do líder
+        if (c.id === cell.id) return true;
+        // Mesmo setor da célula ativa do líder
+        if (activeCellSecClean && cSecClean === activeCellSecClean) return true;
+        // Setor informado no perfil do usuário
+        if (userSecClean && cSecClean === userSecClean) return true;
+        if (userSecClean && (cSecClean.includes(userSecClean) || userSecClean.includes(cSecClean))) return true;
+        // Se o líder é o próprio usuário
+        if (currentUser?.name && c.leaderName?.toLowerCase() === currentUser.name.toLowerCase()) return true;
+        return false;
+      });
+
+      return sortAZ(matched.length > 0 ? matched : [cell]);
     }
 
-    return cells;
-  }, [cells, cell, isSectorLeaderOnly, currentUser?.sector, selectedSectorFilter]);
+    // 4. Líder de Célula: Apenas as células que lidera ou está vinculado
+    if (isCellLeader) {
+      const matched = cells.filter((c) => {
+        if (currentUser?.currentCellId && c.id === currentUser.currentCellId) return true;
+        if (currentUser?.name && c.leaderName?.toLowerCase() === currentUser.name.toLowerCase()) return true;
+        if (currentUser?.id && c.leaderMemberIds?.includes(currentUser.id)) return true;
+        if (units && units.length > 0) {
+          const u = units.find((unit) => unit.id === c.id);
+          if (u?.leaders?.some((l) => l.id === currentUser?.id || l.name?.toLowerCase() === currentUser?.name?.toLowerCase())) {
+            return true;
+          }
+        }
+        return false;
+      });
+
+      return sortAZ(matched.length > 0 ? matched : [cell]);
+    }
+
+    // 5. Membro (e outras funções de apoio): Apenas a célula vinculada
+    const memberCells = cells.filter((c) => {
+      if (currentUser?.currentCellId && c.id === currentUser.currentCellId) return true;
+      if (members.some((m) => m.id === currentUser?.id && m.cellId === c.id)) return true;
+      return false;
+    });
+
+    return sortAZ(memberCells.length > 0 ? memberCells : [cell]);
+  }, [
+    cells,
+    cell,
+    currentUser,
+    isPastorOrAdmin,
+    isAreaLeader,
+    isSectorLeader,
+    isCellLeader,
+    units,
+    members,
+  ]);
+
+  // Sincroniza a célula ativa caso esteja fora da cobertura permitida para o usuário
+  useEffect(() => {
+    if (accessibleCells.length > 0 && !accessibleCells.some((c) => c.id === cell.id)) {
+      onSelectCell?.(accessibleCells[0].id);
+    }
+  }, [accessibleCells, cell.id, onSelectCell]);
+
+  // Setores identificados dentro da cobertura acessível
+  const sectorsInCoverage = useMemo(() => {
+    const set = new Set<string>();
+    accessibleCells.forEach((c) => {
+      const sec = c.sectorName?.trim();
+      if (sec) set.add(sec);
+    });
+    return Array.from(set).sort();
+  }, [accessibleCells]);
+
+  // Células exibidas no seletor (estritamente ordenadas de A-Z)
+  const displayedCells = useMemo(() => {
+    return accessibleCells;
+  }, [accessibleCells]);
+
+  // Rótulo da cobertura para exibição contextual no topo
+  const coverageScopeBadge = useMemo(() => {
+    if (isPastorOrAdmin) return 'Toda a Igreja';
+    if (isAreaLeader) {
+      return cell.areaName || currentUser?.sector || 'Sua Área';
+    }
+    if (isSectorLeader) {
+      return cell.sectorName || currentUser?.sector || 'Seu Setor';
+    }
+    return cell.name;
+  }, [isPastorOrAdmin, isAreaLeader, isSectorLeader, cell.areaName, cell.sectorName, cell.name, currentUser?.sector]);
 
   /**
    * Gera sugestão de login a partir do nome:
@@ -587,133 +782,75 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
   return (
     <div id="screen-my-cell" className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full overflow-x-hidden">
-      {/* Top Banner / Breadcrumb & Controls */}
+      {/* Top Banner & Header Controls */}
       <div className="max-w-6xl mx-auto px-2.5 sm:px-6 pt-3 sm:pt-4 pb-2 w-full">
-        {/* Seletor Hierárquico Contextual:
-            Aparece a partir do penúltimo nível da estrutura (Líder de Setor) até Pastores/Supervisores.
-            - Líder de Setor: acesso apenas às células vinculadas ao seu setor.
-            - Pastor/Supervisor/Admin: organizado com filtro de Setor + Célula para não ficar uma lista imensa.
-            - Membros ou Líderes de Célula: não veem esse seletor, mantendo a tela perfeitamente limpa.
-        */}
-        {canAccessCellSelector && cells && cells.length > 1 && (
-          <div className="mb-3 px-3 py-2.5 bg-white rounded-xl sm:rounded-2xl border border-slate-200/90 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-2.5 w-full">
-            <div className="flex items-center gap-2 min-w-0">
-              <div className="w-8 h-8 rounded-xl bg-slate-100 text-[#04213d] flex items-center justify-center shrink-0">
-                <Network size={16} />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs font-bold text-slate-800">
-                    {isSectorLeaderOnly ? 'Seu Setor de Células' : 'Navegação Hierárquica'}
-                  </span>
-                  <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded-md">
-                    {currentUser?.role || 'Liderança'}
-                  </span>
-                  {isSectorLeaderOnly && currentUser?.sector && (
-                    <span className="text-[10px] bg-sky-50 text-sky-800 font-bold px-1.5 py-0.5 rounded-md border border-sky-200/60 truncate max-w-[130px]">
-                      {currentUser.sector}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[10px] sm:text-[11px] text-slate-500 truncate">
-                  {isSectorLeaderOnly
-                    ? `Células sob sua coordenação (${accessibleCells.length} disponíveis)`
-                    : 'Filtrado por setor para rápida alternância sem poluir a tela'}
-                </p>
-              </div>
-            </div>
+        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-xs border border-slate-200/80 mb-3 w-full">
+          {/* Informações da Célula */}
+          <div className="min-w-0 flex-1 pr-10 lg:pr-0">
+            <h2 className="text-xl sm:text-2xl font-extrabold text-[#04213d] break-words">
+              {cell.name}
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-500 mt-1 truncate">
+              {(() => {
+                const rawDay = (cell.meetingDay || 'Sexta').replace(/-feira/i, '').trim();
+                const day = rawDay ? rawDay.charAt(0).toUpperCase() + rawDay.slice(1) : 'Sexta';
+                const time = (cell.meetingTime || '19h30').replace(/^(\d{1,2}):(\d{2})$/, '$1h$2').trim();
+                const leader = cell.leaderName || 'Não informado';
+                return `${day} às ${time} - Líder: ${leader}`;
+              })()}
+            </p>
+          </div>
 
-            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full md:w-auto">
-              {/* Para Pastores/Supervisores/Admin: Seletor de Setor para evitar listas imensas de dezenas de células */}
-              {!isSectorLeaderOnly && availableSectors.length > 1 && (
-                <div className="flex-1 sm:flex-initial flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 min-w-0">
-                  <Layers size={13} className="text-slate-500 shrink-0" />
-                  <span className="text-[10px] sm:text-[11px] font-semibold text-slate-600 shrink-0">Setor:</span>
+          {/* Botão Legenda (posicionado no canto superior direito no mobile; em linha no desktop) */}
+          <button
+            type="button"
+            id="btn-cell-frequency-legend"
+            onClick={() => setShowLegend(!showLegend)}
+            className="absolute top-3.5 right-3.5 lg:static p-2 lg:px-3 lg:py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-2xs"
+            title="Entenda as cores da frequência"
+            aria-label="Legenda de frequência"
+          >
+            <HelpCircle size={16} className="text-slate-500" />
+            <span className="hidden lg:inline">Legenda</span>
+          </button>
+
+          {/* Seletor de Células (A-Z) & Botão Novo Membro Lado a Lado */}
+          {(accessibleCells.length > 1 || userHierarchyLevel > 1) && (
+            <div className="flex flex-row items-center gap-2 justify-start lg:justify-end shrink-0 pt-2 lg:pt-0 border-t border-slate-100 lg:border-t-0 w-full lg:w-auto">
+              {/* Seletor de Célula em Ordem Alfabética (A-Z) apenas com o nome da célula */}
+              {accessibleCells.length > 1 && (
+                <div className="flex items-center gap-1.5 bg-sky-50/80 hover:bg-sky-50 border border-sky-300 rounded-xl px-2.5 py-2 min-w-0 shadow-2xs transition flex-1 sm:flex-initial">
+                  <span className="text-[10px] sm:text-xs font-extrabold text-sky-950 shrink-0">Célula:</span>
                   <select
-                    value={selectedSectorFilter}
-                    onChange={(e) => {
-                      const newSec = e.target.value;
-                      setSelectedSectorFilter(newSec);
-                      const cellsInSec = newSec === 'todos' ? cells : cells.filter(c => (c.sectorName || 'Geral') === newSec);
-                      if (cellsInSec.length > 0 && !cellsInSec.some(c => c.id === cell.id)) {
-                        onSelectCell?.(cellsInSec[0].id);
-                      }
-                    }}
-                    className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer truncate w-full"
+                    id="select-active-cell"
+                    value={cell.id}
+                    onChange={(e) => onSelectCell?.(e.target.value)}
+                    className="text-xs font-extrabold text-[#04213d] bg-transparent focus:outline-none cursor-pointer w-full sm:w-auto sm:max-w-[180px] lg:max-w-[200px] truncate"
+                    title="Selecionar célula (Ordem A-Z)"
                   >
-                    <option value="todos">Todos ({cells.length})</option>
-                    {availableSectors.map((sec) => {
-                      const count = cells.filter(c => (c.sectorName || 'Geral') === sec).length;
-                      return (
-                        <option key={sec} value={sec}>
-                          {sec} ({count})
-                        </option>
-                      );
-                    })}
+                    {displayedCells.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
               )}
 
-              {/* Seletor de Célula */}
-              <div className="flex-1 sm:flex-initial flex items-center gap-1.5 bg-sky-50/70 border border-sky-200 rounded-xl px-2.5 py-1.5 min-w-0">
-                <span className="text-[10px] sm:text-[11px] font-bold text-sky-950 shrink-0">Célula:</span>
-                <select
-                  value={cell.id}
-                  onChange={(e) => onSelectCell?.(e.target.value)}
-                  className="text-xs font-extrabold text-[#04213d] bg-transparent focus:outline-none cursor-pointer max-w-[170px] sm:max-w-[200px] truncate w-full"
+              {/* Botão Novo Membro (Visível apenas para nível hierárquico acima de 1) */}
+              {userHierarchyLevel > 1 && (
+                <button
+                  type="button"
+                  id="btn-cell-add-member"
+                  onClick={handleOpenAddModal}
+                  className="px-3.5 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                 >
-                  {accessibleCells.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} {!isSectorLeaderOnly && c.sectorName ? `(${c.sectorName})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <Plus size={15} />
+                  <span>Novo Membro</span>
+                </button>
+              )}
             </div>
-          </div>
-        )}
-
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-xs border border-slate-200/80 mb-3 w-full">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[11px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
-                Lifegroup
-              </span>
-              <span className="text-xs text-slate-400">•</span>
-              <span className="text-xs text-slate-500 font-medium flex items-center gap-1 truncate">
-                <MapPin size={12} className="text-slate-400 shrink-0" /> <span className="truncate">{cell.address}</span>
-              </span>
-            </div>
-            <h2 className="text-lg sm:text-2xl font-extrabold text-[#04213d] mt-1 break-words">
-              Membros da Célula {cell.name}
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5 truncate">
-              Reunião toda <strong>{cell.meetingDay}</strong> às <strong>{cell.meetingTime}</strong> • Líder: {cell.leaderName}
-            </p>
-          </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              id="btn-cell-frequency-legend"
-              onClick={() => setShowLegend(!showLegend)}
-              className="flex-1 sm:flex-initial px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer"
-              title="Entenda as cores da frequência"
-            >
-              <HelpCircle size={15} className="text-slate-500" />
-              <span>Legenda</span>
-            </button>
-            <button
-              type="button"
-              id="btn-cell-add-member"
-              onClick={handleOpenAddModal}
-              className="flex-1 sm:flex-initial px-3.5 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
-            >
-              <Plus size={15} />
-              <span>Novo Membro</span>
-            </button>
-          </div>
+          )}
         </div>
 
         {/* Legend Expandable Drawer */}

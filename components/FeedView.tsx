@@ -192,13 +192,10 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 Feed de Notícias
               </h2>
               <p className="text-xs text-slate-500">
-                {churchName} • {currentCell.name} (Últimas 10 publicações)
+                {churchName}
               </p>
             </div>
           </div>
-          <span className="text-xs text-slate-400 font-medium">
-            {posts.length} {posts.length === 1 ? 'publicação recente' : 'publicações recentes'}
-          </span>
         </div>
 
         {/* Post Creation Box - Only for allowed leadership roles */}

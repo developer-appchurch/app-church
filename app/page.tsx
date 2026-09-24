@@ -411,9 +411,10 @@ export default function Home() {
         <LeadershipTrackModal
           key={selectedMemberForTrack.id}
           member={selectedMemberForTrack}
-          churchId={selectedMemberForTrack.churchId || targetChurchContext?.id || user.churchId}
-          churchName={targetChurchContext?.name || user.churchName}
+          churchId={selectedMemberForTrack.churchId || targetChurchContext?.id || user?.churchId}
+          churchName={targetChurchContext?.name || user?.churchName}
           cellName={currentCell?.name || 'Célula'}
+          currentUser={user}
           validatorName={user?.name || user?.role || 'Líder Responsável'}
           onClose={() => setSelectedMemberForTrack(null)}
           onSaveProgress={handleSaveLeadershipProgress}

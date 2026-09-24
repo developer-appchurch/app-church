@@ -117,6 +117,11 @@ export interface CellGroup {
   meetingDay: string;
   meetingTime: string;
   memberCount: number;
+  parentUnitId?: string | null;
+  parentName?: string;
+  areaName?: string;
+  areaUnitId?: string | null;
+  leaderMemberIds?: string[];
 }
 
 export interface CellMember {
