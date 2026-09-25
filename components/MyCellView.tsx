@@ -895,8 +895,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="w-3.5 h-3.5 rounded-full bg-[#16a34a] shrink-0 shadow-2xs" />
                   <div className="min-w-0">
-                    <div className="font-bold text-emerald-950 text-[11px] sm:text-xs truncate">Verde (Assíduo)</div>
-                    <div className="text-[10px] text-emerald-700 truncate">90% a 100%</div>
+                    <div className="font-bold text-emerald-950 text-xs sm:text-sm truncate">Assíduo</div>
+                    <div className="text-[10px] sm:text-[11px] text-emerald-700 truncate">90% a 100%</div>
                   </div>
                 </div>
                 <div className="bg-emerald-600 text-white font-extrabold text-xs px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs">
@@ -908,8 +908,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="w-3.5 h-3.5 rounded-full bg-[#facc15] shrink-0 shadow-2xs" />
                   <div className="min-w-0">
-                    <div className="font-bold text-amber-950 text-[11px] sm:text-xs truncate">Amarelo (Regular)</div>
-                    <div className="text-[10px] text-amber-700 truncate">Em torno de 75%</div>
+                    <div className="font-bold text-amber-950 text-xs sm:text-sm truncate">Regular</div>
+                    <div className="text-[10px] sm:text-[11px] text-amber-700 truncate">Em torno de 75%</div>
                   </div>
                 </div>
                 <div className="bg-amber-500 text-amber-950 font-extrabold text-xs px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs">
@@ -921,8 +921,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="w-3.5 h-3.5 rounded-full bg-[#d05a5a] shrink-0 shadow-2xs" />
                   <div className="min-w-0">
-                    <div className="font-bold text-red-950 text-[11px] sm:text-xs truncate">Vermelho (Alerta)</div>
-                    <div className="text-[10px] text-red-700 truncate">Abaixo de 50%</div>
+                    <div className="font-bold text-red-950 text-xs sm:text-sm truncate">Alerta</div>
+                    <div className="text-[10px] sm:text-[11px] text-red-700 truncate">Abaixo de 50%</div>
                   </div>
                 </div>
                 <div className="bg-red-600 text-white font-extrabold text-xs px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs">
@@ -934,8 +934,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="w-3.5 h-3.5 rounded-full bg-[#18181b] shrink-0 shadow-2xs" />
                   <div className="min-w-0">
-                    <div className="font-bold text-slate-950 text-[11px] sm:text-xs truncate">Preto (Ausente)</div>
-                    <div className="text-[10px] text-slate-600 truncate">3+ faltas seguidas</div>
+                    <div className="font-bold text-slate-950 text-xs sm:text-sm truncate">Ausente</div>
+                    <div className="text-[10px] sm:text-[11px] text-slate-600 truncate">3+ faltas seguidas</div>
                   </div>
                 </div>
                 <div className="bg-slate-900 text-white font-extrabold text-xs px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs">
