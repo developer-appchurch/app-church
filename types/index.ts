@@ -323,3 +323,33 @@ export interface RegisterChurchResult {
   seedCell?: CellGroup;
   initialPasswordGenerated?: string;
 }
+
+export interface WeeklyReport {
+  id: string;
+  igreja_id: string;
+  unidade_id: string;
+  lancado_por?: string;
+  lancado_por_nome?: string;
+  data_relatorio: string;
+  ano_iso?: number;
+  numero_semana?: number;
+  houve_reuniao?: boolean;
+  valor_pix?: number | string | null;
+  valor_especie?: number | string | null;
+  qtd_membros: number;
+  qtd_convidados?: number | null;
+  qtd_criancas?: number | null;
+  observacao?: string | null;
+  supervisao?: boolean;
+  tesouraria_recebido?: boolean;
+  criado_em?: string;
+  atualizado_em?: string;
+  // Campos parseados
+  tema_estudo?: string;
+  pedidos_oracao?: string;
+  visitantes?: number;
+  oferta?: string;
+  presentes_ids?: string[];
+  observacao_texto?: string;
+}
+

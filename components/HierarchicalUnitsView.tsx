@@ -724,8 +724,16 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   onChange={(e) => setUnitName(e.target.value)}
                   placeholder={
                     isLeafLevel
-                      ? 'Ex: Célula Betel, Ágape, Filadélfia'
-                      : `Ex: ${activeLevel.name} Norte, ${activeLevel.name} Central`
+                      ? 'Ex: Betel, Ágape, Filadélfia'
+                      : activeLevel?.name?.toLowerCase().includes('setor')
+                      ? 'Ex: Azul, Black, Fire'
+                      : activeLevel?.name?.toLowerCase().includes('área') || activeLevel?.name?.toLowerCase().includes('area')
+                      ? 'Ex: Norte, Sul, Leste, Central'
+                      : activeLevel?.name?.toLowerCase().includes('rede')
+                      ? 'Ex: Jovens, Família, Kids'
+                      : activeLevel?.name?.toLowerCase().includes('distrito')
+                      ? 'Ex: Alpha, Beta, Ômega'
+                      : 'Ex: Azul, Black, Fire'
                   }
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 focus:ring-1 focus:ring-sky-800"
                 />

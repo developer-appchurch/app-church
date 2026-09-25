@@ -789,7 +789,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 )}
               </div>
             ) : (
-              displayPosts.map((post) => {
+              displayPosts.map((post, postIndex) => {
                 const isCommentsOpen = activeCommentPostId === post.id;
                 const commentsState = postCommentsState[post.id];
                 const commentsList = commentsState?.comments || [];
@@ -923,7 +923,8 @@ export const FeedView: React.FC<FeedViewProps> = ({
                           alt="Momento da congregação"
                           width={post.imageWidth || 800}
                           height={post.imageHeight || 450}
-                          loading="lazy"
+                          priority={postIndex === 0}
+                          {...(postIndex > 0 ? { loading: 'lazy' as const } : {})}
                           decoding="async"
                           className="w-full h-full object-cover hover:scale-[1.01] transition duration-300"
                           unoptimized

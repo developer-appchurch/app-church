@@ -644,7 +644,13 @@ export default function Home() {
           )}
 
           {activeScreen === 'reports' && (
-            <WeeklyReportView currentCell={currentCell} members={effectiveMembers} />
+            <WeeklyReportView
+              currentCell={currentCell}
+              members={effectiveMembers}
+              cells={effectiveCells}
+              onSelectCell={setSelectedCellId}
+              currentUser={user}
+            />
           )}
 
           {activeScreen === 'hierarchy_units' && user && (

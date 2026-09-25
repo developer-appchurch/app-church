@@ -26,8 +26,11 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
   useEffect(() => {
     isRefreshingRef.current = isRefreshing;
     if (!isRefreshing) {
-      setPullDistance(0);
-      setIsPulling(false);
+      const timer = setTimeout(() => {
+        setPullDistance(0);
+        setIsPulling(false);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [isRefreshing]);
 
