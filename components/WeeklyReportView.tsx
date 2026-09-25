@@ -176,6 +176,22 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     });
   };
 
+  // Limpa observação caso venha algum resíduo antigo ou JSON
+  const cleanObservationText = (val: any): string => {
+    if (!val || typeof val !== 'string') return '';
+    const trimmed = val.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const text = parsed.observacao || parsed.texto_livre || parsed.observacoes_extras || '';
+        return typeof text === 'string' ? text.trim() : '';
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  };
+
   // Reset modal form
   const resetForm = useCallback(() => {
     const today = new Date();
@@ -316,7 +332,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     setValorEspecie(formatMoneyInput(rep.valor_especie));
     setConvidadosCount(String(rep.qtd_convidados ?? 0));
     setChildrenCount(String(rep.qtd_criancas ?? 0));
-    setObservacao(rep.observacao_texto || rep.observacao || '');
+    setObservacao(cleanObservationText(rep.observacao_texto || rep.observacao || ''));
     setPresentMemberIds(rep.presentes_ids || []);
     setDuplicateWarning(null);
     setSelectedReportForDetail(null);
@@ -883,15 +899,20 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   )}
 
                 {/* Observação sobre a Reunião */}
-                {(selectedReportForDetail.observacao_texto ||
-                  selectedReportForDetail.observacao) && (
+                {Boolean(
+                  cleanObservationText(
+                    selectedReportForDetail.observacao_texto || selectedReportForDetail.observacao
+                  )
+                ) && (
                   <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/80">
                     <div className="text-[11px] font-bold text-slate-700 uppercase mb-1">
                       Observação sobre a Reunião
                     </div>
                     <p className="text-xs text-slate-800 whitespace-pre-line font-medium">
-                      {selectedReportForDetail.observacao_texto ||
-                        selectedReportForDetail.observacao}
+                      {cleanObservationText(
+                        selectedReportForDetail.observacao_texto ||
+                          selectedReportForDetail.observacao
+                      )}
                     </p>
                   </div>
                 )}
@@ -1277,11 +1298,17 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                     </div>
                   </div>
 
-                  {duplicateWarning.existingReport.observacao && (
+                  {Boolean(
+                    cleanObservationText(duplicateWarning.existingReport.observacao)
+                  ) && (
                     <div className="bg-white p-2 rounded-lg border border-slate-200/70 text-xs">
-                      <span className="text-[10px] text-slate-500 block font-medium mb-0.5">Observação</span>
+                      <span className="text-[10px] text-slate-500 block font-medium mb-0.5">
+                        Observação
+                      </span>
                       <p className="text-slate-700 italic line-clamp-2">
-                        &ldquo;{duplicateWarning.existingReport.observacao}&rdquo;
+                        &ldquo;
+                        {cleanObservationText(duplicateWarning.existingReport.observacao)}
+                        &rdquo;
                       </p>
                     </div>
                   )}

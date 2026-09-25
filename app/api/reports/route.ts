@@ -3,6 +3,24 @@ import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 
 /**
+ * Função utilitária para limpar observação e remover qualquer JSON antigo/resíduo de metadados
+ */
+function cleanObservationText(val: any): string {
+  if (!val || typeof val !== 'string') return '';
+  const trimmed = val.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const text = parsed.observacao || parsed.texto_livre || parsed.observacoes_extras || '';
+      return typeof text === 'string' ? text.trim() : '';
+    } catch {
+      return trimmed;
+    }
+  }
+  return trimmed;
+}
+
+/**
  * Função utilitária para converter valor em moeda para número float
  */
 function parseCurrency(val: any): number {
@@ -172,26 +190,13 @@ export async function GET(req: NextRequest) {
 
     // Processa os dados
     const reports = reportRows.map((row: any) => {
-      let parsedObs: any = {};
-      let observacaoTexto = row.observacao || '';
-      if (row.observacao && row.observacao.trim().startsWith('{')) {
-        try {
-          parsedObs = JSON.parse(row.observacao);
-          observacaoTexto = parsedObs.observacao || parsedObs.texto_livre || parsedObs.observacoes_extras || '';
-        } catch {
-          observacaoTexto = row.observacao;
-        }
-      }
-
-      // Se presencasByReport encontrou registros para esse relatório (ou lista vazia confirmada), usa ela
-      const presentesIds =
-        presencasByReport[row.id] !== undefined && presencasByReport[row.id].length > 0
-          ? presencasByReport[row.id]
-          : (parsedObs.presentes_ids || presencasByReport[row.id] || []);
+      const observacaoTexto = cleanObservationText(row.observacao);
+      const presentesIds = presencasByReport[row.id] || [];
 
       return {
         ...row,
-        lancado_por_nome: row.lancador?.nome || parsedObs.autor_nome || null,
+        lancado_por_nome: row.lancador?.nome || 'Líder Responsável',
+        observacao: observacaoTexto,
         observacao_texto: observacaoTexto,
         presentes_ids: presentesIds,
       };
@@ -303,15 +308,7 @@ export async function POST(req: NextRequest) {
     const parsedPix = parseCurrency(valorPix);
     const parsedEspecie = parseCurrency(valorEspecie);
     const { year: isoYear, week: isoWeek } = getISOWeekAndYear(reportDate);
-
-    // Estrutura observacao com metadados para garantir integridade e redundância
-    const observacaoPayload = JSON.stringify({
-      texto_livre: typeof observacao === 'string' ? observacao.trim() : '',
-      observacao: typeof observacao === 'string' ? observacao.trim() : '',
-      presentes_ids: Array.isArray(presentMemberIds) ? presentMemberIds : [],
-      autor_nome: authorName || 'Líder Responsável',
-      atualizado_em: new Date().toISOString(),
-    });
+    const cleanObs = cleanObservationText(observacao);
 
     const reportPayload: any = {
       igreja_id: churchId,
@@ -324,7 +321,7 @@ export async function POST(req: NextRequest) {
       qtd_criancas: Number(childrenCount) || 0,
       valor_pix: parsedPix,
       valor_especie: parsedEspecie,
-      observacao: observacaoPayload,
+      observacao: cleanObs,
       supervisao: Boolean(supervisao),
     };
 
@@ -529,8 +526,9 @@ export async function POST(req: NextRequest) {
       report: {
         ...savedReport,
         lancado_por_nome: authorNameFinal,
-        observacao_texto: typeof observacao === 'string' ? observacao.trim() : '',
-        presentes_ids: presentMemberIds,
+        observacao: cleanObs,
+        observacao_texto: cleanObs,
+        presentes_ids: Array.isArray(presentMemberIds) ? presentMemberIds : [],
       },
     });
   } catch (err: any) {
