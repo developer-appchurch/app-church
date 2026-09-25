@@ -20,6 +20,7 @@ import { LoginScreen } from '../components/LoginScreen';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
 import { ConnectionBadge } from '../components/ConnectionBadge';
+import { PullToRefresh } from '../components/PullToRefresh';
 import { Plus, AlertCircle, Layers, X, CheckCircle2, Loader2 } from 'lucide-react';
 
 const ViewLoading = () => (
@@ -116,6 +117,7 @@ export default function Home() {
   const [targetChurchContext, setTargetChurchContext] = useState<{ id: string; name: string } | null>(null);
   const [hierarchyLevelIndex, setHierarchyLevelIndex] = useState<number>(0);
   const [refreshErrorBanner, setRefreshErrorBanner] = useState<string>('');
+  const [refreshSuccessToast, setRefreshSuccessToast] = useState<string>('');
 
   // 1. React Query: Consulta de Células com keepPreviousData e enabled condicionado a churchId
   const {
@@ -251,6 +253,7 @@ export default function Home() {
     if (!user) return;
     setIsRefreshing(true);
     setRefreshErrorBanner('');
+    setRefreshSuccessToast('');
     try {
       // 1. Invalida as queries do React Query (mantém os dados na tela graças ao keepPreviousData)
       await Promise.all([
@@ -280,6 +283,12 @@ export default function Home() {
 
       const status = await AppChurchService.checkConnection();
       setConnectionStatus(status);
+
+      // Notificação rápida (2s no máximo) em tom de verde claro
+      setRefreshSuccessToast('Dados Atualizados');
+      setTimeout(() => {
+        setRefreshSuccessToast('');
+      }, 2000);
     } catch (err: any) {
       console.error('[handleRefresh] Erro ao sincronizar dados com o Supabase:', err);
       setRefreshErrorBanner('Não foi possível conectar ao banco de dados neste momento. Os dados anteriores foram mantidos.');
@@ -552,6 +561,16 @@ export default function Home() {
         onLogout={handleLogout}
       />
 
+      {/* Toast Notificação Rápida de Sucesso ao Atualizar Dados (2s max, tom verde claro) */}
+      {refreshSuccessToast && (
+        <div className="fixed top-16 right-3 sm:right-6 z-50 animate-in fade-in slide-in-from-top-2 duration-200 pointer-events-none">
+          <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-300/90 text-emerald-900 px-3.5 py-2 rounded-xl shadow-lg shadow-emerald-950/10 text-xs sm:text-sm font-bold">
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <span>{refreshSuccessToast}</span>
+          </div>
+        </div>
+      )}
+
       {refreshErrorBanner && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center justify-between text-xs text-amber-800 animate-fadeIn">
           <div className="flex items-center gap-2">
@@ -579,106 +598,108 @@ export default function Home() {
         onUpdateAvatar={handleUpdateAvatar}
       />
 
-      {/* Main Dynamic View */}
-      <main className="flex-1">
-        {activeScreen === 'feed' && (
-          <FeedView
-            posts={posts}
-            announcements={announcements}
-            currentUser={user}
-            currentCell={currentCell}
-            churchName={user.churchName}
-            onLikePost={handleLikePost}
-            onAddComment={handleAddComment}
-            onDeleteComment={handleDeleteComment}
-            onDeletePost={handleDeletePost}
-            onCreatePost={handleCreatePost}
-            onCreateAnnouncement={handleCreateAnnouncement}
-            onToggleRSVP={handleToggleRSVP}
-          />
-        )}
-
-        {activeScreen === 'my_cell' && (
-          <MyCellView
-            members={effectiveMembers}
-            cell={currentCell}
-            churchName={user.churchName}
-            currentUser={user}
-            cells={effectiveCells}
-            onSelectCell={setSelectedCellId}
-            onOpenLeadershipTrack={(member) => setSelectedMemberForTrack(member)}
-            onAddMember={handleAddMember}
-            onUpdateAttendance={handleUpdateAttendance}
-          />
-        )}
-
-        {activeScreen === 'leadership_track' && (
-          <LeadershipOverviewView
-            members={effectiveMembers}
-            currentCell={currentCell}
-            currentUser={user}
-            cells={effectiveCells}
-            onSelectCell={setSelectedCellId}
-            onOpenMemberTrack={(member) => setSelectedMemberForTrack(member)}
-          />
-        )}
-
-        {activeScreen === 'reports' && (
-          <WeeklyReportView currentCell={currentCell} members={effectiveMembers} />
-        )}
-
-        {activeScreen === 'hierarchy_units' && user && (
-          <HierarchicalUnitsView
-            user={user}
-            targetChurchId={targetChurchContext?.id || user.churchId}
-            targetChurchName={targetChurchContext?.name || user.churchName}
-            initialLevelIndex={hierarchyLevelIndex}
-            onNavigateOverview={() => setActiveScreen('church_overview')}
-            onNavigatePool={() => setActiveScreen('member_pool')}
-          />
-        )}
-
-        {activeScreen === 'member_pool' && user && (
-          <MemberPoolView
-            user={user}
-            onNavigateUnits={() => setActiveScreen('hierarchy_units')}
-            onNavigateOverview={() => setActiveScreen('church_overview')}
-          />
-        )}
-
-        {activeScreen === 'church_overview' && user && (
-          <ChurchHierarchyOverviewView
-            user={user}
-            onNavigateAddUnit={(levelIdx) => {
-              setHierarchyLevelIndex(levelIdx);
-              setActiveScreen('hierarchy_units');
-            }}
-            onNavigatePool={() => setActiveScreen('member_pool')}
-          />
-        )}
-
-        {activeScreen === 'register_church' &&
-          (user?.isSystemAdmin || user?.role === 'Administrador' || user?.login === 'admin') && (
-            <RegisterChurchView
-              onBack={() => setActiveScreen('feed')}
-              onSuccessLogin={handleLoginSuccess}
-              isLoggedIn={true}
-              onNavigateUnits={(church) => {
-                if (church) {
-                  setTargetChurchContext({ id: church.churchId, name: church.churchName });
-                }
-                setHierarchyLevelIndex(0);
-                setActiveScreen('hierarchy_units');
-              }}
-              onNavigateOverview={(church) => {
-                if (church) {
-                  setTargetChurchContext({ id: church.churchId, name: church.churchName });
-                }
-                setActiveScreen('church_overview');
-              }}
+      {/* Main Dynamic View com PullToRefresh mobile integrado */}
+      <PullToRefresh onRefresh={handleRefresh} isRefreshing={isRefreshing}>
+        <main className="flex-1">
+          {activeScreen === 'feed' && (
+            <FeedView
+              posts={posts}
+              announcements={announcements}
+              currentUser={user}
+              currentCell={currentCell}
+              churchName={user.churchName}
+              onLikePost={handleLikePost}
+              onAddComment={handleAddComment}
+              onDeleteComment={handleDeleteComment}
+              onDeletePost={handleDeletePost}
+              onCreatePost={handleCreatePost}
+              onCreateAnnouncement={handleCreateAnnouncement}
+              onToggleRSVP={handleToggleRSVP}
             />
           )}
-      </main>
+
+          {activeScreen === 'my_cell' && (
+            <MyCellView
+              members={effectiveMembers}
+              cell={currentCell}
+              churchName={user.churchName}
+              currentUser={user}
+              cells={effectiveCells}
+              onSelectCell={setSelectedCellId}
+              onOpenLeadershipTrack={(member) => setSelectedMemberForTrack(member)}
+              onAddMember={handleAddMember}
+              onUpdateAttendance={handleUpdateAttendance}
+            />
+          )}
+
+          {activeScreen === 'leadership_track' && (
+            <LeadershipOverviewView
+              members={effectiveMembers}
+              currentCell={currentCell}
+              currentUser={user}
+              cells={effectiveCells}
+              onSelectCell={setSelectedCellId}
+              onOpenMemberTrack={(member) => setSelectedMemberForTrack(member)}
+            />
+          )}
+
+          {activeScreen === 'reports' && (
+            <WeeklyReportView currentCell={currentCell} members={effectiveMembers} />
+          )}
+
+          {activeScreen === 'hierarchy_units' && user && (
+            <HierarchicalUnitsView
+              user={user}
+              targetChurchId={targetChurchContext?.id || user.churchId}
+              targetChurchName={targetChurchContext?.name || user.churchName}
+              initialLevelIndex={hierarchyLevelIndex}
+              onNavigateOverview={() => setActiveScreen('church_overview')}
+              onNavigatePool={() => setActiveScreen('member_pool')}
+            />
+          )}
+
+          {activeScreen === 'member_pool' && user && (
+            <MemberPoolView
+              user={user}
+              onNavigateUnits={() => setActiveScreen('hierarchy_units')}
+              onNavigateOverview={() => setActiveScreen('church_overview')}
+            />
+          )}
+
+          {activeScreen === 'church_overview' && user && (
+            <ChurchHierarchyOverviewView
+              user={user}
+              onNavigateAddUnit={(levelIdx) => {
+                setHierarchyLevelIndex(levelIdx);
+                setActiveScreen('hierarchy_units');
+              }}
+              onNavigatePool={() => setActiveScreen('member_pool')}
+            />
+          )}
+
+          {activeScreen === 'register_church' &&
+            (user?.isSystemAdmin || user?.role === 'Administrador' || user?.login === 'admin') && (
+              <RegisterChurchView
+                onBack={() => setActiveScreen('feed')}
+                onSuccessLogin={handleLoginSuccess}
+                isLoggedIn={true}
+                onNavigateUnits={(church) => {
+                  if (church) {
+                    setTargetChurchContext({ id: church.churchId, name: church.churchName });
+                  }
+                  setHierarchyLevelIndex(0);
+                  setActiveScreen('hierarchy_units');
+                }}
+                onNavigateOverview={(church) => {
+                  if (church) {
+                    setTargetChurchContext({ id: church.churchId, name: church.churchName });
+                  }
+                  setActiveScreen('church_overview');
+                }}
+              />
+            )}
+        </main>
+      </PullToRefresh>
 
       {/* Modal: Trilho de Liderança do Membro */}
       {selectedMemberForTrack && (

@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Network,
   Layers,
+  Users,
 } from 'lucide-react';
 
 interface MyCellViewProps {
@@ -788,6 +789,14 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     }
   };
 
+  // Tamanho dinâmico e adaptativo da fonte do nome da célula
+  const cellNameFontSizeClass = useMemo(() => {
+    const len = cell.name?.length || 0;
+    if (len > 35) return 'text-lg sm:text-xl lg:text-2xl leading-snug';
+    if (len > 22) return 'text-xl sm:text-2xl lg:text-[26px] leading-tight';
+    return 'text-[22px] sm:text-[26px] lg:text-[28px] leading-tight';
+  }, [cell.name]);
+
   return (
     <div id="screen-my-cell" className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full overflow-x-hidden">
       {/* Top Banner & Header Controls */}
@@ -795,7 +804,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
         <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-xs border border-slate-200/80 mb-3 w-full">
           {/* Informações da Célula */}
           <div className="min-w-0 flex-1 pr-10 lg:pr-0">
-            <h2 className="text-xl sm:text-2xl font-extrabold text-[#04213d] break-words">
+            <h2 className={`${cellNameFontSizeClass} font-extrabold text-[#04213d] break-words`}>
               {cell.name}
             </h2>
             <p className="text-xs sm:text-sm text-slate-500 mt-1 truncate">
@@ -827,13 +836,13 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             <div className="flex flex-row items-center gap-2 justify-start lg:justify-end shrink-0 pt-2 lg:pt-0 border-t border-slate-100 lg:border-t-0 w-full lg:w-auto">
               {/* Seletor de Célula em Ordem Alfabética (A-Z) apenas com o nome da célula */}
               {accessibleCells.length > 1 && (
-                <div className="flex items-center gap-1.5 bg-sky-50/80 hover:bg-sky-50 border border-sky-300 rounded-xl px-2.5 py-2 min-w-0 shadow-2xs transition flex-1 sm:flex-initial">
-                  <span className="text-[10px] sm:text-xs font-extrabold text-sky-950 shrink-0">Célula:</span>
+                <div className="flex items-center gap-1.5 bg-sky-50/80 hover:bg-sky-50 border border-sky-300 rounded-xl pl-2 pr-2.5 sm:px-2.5 py-2 min-w-0 shadow-2xs transition flex-1 sm:flex-initial">
+                  <span className="text-[10px] sm:text-xs font-bold text-sky-950 shrink-0 hidden sm:inline">Célula:</span>
                   <select
                     id="select-active-cell"
                     value={cell.id}
                     onChange={(e) => onSelectCell?.(e.target.value)}
-                    className="text-xs font-extrabold text-[#04213d] bg-transparent focus:outline-none cursor-pointer w-full sm:w-auto sm:max-w-[180px] lg:max-w-[200px] truncate"
+                    className="text-[15px] sm:text-xs font-bold text-[#04213d] bg-transparent focus:outline-none cursor-pointer w-full sm:w-auto sm:max-w-[180px] lg:max-w-[200px] truncate"
                     title="Selecionar célula (Ordem A-Z)"
                   >
                     {displayedCells.map((c) => (
@@ -865,51 +874,80 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
         {showLegend && (
           <div className="bg-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs mb-3 animate-in fade-in duration-150 w-full">
             <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-600">
-                Critérios de Frequência da Célula:
-              </h4>
+              <div className="flex items-center gap-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  Critérios de Frequência & Quantidade por Status
+                </h4>
+                <span className="text-[11px] text-slate-500 font-medium">
+                  ({stats.total} {stats.total === 1 ? 'membro' : 'membros'} no total)
+                </span>
+              </div>
               <button
                 onClick={() => setShowLegend(false)}
                 className="text-slate-400 hover:text-slate-600 cursor-pointer p-1"
+                aria-label="Fechar legenda"
               >
                 <X size={16} />
               </button>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-50/70 border border-emerald-100">
-                <span className="w-3.5 h-3.5 rounded-full bg-[#16a34a] shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold text-emerald-950 text-[11px] sm:text-xs truncate">Verde (Assíduo)</div>
-                  <div className="text-[10px] text-emerald-700 truncate">90% a 100%</div>
+              <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-emerald-50/80 border border-emerald-200/80">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#16a34a] shrink-0 shadow-2xs" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-emerald-950 text-[11px] sm:text-xs truncate">Verde (Assíduo)</div>
+                    <div className="text-[10px] text-emerald-700 truncate">90% a 100%</div>
+                  </div>
+                </div>
+                <div className="bg-emerald-600 text-white font-extrabold text-xs px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs">
+                  {stats.greenCount}
                 </div>
               </div>
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-50/70 border border-amber-100">
-                <span className="w-3.5 h-3.5 rounded-full bg-[#facc15] shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold text-amber-950 text-[11px] sm:text-xs truncate">Amarelo (Regular)</div>
-                  <div className="text-[10px] text-amber-700 truncate">Em torno de 75%</div>
+
+              <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/80">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#facc15] shrink-0 shadow-2xs" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-amber-950 text-[11px] sm:text-xs truncate">Amarelo (Regular)</div>
+                    <div className="text-[10px] text-amber-700 truncate">Em torno de 75%</div>
+                  </div>
+                </div>
+                <div className="bg-amber-500 text-amber-950 font-extrabold text-xs px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs">
+                  {stats.yellowCount}
                 </div>
               </div>
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-red-50/70 border border-red-100">
-                <span className="w-3.5 h-3.5 rounded-full bg-[#d05a5a] shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold text-red-950 text-[11px] sm:text-xs truncate">Vermelho (Alerta)</div>
-                  <div className="text-[10px] text-red-700 truncate">Abaixo de 50%</div>
+
+              <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-red-50/80 border border-red-200/80">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#d05a5a] shrink-0 shadow-2xs" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-red-950 text-[11px] sm:text-xs truncate">Vermelho (Alerta)</div>
+                    <div className="text-[10px] text-red-700 truncate">Abaixo de 50%</div>
+                  </div>
+                </div>
+                <div className="bg-red-600 text-white font-extrabold text-xs px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs">
+                  {stats.redCount}
                 </div>
               </div>
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-100 border border-slate-200">
-                <span className="w-3.5 h-3.5 rounded-full bg-[#18181b] shrink-0" />
-                <div className="min-w-0">
-                  <div className="font-bold text-slate-950 text-[11px] sm:text-xs truncate">Preto (Ausente)</div>
-                  <div className="text-[10px] text-slate-600 truncate">3+ faltas seguidas</div>
+
+              <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-100 border border-slate-300/80">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-3.5 h-3.5 rounded-full bg-[#18181b] shrink-0 shadow-2xs" />
+                  <div className="min-w-0">
+                    <div className="font-bold text-slate-950 text-[11px] sm:text-xs truncate">Preto (Ausente)</div>
+                    <div className="text-[10px] text-slate-600 truncate">3+ faltas seguidas</div>
+                  </div>
+                </div>
+                <div className="bg-slate-900 text-white font-extrabold text-xs px-2.5 py-0.5 rounded-full shrink-0 shadow-2xs">
+                  {stats.blackCount}
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Responsive Search & Filters Bar */}
-        <div className="flex flex-col sm:flex-row items-center gap-2 mb-3 w-full">
+        {/* Responsive Search & Filters Bar com Contador de Membros */}
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 mb-3 w-full">
           <div className="relative w-full sm:flex-1">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -924,68 +962,45 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               className="w-full bg-white border border-slate-200 rounded-xl pl-8.5 pr-3 py-2 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-sky-800"
             />
           </div>
-          <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto">
-            <select
-              id="select-filter-role"
-              value={selectedRole}
-              onChange={(e) => setSelectedRole(e.target.value)}
-              className="bg-white border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-sky-800 cursor-pointer w-full sm:w-auto"
-            >
-              <option value="todos">Todas as Funções</option>
-              <option value="Membro">Membro</option>
-              <option value="Líder em Treinamento">Líder Trein.</option>
-              <option value="Líder de Setor">Líder Setor</option>
-              <option value="Líder de Célula">Líder Célula</option>
-            </select>
-            <select
-              id="select-filter-attendance"
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="bg-white border border-slate-200 rounded-xl px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-sky-800 cursor-pointer w-full sm:w-auto"
-            >
-              <option value="todos">Toda Frequência</option>
-              <option value="green">Assíduo</option>
-              <option value="yellow">Regular</option>
-              <option value="red">Alerta</option>
-              <option value="black">Ausente</option>
-            </select>
-          </div>
-        </div>
+          <div className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
+            <div className="grid grid-cols-2 gap-1.5 sm:gap-2 flex-1 sm:flex sm:w-auto">
+              <select
+                id="select-filter-role"
+                value={selectedRole}
+                onChange={(e) => setSelectedRole(e.target.value)}
+                className="bg-white border border-slate-200 rounded-xl pl-1.5 pr-2 sm:px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-sky-800 cursor-pointer w-full sm:w-auto"
+              >
+                <option value="todos">Todas as Funções</option>
+                <option value="Membro">Membro</option>
+                <option value="Líder em Treinamento">Líder Trein.</option>
+                <option value="Líder de Setor">Líder Setor</option>
+                <option value="Líder de Célula">Líder Célula</option>
+              </select>
+              <select
+                id="select-filter-attendance"
+                value={selectedStatus}
+                onChange={(e) => setSelectedStatus(e.target.value)}
+                className="bg-white border border-slate-200 rounded-xl pl-1.5 pr-2 sm:px-2.5 py-2 text-xs font-semibold text-slate-700 focus:outline-none focus:border-sky-800 cursor-pointer w-full sm:w-auto"
+              >
+                <option value="todos">Toda Frequência</option>
+                <option value="green">Assíduo</option>
+                <option value="yellow">Regular</option>
+                <option value="red">Alerta</option>
+                <option value="black">Ausente</option>
+              </select>
+            </div>
 
-        {/* Quick KPI Stats Bar - Compact & 100% responsive without overflowing */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-2 sm:p-2.5 mb-3 select-none w-full">
-          <div className="grid grid-cols-5 divide-x divide-slate-100 text-center">
-            <div className="px-0.5 sm:px-2">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-500 block truncate">Total</span>
-              <span className="text-xs sm:text-sm font-bold text-[#04213d]">{stats.total}</span>
-            </div>
-            <div className="px-0.5 sm:px-2">
-              <span className="text-[10px] sm:text-xs font-semibold text-emerald-700 flex items-center justify-center gap-1 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                <span className="truncate">Assíduo</span>
+            {/* Contador de Membros da Célula integrado ao bloco de filtros */}
+            <div
+              id="cell-members-count-badge"
+              className="bg-white border border-slate-200 rounded-xl px-2.5 sm:px-3 py-2 text-xs font-bold text-[#04213d] flex items-center gap-1 sm:gap-1.5 shrink-0 shadow-2xs whitespace-nowrap"
+              title="Quantidade total de membros nesta célula"
+            >
+              <Users size={14} className="text-slate-500 sm:hidden shrink-0" />
+              <span className="text-slate-500 font-medium hidden sm:inline">Membros:</span>
+              <span className="bg-[#052447] text-white text-[11px] px-1.5 sm:px-2 py-0.5 rounded-full font-bold">
+                {stats.total}
               </span>
-              <span className="text-xs sm:text-sm font-bold text-emerald-700">{stats.greenCount}</span>
-            </div>
-            <div className="px-0.5 sm:px-2">
-              <span className="text-[10px] sm:text-xs font-semibold text-amber-700 flex items-center justify-center gap-1 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
-                <span className="truncate">Regular</span>
-              </span>
-              <span className="text-xs sm:text-sm font-bold text-amber-700">{stats.yellowCount}</span>
-            </div>
-            <div className="px-0.5 sm:px-2">
-              <span className="text-[10px] sm:text-xs font-semibold text-red-700 flex items-center justify-center gap-1 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-                <span className="truncate">Alerta</span>
-              </span>
-              <span className="text-xs sm:text-sm font-bold text-red-700">{stats.redCount}</span>
-            </div>
-            <div className="px-0.5 sm:px-2">
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-800 flex items-center justify-center gap-1 truncate">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-900 shrink-0" />
-                <span className="truncate">Ausente</span>
-              </span>
-              <span className="text-xs sm:text-sm font-bold text-slate-900">{stats.blackCount}</span>
             </div>
           </div>
         </div>
