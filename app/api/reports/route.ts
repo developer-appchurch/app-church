@@ -310,13 +310,24 @@ export async function POST(req: NextRequest) {
     const { year: isoYear, week: isoWeek } = getISOWeekAndYear(reportDate);
     const cleanObs = cleanObservationText(observacao);
 
+    // Sanitiza e deduplica os IDs dos membros presentes
+    const sanitizedMemberIds: string[] = Array.isArray(presentMemberIds)
+      ? Array.from(
+          new Set(
+            presentMemberIds
+              .map((id: any) => (id !== null && id !== undefined ? String(id).trim() : ''))
+              .filter(Boolean)
+          )
+        )
+      : [];
+
     const reportPayload: any = {
       igreja_id: churchId,
       unidade_id: cellId,
       lancado_por: finalMemberId,
       data_relatorio: reportDate,
       houve_reuniao: true,
-      qtd_membros: Array.isArray(presentMemberIds) ? presentMemberIds.length : Number(membersCount) || 0,
+      qtd_membros: sanitizedMemberIds.length,
       qtd_convidados: Number(convidadosCount) || 0,
       qtd_criancas: Number(childrenCount) || 0,
       valor_pix: parsedPix,
@@ -481,29 +492,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const reportId = savedReport?.id || existingReport?.id || explicitReportId;
+    const targetReportId = savedReport?.id || existingReport?.id || explicitReportId;
 
-    // 2. Sincroniza presenças na tabela relatorio_presencas
-    if (reportId) {
-      // Remove presenças anteriores deste relatório
-      await supabase
+    // 2. Expurgar e recriar completamente a lista de presenças em 'relatorio_presencas'
+    if (targetReportId) {
+      // Passo A: Expurgar todas as presenças anteriores vinculadas a este relatório
+      const { error: purgeError } = await supabase
         .from('relatorio_presencas')
         .delete()
-        .eq('relatorio_id', reportId);
+        .eq('relatorio_id', targetReportId);
 
-      // Insere as novas presenças
-      if (Array.isArray(presentMemberIds) && presentMemberIds.length > 0) {
-        const presencasPayload = presentMemberIds.map((mId: string) => ({
-          relatorio_id: reportId,
+      if (purgeError) {
+        console.error(`[POST /api/reports] Erro ao expurgar presenças do relatório ${targetReportId}:`, purgeError);
+      }
+
+      // Passo B: Recriar a lista de presenças com os membros atualmente selecionados
+      if (sanitizedMemberIds.length > 0) {
+        const presencasPayload = sanitizedMemberIds.map((mId: string) => ({
+          relatorio_id: targetReportId,
           membro_id: mId,
         }));
 
-        const { error: presError } = await supabase
+        const { error: insertPresError } = await supabase
           .from('relatorio_presencas')
           .insert(presencasPayload);
 
-        if (presError) {
-          console.error('[POST /api/reports] Aviso: falha ao gravar relatorio_presencas:', presError);
+        if (insertPresError) {
+          console.error(`[POST /api/reports] Erro ao recriar relatorio_presencas para ${targetReportId}:`, insertPresError);
         }
       }
     }
@@ -525,10 +540,12 @@ export async function POST(req: NextRequest) {
       success: true,
       report: {
         ...savedReport,
+        id: targetReportId,
         lancado_por_nome: authorNameFinal,
         observacao: cleanObs,
         observacao_texto: cleanObs,
-        presentes_ids: Array.isArray(presentMemberIds) ? presentMemberIds : [],
+        presentes_ids: sanitizedMemberIds,
+        qtd_membros: sanitizedMemberIds.length,
       },
     });
   } catch (err: any) {
