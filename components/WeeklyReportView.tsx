@@ -392,7 +392,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
         return;
       }
 
-      // Atualiza a lista de relatórios e modal de detalhes
+      // Atualiza imediatamente o estado local e modal de detalhes
       if (json.report) {
         setReports((prev) => {
           const exists = prev.some((r) => r.id === json.report.id);
@@ -404,9 +404,10 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
         if (selectedReportForDetail && selectedReportForDetail.id === json.report.id) {
           setSelectedReportForDetail(json.report);
         }
-      } else {
-        await fetchRecentReports();
       }
+
+      // Revalida em segundo plano com o banco de dados
+      await fetchRecentReports();
 
       setDuplicateWarning(null);
       setIsModalOpen(false);

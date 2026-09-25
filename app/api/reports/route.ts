@@ -496,29 +496,51 @@ export async function POST(req: NextRequest) {
 
     // 2. Expurgar e recriar completamente a lista de presenças em 'relatorio_presencas'
     if (targetReportId) {
-      // Passo A: Expurgar todas as presenças anteriores vinculadas a este relatório
-      const { error: purgeError } = await supabase
-        .from('relatorio_presencas')
-        .delete()
-        .eq('relatorio_id', targetReportId);
+      // Coleta todos os IDs associados a este relatório (ID explícito, existente e salvo) para evitar qualquer resíduo órfão
+      const idsToPurge = Array.from(
+        new Set([targetReportId, explicitReportId, existingReport?.id].filter(Boolean))
+      );
 
-      if (purgeError) {
-        console.error(`[POST /api/reports] Erro ao expurgar presenças do relatório ${targetReportId}:`, purgeError);
+      // Passo A: Expurgar todas as presenças anteriores vinculadas a todos esses IDs
+      for (const rId of idsToPurge) {
+        const { error: purgeError } = await supabase
+          .from('relatorio_presencas')
+          .delete()
+          .eq('relatorio_id', rId);
+
+        if (purgeError) {
+          console.error(`[POST /api/reports] Erro ao expurgar presenças do relatório ${rId}:`, purgeError);
+        }
       }
 
       // Passo B: Recriar a lista de presenças com os membros atualmente selecionados
       if (sanitizedMemberIds.length > 0) {
-        const presencasPayload = sanitizedMemberIds.map((mId: string) => ({
+        // Tenta primeiro inserir com unidade_id caso a coluna tenha sido adicionada ao banco
+        const presencasPayloadWithUnidade = sanitizedMemberIds.map((mId: string) => ({
           relatorio_id: targetReportId,
           membro_id: mId,
+          unidade_id: cellId,
         }));
 
-        const { error: insertPresError } = await supabase
+        let { error: insertPresError } = await supabase
           .from('relatorio_presencas')
-          .insert(presencasPayload);
+          .insert(presencasPayloadWithUnidade);
+
+        // Se o banco indicar que a coluna unidade_id não existe, tenta sem ela
+        if (insertPresError && insertPresError.message?.includes('unidade_id') && insertPresError.message?.includes('column')) {
+          const presencasPayloadStandard = sanitizedMemberIds.map((mId: string) => ({
+            relatorio_id: targetReportId,
+            membro_id: mId,
+          }));
+
+          const resRetry = await supabase
+            .from('relatorio_presencas')
+            .insert(presencasPayloadStandard);
+          insertPresError = resRetry.error;
+        }
 
         if (insertPresError) {
-          console.error(`[POST /api/reports] Erro ao recriar relatorio_presencas para ${targetReportId}:`, insertPresError);
+          console.error(`[POST /api/reports] Aviso ao persistir presenças em relatorio_presencas (${targetReportId}):`, insertPresError.message);
         }
       }
     }
