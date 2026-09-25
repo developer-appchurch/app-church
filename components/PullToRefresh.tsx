@@ -119,36 +119,40 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
 
   return (
     <div className="relative w-full">
-      {/* Indicador Flutuante Estilo Instagram / iOS no Mobile */}
-      <div
-        className={`fixed left-1/2 -translate-x-1/2 z-40 md:hidden pointer-events-none transition-transform ${
-          isPulling ? 'duration-75' : 'duration-300 ease-out'
-        }`}
-        style={{
-          top: `${Math.max(12, pullDistance - 36)}px`,
-          opacity: showIndicator ? 1 : 0,
-          transform: `translateX(-50%) scale(${Math.max(0.6, Math.min(1.05, 0.6 + progressRatio * 0.45))})`,
-        }}
-      >
+      {/* Indicador Flutuante Perfeitamente Centralizado no Topo no Mobile */}
+      <div className="fixed inset-x-0 top-0 flex justify-center pointer-events-none z-50 md:hidden">
         <div
-          className={`flex items-center justify-center w-10 h-10 rounded-full shadow-md border backdrop-blur-xs transition-colors ${
-            isReadyToRelease || isRefreshing
-              ? 'bg-[#052447] text-white border-sky-400/30'
-              : 'bg-white text-slate-700 border-slate-200/90'
+          className={`transition-all ${
+            isPulling ? 'duration-75' : 'duration-300 ease-out'
           }`}
+          style={{
+            transform: `translateY(${Math.max(14, pullDistance - 28)}px) scale(${Math.max(
+              0.65,
+              Math.min(1.05, 0.65 + progressRatio * 0.4)
+            )})`,
+            opacity: showIndicator ? 1 : 0,
+          }}
         >
-          {isRefreshing ? (
-            <Loader2 size={20} className="animate-spin text-sky-400" />
-          ) : (
-            <div
-              className="transition-transform duration-150"
-              style={{
-                transform: `rotate(${progressRatio * 180}deg)`,
-              }}
-            >
-              <ArrowDown size={18} className={isReadyToRelease ? 'text-sky-300' : 'text-slate-500'} />
-            </div>
-          )}
+          <div
+            className={`flex items-center justify-center w-10 h-10 rounded-full shadow-lg border backdrop-blur-xs transition-colors ${
+              isReadyToRelease || isRefreshing
+                ? 'bg-[#052447] text-white border-sky-400/40 shadow-sky-950/20'
+                : 'bg-white text-slate-700 border-slate-200/90 shadow-slate-900/10'
+            }`}
+          >
+            {isRefreshing ? (
+              <Loader2 size={20} className="animate-spin text-sky-400" />
+            ) : (
+              <div
+                className="transition-transform duration-150"
+                style={{
+                  transform: `rotate(${progressRatio * 180}deg)`,
+                }}
+              >
+                <ArrowDown size={18} className={isReadyToRelease ? 'text-sky-300' : 'text-slate-500'} />
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
