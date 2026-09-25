@@ -6,6 +6,7 @@ import './globals.css'; // Global styles
 export const metadata: Metadata = {
   title: 'AppChurch - Gestão de Igrejas e Células',
   description: 'Plataforma multi-igreja para gestão de células e lifegroups, feed de notícias, avisos gerais, controle de membros, frequência e trilho de liderança integrado ao Supabase.',
+  manifest: "/site.webmanifest",
   openGraph: {
     title: 'AppChurch - Gestão de Igrejas e Células',
     description: 'Plataforma multi-igreja para gestão de células e lifegroups, feed de notícias, avisos gerais, controle de membros, frequência e trilho de liderança integrado ao Supabase.',
