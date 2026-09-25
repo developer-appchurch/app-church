@@ -184,12 +184,8 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     const dd = String(today.getDate()).padStart(2, '0');
     setReportDate(`${yyyy}-${mm}-${dd}`);
 
-    // Marca por padrão os membros assíduos/regulares
-    setPresentMemberIds(
-      cellMembers
-        .filter((m) => m.attendanceStatus === 'green' || m.attendanceStatus === 'yellow')
-        .map((m) => m.id)
-    );
+    // Marca por padrão todos os membros da célula presentes
+    setPresentMemberIds(cellMembers.map((m) => m.id));
     setValorPix('0,00');
     setValorEspecie('0,00');
     setConvidadosCount('0');
@@ -380,7 +376,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
         return;
       }
 
-      // Atualiza a lista de relatórios
+      // Atualiza a lista de relatórios e modal de detalhes
       if (json.report) {
         setReports((prev) => {
           const exists = prev.some((r) => r.id === json.report.id);
@@ -389,6 +385,9 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
           }
           return [json.report, ...prev];
         });
+        if (selectedReportForDetail && selectedReportForDetail.id === json.report.id) {
+          setSelectedReportForDetail(json.report);
+        }
       } else {
         await fetchRecentReports();
       }
@@ -1012,10 +1011,10 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   <div className="border border-slate-200 rounded-xl p-3 bg-slate-50/70">
                     <div className="flex items-center justify-between pb-2 border-b border-slate-200/80 mb-2">
                       <h4 className="text-xs font-bold text-[#052447] flex items-center gap-1.5">
-                        <Users size={14} className="text-sky-700" />
+                        <Users size={14} className="text-emerald-700" />
                         <span>Membros Presentes</span>
                       </h4>
-                      <span className="text-[10px] sm:text-[11px] font-bold text-sky-900 bg-sky-100 px-2 py-0.5 rounded-full border border-sky-200 shrink-0">
+                      <span className="text-[10px] sm:text-[11px] font-bold text-emerald-900 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-200 shrink-0">
                         {presentMemberIds.length} de {cellMembers.length} presentes
                       </span>
                     </div>
@@ -1037,32 +1036,21 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                               key={member.id}
                               type="button"
                               onClick={() => togglePresence(member.id)}
-                              className={`flex items-center justify-between p-1.5 px-2 rounded-lg border text-left transition cursor-pointer text-[11px] ${
+                              className={`flex items-center justify-between p-2 px-2.5 rounded-lg border text-left transition cursor-pointer text-xs ${
                                 isPresent
-                                  ? 'bg-sky-50/80 border-sky-300 text-sky-950 font-bold shadow-2xs'
+                                  ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold shadow-2xs'
                                   : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                               }`}
                             >
-                              <div className="flex items-center gap-1.5 truncate pr-1">
-                                <div
-                                  className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 text-[9px] font-bold ${
-                                    isPresent
-                                      ? 'bg-sky-800 text-white'
-                                      : 'bg-slate-200 text-slate-600'
-                                  }`}
-                                >
-                                  {member.name.charAt(0).toUpperCase()}
-                                </div>
-                                <span className="truncate">{member.name}</span>
-                              </div>
+                              <span className="truncate pr-1 font-semibold">{member.name}</span>
                               <div
-                                className={`w-3.5 h-3.5 rounded flex items-center justify-center shrink-0 border ${
+                                className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border transition ${
                                   isPresent
-                                    ? 'bg-sky-800 border-sky-800 text-white'
+                                    ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs'
                                     : 'border-slate-300 bg-white'
                                 }`}
                               >
-                                {isPresent && <Check size={10} strokeWidth={3} />}
+                                {isPresent && <Check size={11} strokeWidth={3} />}
                               </div>
                             </button>
                           );

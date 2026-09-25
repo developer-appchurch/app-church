@@ -148,6 +148,11 @@ export async function GET(req: NextRequest) {
     // Busca presenças da tabela relatorio_presencas para esses relatórios
     let presencasByReport: Record<string, string[]> = {};
     if (reportIds.length > 0) {
+      // Inicializa cada ID com lista vazia para garantir precisão
+      for (const id of reportIds) {
+        presencasByReport[id] = [];
+      }
+
       const { data: presRows, error: presError } = await supabase
         .from('relatorio_presencas')
         .select('relatorio_id, membro_id')
@@ -155,10 +160,10 @@ export async function GET(req: NextRequest) {
 
       if (!presError && presRows) {
         for (const row of presRows) {
-          if (!presencasByReport[row.relatorio_id]) {
-            presencasByReport[row.relatorio_id] = [];
-          }
-          if (row.membro_id) {
+          if (row.relatorio_id && row.membro_id) {
+            if (!presencasByReport[row.relatorio_id]) {
+              presencasByReport[row.relatorio_id] = [];
+            }
             presencasByReport[row.relatorio_id].push(row.membro_id);
           }
         }
@@ -178,7 +183,11 @@ export async function GET(req: NextRequest) {
         }
       }
 
-      const presentesIds = presencasByReport[row.id] || parsedObs.presentes_ids || [];
+      // Se presencasByReport encontrou registros para esse relatório (ou lista vazia confirmada), usa ela
+      const presentesIds =
+        presencasByReport[row.id] !== undefined && presencasByReport[row.id].length > 0
+          ? presencasByReport[row.id]
+          : (parsedObs.presentes_ids || presencasByReport[row.id] || []);
 
       return {
         ...row,
@@ -295,7 +304,16 @@ export async function POST(req: NextRequest) {
     const parsedEspecie = parseCurrency(valorEspecie);
     const { year: isoYear, week: isoWeek } = getISOWeekAndYear(reportDate);
 
-    const reportPayload = {
+    // Estrutura observacao com metadados para garantir integridade e redundância
+    const observacaoPayload = JSON.stringify({
+      texto_livre: typeof observacao === 'string' ? observacao.trim() : '',
+      observacao: typeof observacao === 'string' ? observacao.trim() : '',
+      presentes_ids: Array.isArray(presentMemberIds) ? presentMemberIds : [],
+      autor_nome: authorName || 'Líder Responsável',
+      atualizado_em: new Date().toISOString(),
+    });
+
+    const reportPayload: any = {
       igreja_id: churchId,
       unidade_id: cellId,
       lancado_por: finalMemberId,
@@ -306,52 +324,65 @@ export async function POST(req: NextRequest) {
       qtd_criancas: Number(childrenCount) || 0,
       valor_pix: parsedPix,
       valor_especie: parsedEspecie,
-      observacao: typeof observacao === 'string' ? observacao.trim() : '',
+      observacao: observacaoPayload,
       supervisao: Boolean(supervisao),
     };
 
-    // 1. Verifica se já existe um relatório nesta mesma semana e ano para esta célula
+    // 1. Procura se já existe relatório para este ID ou para a mesma semana/ano/data
     let existingReport: any = null;
 
     if (explicitReportId) {
       const { data: byId } = await supabase
         .from('relatorios_semanais')
-        .select('*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome)')
+        .select('*')
         .eq('id', explicitReportId)
         .maybeSingle();
       existingReport = byId;
-    } else {
-      // Procura por ano_iso e numero_semana
+    }
+
+    if (!existingReport) {
       const { data: byWeek } = await supabase
         .from('relatorios_semanais')
-        .select('*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome)')
+        .select('*')
         .eq('unidade_id', cellId)
         .eq('ano_iso', isoYear)
         .eq('numero_semana', isoWeek)
         .maybeSingle();
-
       if (byWeek) {
         existingReport = byWeek;
-      } else {
-        const { data: byDate } = await supabase
-          .from('relatorios_semanais')
-          .select('*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome)')
-          .eq('unidade_id', cellId)
-          .eq('data_relatorio', reportDate)
-          .maybeSingle();
+      }
+    }
+
+    if (!existingReport) {
+      const { data: byDate } = await supabase
+        .from('relatorios_semanais')
+        .select('*')
+        .eq('unidade_id', cellId)
+        .eq('data_relatorio', reportDate)
+        .maybeSingle();
+      if (byDate) {
         existingReport = byDate;
       }
     }
 
     // Se já existe um relatório e o usuário AINDA NÃO confirmou a substituição:
     if (existingReport && !allowOverwrite) {
-      // Formata os dados do relatório existente para o modal de confirmação
+      let lancadorNome = 'Líder Responsável';
+      if (existingReport.lancado_por) {
+        const { data: lData } = await supabase
+          .from('membros')
+          .select('nome')
+          .eq('id', existingReport.lancado_por)
+          .maybeSingle();
+        if (lData?.nome) lancadorNome = lData.nome;
+      }
+
       const existingReportData = {
         id: existingReport.id,
         data_relatorio: existingReport.data_relatorio,
         ano_iso: existingReport.ano_iso || isoYear,
         numero_semana: existingReport.numero_semana || isoWeek,
-        lancado_por_nome: existingReport.lancador?.nome || 'Líder Responsável',
+        lancado_por_nome: lancadorNome,
         qtd_membros: existingReport.qtd_membros ?? 0,
         qtd_convidados: existingReport.qtd_convidados ?? 0,
         qtd_criancas: existingReport.qtd_criancas ?? 0,
@@ -377,31 +408,20 @@ export async function POST(req: NextRequest) {
         .from('relatorios_semanais')
         .update(reportPayload)
         .eq('id', existingReport.id)
-        .select('*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome)')
+        .select()
         .single();
 
       if (updateError) {
-        const { data: fbUpd, error: fbErr } = await supabase
-          .from('relatorios_semanais')
-          .update(reportPayload)
-          .eq('id', existingReport.id)
-          .select()
-          .single();
-
-        if (fbErr) {
-          console.error('[POST /api/reports] Erro ao atualizar:', fbErr);
-          return NextResponse.json({ error: fbErr.message }, { status: 500 });
-        }
-        savedReport = fbUpd;
-      } else {
-        savedReport = updated;
+        console.error('[POST /api/reports] Erro ao atualizar:', updateError);
+        return NextResponse.json({ error: `Erro ao atualizar relatório: ${updateError.message}` }, { status: 500 });
       }
+      savedReport = updated;
     } else {
       // Inserção de novo relatório
       const { data: inserted, error: insertError } = await supabase
         .from('relatorios_semanais')
         .insert(reportPayload)
-        .select('*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome)')
+        .select()
         .single();
 
       if (insertError) {
@@ -410,60 +430,51 @@ export async function POST(req: NextRequest) {
           insertError.message.includes('unique') ||
           insertError.message.includes('duplicate')
         ) {
-          // Se disparou restrição única
+          // Se disparou restrição única no banco
           const { data: conflictReport } = await supabase
             .from('relatorios_semanais')
-            .select('*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome)')
+            .select('*')
             .eq('unidade_id', cellId)
             .eq('ano_iso', isoYear)
             .eq('numero_semana', isoWeek)
             .maybeSingle();
 
           if (conflictReport && !allowOverwrite) {
+            let conflictLancadorNome = 'Líder Responsável';
+            if (conflictReport.lancado_por) {
+              const { data: cL } = await supabase
+                .from('membros')
+                .select('nome')
+                .eq('id', conflictReport.lancado_por)
+                .maybeSingle();
+              if (cL?.nome) conflictLancadorNome = cL.nome;
+            }
+
             return NextResponse.json({
               duplicate: true,
               message: `Já existe um relatório lançado para esta célula nesta semana.`,
               existingReport: {
-                id: conflictReport.id,
-                data_relatorio: conflictReport.data_relatorio,
-                ano_iso: conflictReport.ano_iso || isoYear,
-                numero_semana: conflictReport.numero_semana || isoWeek,
-                lancado_por_nome: conflictReport.lancador?.nome || 'Líder Responsável',
-                qtd_membros: conflictReport.qtd_membros ?? 0,
-                qtd_convidados: conflictReport.qtd_convidados ?? 0,
-                qtd_criancas: conflictReport.qtd_criancas ?? 0,
-                valor_pix: conflictReport.valor_pix ?? 0,
-                valor_especie: conflictReport.valor_especie ?? 0,
-                supervisao: conflictReport.supervisao ?? false,
-                observacao: conflictReport.observacao || '',
-                criado_em: conflictReport.criado_em,
+                ...conflictReport,
+                lancado_por_nome: conflictLancadorNome,
               },
             });
           }
 
           if (conflictReport && allowOverwrite) {
-            const { data: updFb } = await supabase
+            const { data: updFb, error: updFbErr } = await supabase
               .from('relatorios_semanais')
               .update(reportPayload)
               .eq('id', conflictReport.id)
               .select()
               .single();
+
+            if (updFbErr) {
+              return NextResponse.json({ error: updFbErr.message }, { status: 500 });
+            }
             savedReport = updFb;
           } else {
             return NextResponse.json({ error: insertError.message }, { status: 500 });
           }
-        } else if (insertError.message.includes('relation') || insertError.message.includes('fkey')) {
-          const { data: fallbackInserted, error: fallbackError } = await supabase
-            .from('relatorios_semanais')
-            .insert(reportPayload)
-            .select()
-            .single();
-
-          if (fallbackError) {
-            console.error('[POST /api/reports] Erro ao inserir:', fallbackError);
-            return NextResponse.json({ error: fallbackError.message }, { status: 500 });
-          }
-          savedReport = fallbackInserted;
         } else {
           console.error('[POST /api/reports] Erro ao inserir:', insertError);
           return NextResponse.json({ error: insertError.message }, { status: 500 });
@@ -473,7 +484,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const reportId = savedReport?.id;
+    const reportId = savedReport?.id || existingReport?.id || explicitReportId;
 
     // 2. Sincroniza presenças na tabela relatorio_presencas
     if (reportId) {
@@ -500,11 +511,24 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Busca nome do lançador para retorno
+    let authorNameFinal = authorName || 'Líder Responsável';
+    if (savedReport?.lancado_por) {
+      const { data: lancadorData } = await supabase
+        .from('membros')
+        .select('nome')
+        .eq('id', savedReport.lancado_por)
+        .maybeSingle();
+      if (lancadorData?.nome) {
+        authorNameFinal = lancadorData.nome;
+      }
+    }
+
     return NextResponse.json({
       success: true,
       report: {
         ...savedReport,
-        lancado_por_nome: savedReport?.lancador?.nome || authorName,
+        lancado_por_nome: authorNameFinal,
         observacao_texto: typeof observacao === 'string' ? observacao.trim() : '',
         presentes_ids: presentMemberIds,
       },
