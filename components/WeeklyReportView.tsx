@@ -29,6 +29,8 @@ interface WeeklyReportViewProps {
   cells?: CellGroup[];
   onSelectCell?: (cellId: string) => void;
   currentUser?: UserProfile;
+  autoOpenModal?: boolean;
+  initialReportDate?: string;
 }
 
 export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
@@ -37,9 +39,11 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
   cells = [],
   onSelectCell,
   currentUser,
+  autoOpenModal = false,
+  initialReportDate,
 }) => {
-  // Modal de Lançamento / Edição de Relatório
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // Modal de Lançamento / Edição de Relatório (abre diretamente se acionado via deep link)
+  const [isModalOpen, setIsModalOpen] = useState(() => Boolean(autoOpenModal));
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
 
   // Modal de Detalhes do Relatório
@@ -80,6 +84,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
 
   // Form states inside modal
   const [reportDate, setReportDate] = useState(() => {
+    if (initialReportDate) return initialReportDate;
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');

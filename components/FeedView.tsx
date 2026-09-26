@@ -610,21 +610,6 @@ export const FeedView: React.FC<FeedViewProps> = ({
       )}
 
       <div className="max-w-3xl mx-auto px-3 sm:px-6 pt-4">
-        {/* Header do Feed */}
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-[#052447] text-white flex items-center justify-center">
-              <Sparkles size={16} className="text-sky-300" />
-            </div>
-            <div>
-              <h2 className="text-base sm:text-lg font-bold text-[#052447]">
-                Feed de Notícias
-              </h2>
-              <p className="text-xs text-slate-500">{churchName}</p>
-            </div>
-          </div>
-        </div>
-
         {/* Post Creation Box - Restrito por liderança */}
         {canUserPost && (
           <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-2xs mb-4">

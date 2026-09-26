@@ -76,6 +76,11 @@ const ChurchHierarchyOverviewView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const NotificationPermissionBanner = dynamic(
+  () => import('../components/NotificationPermissionBanner').then((m) => m.NotificationPermissionBanner),
+  { ssr: false }
+);
+
 export default function Home() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -118,6 +123,39 @@ export default function Home() {
   const [hierarchyLevelIndex, setHierarchyLevelIndex] = useState<number>(0);
   const [refreshErrorBanner, setRefreshErrorBanner] = useState<string>('');
   const [refreshSuccessToast, setRefreshSuccessToast] = useState<string>('');
+
+  // Deep link states para relatórios pendentes via push notification
+  const [autoOpenReportModal, setAutoOpenReportModal] = useState<boolean>(false);
+  const [targetReportWeek, setTargetReportWeek] = useState<string | undefined>(undefined);
+
+  // Tratamento de deep link via notificação Push (?screen=reports&cellId=...&openModal=true)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const screenParam = params.get('screen');
+      const cellIdParam = params.get('cellId');
+      const openModalParam = params.get('openModal');
+      const targetWeekParam = params.get('targetWeek');
+
+      if (screenParam === 'reports' || screenParam === 'weekly_report') {
+        queueMicrotask(() => {
+          setActiveScreen('reports');
+          if (cellIdParam) {
+            setSelectedCellId(cellIdParam);
+          }
+          if (openModalParam === 'true') {
+            setAutoOpenReportModal(true);
+          }
+          if (targetWeekParam) {
+            setTargetReportWeek(targetWeekParam);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('[Home] Erro ao ler query params para deep link:', e);
+    }
+  }, []);
 
   // 1. React Query: Consulta de Células com keepPreviousData e enabled condicionado a churchId
   const {
@@ -598,6 +636,9 @@ export default function Home() {
         onUpdateAvatar={handleUpdateAvatar}
       />
 
+      {/* Banner de Permissão Amigável para Notificações de Lembrete de Relatório */}
+      {user && <NotificationPermissionBanner user={user} />}
+
       {/* Main Dynamic View com PullToRefresh mobile integrado */}
       <PullToRefresh onRefresh={handleRefresh} isRefreshing={isRefreshing}>
         <main className="flex-1">
@@ -650,6 +691,8 @@ export default function Home() {
               cells={effectiveCells}
               onSelectCell={setSelectedCellId}
               currentUser={user}
+              autoOpenModal={autoOpenReportModal}
+              initialReportDate={targetReportWeek}
             />
           )}
 
