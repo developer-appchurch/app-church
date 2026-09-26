@@ -112,6 +112,7 @@ export interface CellGroup {
   churchId: string;
   name: string;
   leaderName: string;
+  leaderNames?: string[];
   sectorName: string;
   address: string;
   meetingDay: string;

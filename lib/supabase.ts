@@ -1356,7 +1356,7 @@ export const AppChurchService = {
           // 2. Busca detalhes de células (dia, horário, endereço, etc.)
           const { data: celulasData } = await supabase
             .from('celulas')
-            .select('unidade_id, endereco, dia_reuniao, horario_reuniao, quantidade_membros')
+            .select('unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros')
             .in('unidade_id', unitIds);
 
           const celulaMap = new Map<string, any>();
@@ -1387,17 +1387,24 @@ export const AppChurchService = {
             (leaderMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m.nome));
           }
 
-          const leaderMap = new Map<string, string>();
           const leadersByUnit = new Map<string, string[]>();
+          const leaderNamesByUnit = new Map<string, string[]>();
           (leadersData || []).forEach((l: any) => {
             if (l.unidade_id && l.pessoa_id) {
-              const list = leadersByUnit.get(l.unidade_id) || [];
-              list.push(l.pessoa_id);
-              leadersByUnit.set(l.unidade_id, list);
-            }
-            const memName = leaderMemberMap.get(l.pessoa_id);
-            if (memName && !leaderMap.has(l.unidade_id)) {
-              leaderMap.set(l.unidade_id, memName);
+              const idList = leadersByUnit.get(l.unidade_id) || [];
+              if (!idList.includes(l.pessoa_id)) {
+                idList.push(l.pessoa_id);
+              }
+              leadersByUnit.set(l.unidade_id, idList);
+
+              const memName = leaderMemberMap.get(l.pessoa_id);
+              if (memName) {
+                const nameList = leaderNamesByUnit.get(l.unidade_id) || [];
+                if (!nameList.includes(memName)) {
+                  nameList.push(memName);
+                }
+                leaderNamesByUnit.set(l.unidade_id, nameList);
+              }
             }
           });
 
@@ -1423,15 +1430,25 @@ export const AppChurchService = {
             const parentName = u.pai_id ? parentNameMap.get(u.pai_id) : 'Setor Geral';
             const grandparentId = u.pai_id ? parentIdMap.get(u.pai_id) : null;
             const areaName = grandparentId ? parentNameMap.get(grandparentId) : undefined;
+            const leaderNames = leaderNamesByUnit.get(u.id) || [];
+            let formattedLeader = 'Não informado';
+            if (leaderNames.length === 1) {
+              formattedLeader = leaderNames[0];
+            } else if (leaderNames.length === 2) {
+              formattedLeader = `${leaderNames[0]} e ${leaderNames[1]}`;
+            } else if (leaderNames.length > 2) {
+              formattedLeader = `${leaderNames.slice(0, -1).join(', ')} e ${leaderNames[leaderNames.length - 1]}`;
+            }
             return {
               id: u.id,
               churchId: u.igreja_id,
               name: u.nome,
-              leaderName: leaderMap.get(u.id) || 'Líder',
+              leaderName: formattedLeader,
+              leaderNames: leaderNames,
               sectorName: parentName || 'Setor Geral',
               address: cInfo?.endereco || 'Rua Sumaré, 245 - Junco',
-              meetingDay: cInfo?.dia_reuniao || 'Quinta-feira',
-              meetingTime: cInfo?.horario_reuniao || '19:30',
+              meetingDay: cInfo?.dia_semana || cInfo?.dia_reuniao || 'Quinta-feira',
+              meetingTime: cInfo?.horario || cInfo?.horario_reuniao || '19:30',
               memberCount: countMap.get(u.id) || cInfo?.quantidade_membros || 0,
               parentUnitId: u.pai_id || null,
               parentName: parentName || undefined,

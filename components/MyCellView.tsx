@@ -359,7 +359,13 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
         if (userSecClean && cSecClean === userSecClean) return true;
         if (userSecClean && (cSecClean.includes(userSecClean) || userSecClean.includes(cSecClean))) return true;
         // Se o líder é o próprio usuário
-        if (currentUser?.name && c.leaderName?.toLowerCase() === currentUser.name.toLowerCase()) return true;
+        if (
+          currentUser?.name &&
+          (c.leaderName?.toLowerCase().includes(currentUser.name.toLowerCase()) ||
+            c.leaderNames?.some((n) => n.toLowerCase().includes(currentUser.name.toLowerCase())))
+        ) {
+          return true;
+        }
         return false;
       });
 
@@ -370,7 +376,13 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     if (isCellLeader) {
       const matched = cells.filter((c) => {
         if (currentUser?.currentCellId && c.id === currentUser.currentCellId) return true;
-        if (currentUser?.name && c.leaderName?.toLowerCase() === currentUser.name.toLowerCase()) return true;
+        if (
+          currentUser?.name &&
+          (c.leaderName?.toLowerCase().includes(currentUser.name.toLowerCase()) ||
+            c.leaderNames?.some((n) => n.toLowerCase().includes(currentUser.name.toLowerCase())))
+        ) {
+          return true;
+        }
         if (currentUser?.id && c.leaderMemberIds?.includes(currentUser.id)) return true;
         if (units && units.length > 0) {
           const u = units.find((unit) => unit.id === c.id);
@@ -812,8 +824,44 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 const rawDay = (cell.meetingDay || 'Sexta').replace(/-feira/i, '').trim();
                 const day = rawDay ? rawDay.charAt(0).toUpperCase() + rawDay.slice(1) : 'Sexta';
                 const time = (cell.meetingTime || '19h30').replace(/^(\d{1,2}):(\d{2})$/, '$1h$2').trim();
-                const leader = cell.leaderName || 'Não informado';
-                return `${day} às ${time} - Líder: ${leader}`;
+
+                // 1. Líderes vinculados à unidade organizacional (unidade_lideres)
+                const currentUnit = units.find((u) => u.id === cell.id);
+                const unitLeaderNames = (currentUnit?.leaders || []).map((l) => l.name).filter(Boolean);
+
+                // 2. Líderes vinculados nos dados da célula (unidade_lideres)
+                const cellLeaderNames = cell.leaderNames && cell.leaderNames.length > 0
+                  ? cell.leaderNames
+                  : (cell.leaderName && cell.leaderName !== 'Não informado' && cell.leaderName !== 'Líder')
+                  ? cell.leaderName.split(/ e |, /).map((s) => s.trim()).filter(Boolean)
+                  : [];
+
+                // Combina e deduplica estritamente os líderes vinculados a esta célula
+                const combinedLeaders: string[] = [];
+                [...unitLeaderNames, ...cellLeaderNames].forEach((name) => {
+                  if (name && !combinedLeaders.some((n) => n.toLowerCase() === name.toLowerCase())) {
+                    combinedLeaders.push(name);
+                  }
+                });
+
+                let formattedLeader = 'Não informado';
+                if (combinedLeaders.length === 1) {
+                  formattedLeader = combinedLeaders[0];
+                } else if (combinedLeaders.length === 2) {
+                  formattedLeader = `${combinedLeaders[0]} e ${combinedLeaders[1]}`;
+                } else if (combinedLeaders.length > 2) {
+                  formattedLeader = `${combinedLeaders.slice(0, -1).join(', ')} e ${combinedLeaders[combinedLeaders.length - 1]}`;
+                } else if (cell.leaderName && cell.leaderName !== 'Líder') {
+                  formattedLeader = cell.leaderName;
+                }
+
+                const isPlural =
+                  combinedLeaders.length > 1 ||
+                  formattedLeader.includes(' e ') ||
+                  formattedLeader.includes(',');
+                const leaderLabel = isPlural ? 'Líderes' : 'Líder';
+
+                return `${day} às ${time} - ${leaderLabel}: ${formattedLeader}`;
               })()}
             </p>
           </div>
