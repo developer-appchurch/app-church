@@ -23,6 +23,9 @@ import {
   X,
   ArrowUp,
   AlertCircle,
+  BellRing,
+  CheckCircle2,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   optimizeImageToWebP,
@@ -33,6 +36,7 @@ import {
 } from '../lib/imageOptimizer';
 import { uploadFeedImage, deleteFeedImage } from '../lib/feedStorage';
 import { AppChurchService, supabase } from '../lib/supabase';
+import { AdminNotificationTestModal } from './AdminNotificationTestModal';
 
 interface FeedViewProps {
   posts?: FeedPost[];
@@ -145,6 +149,14 @@ export const FeedView: React.FC<FeedViewProps> = ({
   const [commentToDelete, setCommentToDelete] = useState<{ postId: string; commentId: string } | null>(null);
   const [isDeletingPost, setIsDeletingPost] = useState(false);
 
+  // Estado da Central de Testes de Notificação (Exclusivo Administrador do Sistema)
+  const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+  const [isQuickTesting, setIsQuickTesting] = useState(false);
+  const [quickTestFeedback, setQuickTestFeedback] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
+
   // Sentinela de rolagem infinita
   const observerRef = useRef<IntersectionObserver | null>(null);
   const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
@@ -207,12 +219,61 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
   // RBAC para postar
   const userRoleNormalized = (currentUser.role || '').toLowerCase();
+  
+  // EXCLUSIVAMENTE ADMINISTRADOR DO SISTEMA
+  const isSystemAdmin = Boolean(
+    currentUser.isSystemAdmin === true ||
+    currentUser.role === 'Administrador' ||
+    currentUser.roleId === 'role-admin' ||
+    currentUser.login === 'admin' ||
+    userRoleNormalized.includes('administrador')
+  );
+
   const isUserPastor =
     userRoleNormalized.includes('pastor') ||
     userRoleNormalized.includes('pastora') ||
-    userRoleNormalized.includes('administrador') ||
-    currentUser.login === 'admin' ||
-    currentUser.isSystemAdmin === true;
+    isSystemAdmin;
+
+  // Disparo de Teste Rápido de Notificação Push
+  const handleQuickTestNotification = async () => {
+    setIsQuickTesting(true);
+    setQuickTestFeedback(null);
+    try {
+      const res = await fetch('/api/notifications/test-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cellName: 'Adoneiros',
+          type: 'relatorio_pendente',
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erro ao enviar notificação');
+      }
+
+      if (data.warning) {
+        setQuickTestFeedback({
+          success: false,
+          message: data.warning,
+        });
+      } else {
+        setQuickTestFeedback({
+          success: true,
+          message: `Teste enviado com sucesso! ${data.devicesNotified || 0} dispositivo(s) notificado(s).`,
+        });
+      }
+    } catch (err: any) {
+      console.error('Falha no teste rápido de notificação:', err);
+      setQuickTestFeedback({
+        success: false,
+        message: err.message || 'Falha ao conectar com o serviço push.',
+      });
+    } finally {
+      setIsQuickTesting(false);
+    }
+  };
 
   const canUserPost =
     userRoleNormalized.includes('líder de setor') ||
@@ -610,6 +671,90 @@ export const FeedView: React.FC<FeedViewProps> = ({
       )}
 
       <div className="max-w-3xl mx-auto px-3 sm:px-6 pt-4">
+        {/* ========================================================================= */}
+        {/* BOTÃO & PAINEL EXCLUSIVO DO ADMINISTRADOR DO SISTEMA: TESTAR NOTIFICAÇÕES */}
+        {/* ========================================================================= */}
+        {isSystemAdmin && (
+          <div className="bg-gradient-to-r from-[#052447] via-[#073366] to-[#041a33] text-white rounded-2xl p-4 sm:p-5 shadow-md border border-sky-800/40 mb-4 relative overflow-hidden">
+            {/* Efeitos de iluminação de fundo */}
+            <div className="absolute top-0 right-0 w-48 h-48 bg-sky-500/10 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute bottom-0 left-10 w-32 h-32 bg-amber-500/10 rounded-full blur-xl pointer-events-none" />
+
+            <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-400/20 border border-amber-400/30 text-amber-300 flex items-center justify-center shrink-0 shadow-inner">
+                  <BellRing size={20} className="animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 bg-amber-400/20 text-amber-300 border border-amber-400/30 text-[10px] font-extrabold uppercase tracking-wider rounded-md flex items-center gap-1">
+                      <ShieldCheck size={11} />
+                      Exclusivo Administrador
+                    </span>
+                    <span className="text-[11px] text-sky-200 hidden sm:inline">Push Notification Engine</span>
+                  </div>
+                  <p className="text-xs sm:text-sm font-bold text-white mt-1">
+                    Central de Testes de Notificações
+                  </p>
+                  <p className="text-[11px] text-slate-300 leading-snug">
+                    Simule e dispare notificações push em tempo real para os líderes e dispositivos cadastrados.
+                  </p>
+                </div>
+              </div>
+
+              {/* Botões de Ação do Administrador */}
+              <div className="flex items-center gap-2 self-stretch sm:self-center shrink-0 w-full sm:w-auto justify-end pt-1 sm:pt-0">
+                <button
+                  type="button"
+                  onClick={handleQuickTestNotification}
+                  disabled={isQuickTesting}
+                  className="flex-1 sm:flex-none px-3.5 py-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-400/30 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="Disparar teste rápido de push para a célula Adoneiros"
+                >
+                  {isQuickTesting ? (
+                    <Loader2 size={14} className="animate-spin text-sky-300" />
+                  ) : (
+                    <Send size={14} className="text-sky-300" />
+                  )}
+                  <span>{isQuickTesting ? 'Enviando...' : 'Teste Rápido'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-admin-test-notifications"
+                  onClick={() => setIsTestModalOpen(true)}
+                  className="flex-1 sm:flex-none px-4 py-2 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-300 hover:to-amber-500 text-slate-950 text-xs font-black rounded-xl shadow-xs hover:shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer transform active:scale-95"
+                >
+                  <BellRing size={14} />
+                  <span>Testar Notificações</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Feedback Rápido Toast se houver */}
+            {quickTestFeedback && (
+              <div
+                className={`mt-3 pt-3 border-t border-white/10 text-xs flex items-center justify-between animate-in fade-in ${
+                  quickTestFeedback.success ? 'text-emerald-300' : 'text-amber-300'
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  {quickTestFeedback.success ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                  <span>{quickTestFeedback.message}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQuickTestFeedback(null)}
+                  className="text-white/60 hover:text-white p-0.5 rounded cursor-pointer"
+                  aria-label="Fechar mensagem de status"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Post Creation Box - Restrito por liderança */}
         {canUserPost && (
           <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-2xs mb-4">
@@ -1181,6 +1326,15 @@ export const FeedView: React.FC<FeedViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* Modal de Teste de Notificações Push (Exclusivo Administrador) */}
+      {isSystemAdmin && (
+        <AdminNotificationTestModal
+          isOpen={isTestModalOpen}
+          onClose={() => setIsTestModalOpen(false)}
+          currentUser={currentUser}
+          currentCell={currentCell}
+        />
       )}
     </div>
   );

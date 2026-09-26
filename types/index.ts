@@ -230,12 +230,46 @@ export type ActiveScreen =
   | 'login'
   | 'feed'
   | 'my_cell'
+  | 'our_cells'
   | 'leadership_track'
   | 'reports'
   | 'register_church'
   | 'hierarchy_units'
   | 'member_pool'
   | 'church_overview';
+
+export interface CelulaCardItem {
+  id: string;
+  unidadeId: string;
+  churchId: string;
+  nome: string;
+  bairro: string;
+  endereco: string;
+  diaSemana: string;
+  horario: string;
+  fotoUrl?: string;
+  memberCount: number;
+  leaderNames: string[];
+  leaderMemberIds?: string[];
+  sectorName?: string;
+  areaName?: string;
+}
+
+export interface CelulasQueryParams {
+  churchId: string;
+  search?: string;
+  diaSemana?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface CelulasPaginationResult {
+  celulas: CelulaCardItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+}
 
 export interface HierarchicalLevelInput {
   id?: string;

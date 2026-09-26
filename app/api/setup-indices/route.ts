@@ -28,6 +28,10 @@ export async function POST(req: NextRequest) {
       `CREATE INDEX IF NOT EXISTS idx_unidade_lideres_pessoa ON unidade_lideres(pessoa_id);`,
       `CREATE INDEX IF NOT EXISTS idx_unidade_cobertura_principal ON unidade_cobertura(unidade_principal_id);`,
       `CREATE INDEX IF NOT EXISTS idx_unidade_cobertura_cobertura ON unidade_cobertura(unidade_cobertura_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_celulas_unidade_id ON celulas(unidade_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_celulas_dia_semana ON celulas(dia_semana);`,
+      `CREATE INDEX IF NOT EXISTS idx_celulas_bairro_trgm ON celulas USING gin (bairro gin_trgm_ops);`,
+      `CREATE INDEX IF NOT EXISTS idx_celulas_endereco_trgm ON celulas USING gin (endereco gin_trgm_ops);`,
     ];
 
     const results: any[] = [];

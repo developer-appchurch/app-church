@@ -20,6 +20,7 @@ import {
   Sparkles,
   Loader2,
   AlertCircle,
+  Compass,
 } from 'lucide-react';
 import {
   optimizeImageToWebP,
@@ -153,6 +154,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Minha Célula',
       sublabel: 'Membros, Frequência & Trilho',
       icon: Users,
+    },
+    {
+      id: 'our_cells' as ActiveScreen,
+      label: 'Nossas Células',
+      sublabel: 'Galeria & busca de todas as células',
+      icon: Compass,
     },
     {
       id: 'reports' as ActiveScreen,

@@ -76,6 +76,11 @@ const ChurchHierarchyOverviewView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const NossasCelulasView = dynamic(
+  () => import('../components/NossasCelulasView').then((m) => m.NossasCelulasView),
+  { loading: ViewLoading, ssr: false }
+);
+
 const NotificationPermissionBanner = dynamic(
   () => import('../components/NotificationPermissionBanner').then((m) => m.NotificationPermissionBanner),
   { ssr: false }
@@ -150,6 +155,10 @@ export default function Home() {
           if (targetWeekParam) {
             setTargetReportWeek(targetWeekParam);
           }
+        });
+      } else if (screenParam === 'our_cells' || screenParam === 'celulas' || screenParam === 'nossas_celulas') {
+        queueMicrotask(() => {
+          setActiveScreen('our_cells');
         });
       }
     } catch (e) {
@@ -670,6 +679,17 @@ export default function Home() {
               onOpenLeadershipTrack={(member) => setSelectedMemberForTrack(member)}
               onAddMember={handleAddMember}
               onUpdateAttendance={handleUpdateAttendance}
+            />
+          )}
+
+          {activeScreen === 'our_cells' && (
+            <NossasCelulasView
+              currentUser={user}
+              churchName={user.churchName}
+              onSelectCell={(cellId) => {
+                setSelectedCellId(cellId);
+                setActiveScreen('my_cell');
+              }}
             />
           )}
 
