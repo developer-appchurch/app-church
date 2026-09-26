@@ -11,7 +11,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('push', (event) => {
   let notificationData = {
     title: '🔔 Relatório pendente',
-    body: 'O relatório da sua célula referente à semana passada ainda não foi lançado. Acesse o AppChurch para registrar o relatório.',
+    body: 'O relatório da sua célula referente à semana passada ainda não foi lançado. Clique para lançar agora!',
     icon: '/android-chrome-192x192.png',
     badge: '/android-chrome-192x192.png',
     data: {

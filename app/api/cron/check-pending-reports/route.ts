@@ -391,7 +391,7 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
         // Monta a mensagem exata conforme os requisitos da especificação
         const cellNameLabel = cell.nome ? `da célula ${cell.nome}` : 'da sua célula';
         const notificationTitle = '🔔 Relatório pendente';
-        const notificationBody = `O relatório ${cellNameLabel} referente à semana passada ainda não foi lançado. Acesse o AppChurch para registrar o relatório.`;
+        const notificationBody = `O relatório ${cellNameLabel} referente à semana passada ainda não foi lançado. Clique para lançar agora!`;
 
         // Deep link direto para a tela de relatórios com abertura imediata do formulário
         const deepLinkUrl = `/?screen=reports&cellId=${encodeURIComponent(cell.id)}&openModal=true&targetWeek=${week.startDate}`;
