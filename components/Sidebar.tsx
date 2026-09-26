@@ -19,8 +19,15 @@ import {
   Check,
   Sparkles,
   Loader2,
+  AlertCircle,
 } from 'lucide-react';
-import { optimizeImageToWebP, IMAGE_PRESETS, formatFileSize } from '../lib/imageOptimizer';
+import {
+  optimizeImageToWebP,
+  validateImageFile,
+  validateImageForDatabase,
+  IMAGE_PRESETS,
+  formatFileSize,
+} from '../lib/imageOptimizer';
 import { ActiveScreen, UserProfile, CellGroup } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService } from '../lib/supabase';
@@ -61,6 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [avatarPreview, setAvatarPreview] = useState(user?.avatarUrl || '');
   const [isOptimizingAvatar, setIsOptimizingAvatar] = useState(false);
   const [avatarStats, setAvatarStats] = useState<{ size: string; reduction: string } | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const [avatarSuccess, setAvatarSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -70,24 +78,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (!file) return;
 
     e.target.value = '';
+    setAvatarError(null);
+
+    const validation = validateImageFile(file);
+    if (!validation.isValid) {
+      setAvatarError(validation.error || 'Arquivo de imagem inválido.');
+      return;
+    }
+
     setIsOptimizingAvatar(true);
     try {
       const result = await optimizeImageToWebP(file, IMAGE_PRESETS.AVATAR);
+      if (!result.dataUrl.startsWith('data:image/webp')) {
+        throw new Error('A imagem não pôde ser convertida para WebP.');
+      }
       setAvatarPreview(result.dataUrl);
       setAvatarStats({
         size: formatFileSize(result.optimizedSize),
         reduction: result.reductionLabel,
       });
-    } catch (err) {
-      console.warn('Fallback ao ler avatar:', err);
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          setAvatarPreview(reader.result);
-          setAvatarStats(null);
-        }
-      };
-      reader.readAsDataURL(file);
+      setAvatarError(null);
+    } catch (err: any) {
+      console.error('Falha ao processar e converter foto para WebP:', err);
+      setAvatarError('Não foi possível converter a imagem para WebP. Por favor, envie uma foto válida (JPG, PNG ou WEBP).');
     } finally {
       setIsOptimizingAvatar(false);
     }
@@ -95,6 +108,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handleSaveAvatar = async () => {
     if (!avatarPreview || !user) return;
+    setAvatarError(null);
+
+    const dbValidation = validateImageForDatabase(avatarPreview, 'Foto de perfil');
+    if (!dbValidation.isValid) {
+      setAvatarError(dbValidation.error || 'A imagem deve estar no formato WebP.');
+      return;
+    }
+
     setIsSavingAvatar(true);
     try {
       if (onUpdateAvatar) {
@@ -107,8 +128,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
         setAvatarSuccess(false);
         setIsAvatarModalOpen(false);
       }, 900);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao salvar foto de perfil:', err);
+      setAvatarError(err?.message || 'Erro ao salvar foto de perfil. Tente novamente.');
     } finally {
       setIsSavingAvatar(false);
     }
@@ -406,6 +428,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold mt-1 shadow-2xs">
                     <Sparkles size={12} className="text-emerald-600" />
                     <span>WebP Otimizado: {avatarStats.size} ({avatarStats.reduction})</span>
+                  </div>
+                )}
+
+                {avatarError && (
+                  <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 text-xs font-semibold mt-1 text-left w-full">
+                    <AlertCircle size={15} className="text-rose-600 shrink-0" />
+                    <span>{avatarError}</span>
                   </div>
                 )}
 

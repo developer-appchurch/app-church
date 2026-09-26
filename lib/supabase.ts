@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { deleteFeedImage } from './feedStorage';
 import { getBrowserSupabaseClient } from './supabase/client';
+import { optimizeImageToWebP, validateImageForDatabase, IMAGE_PRESETS } from './imageOptimizer';
 import {
   Church,
   UserProfile,
@@ -3436,12 +3437,31 @@ export const AppChurchService = {
    * Atualiza a foto de avatar do usuário logado (membros.url_avatar e cache de sessão)
    */
   async updateUserAvatar(userId: string, avatarUrl: string): Promise<void> {
+    let safeAvatarUrl = avatarUrl?.trim() || '';
+
+    // Validação e conversão estrita: se for data URL, deve estar em WebP
+    if (safeAvatarUrl && safeAvatarUrl.startsWith('data:')) {
+      if (!safeAvatarUrl.startsWith('data:image/webp')) {
+        try {
+          const opt = await optimizeImageToWebP(safeAvatarUrl, IMAGE_PRESETS.AVATAR);
+          safeAvatarUrl = opt.dataUrl;
+        } catch (err) {
+          throw new Error('A imagem deve estar no formato WebP. Falha ao converter foto para o banco de dados.');
+        }
+      }
+    }
+
+    const validation = validateImageForDatabase(safeAvatarUrl, 'Foto de perfil');
+    if (!validation.isValid) {
+      throw new Error(validation.error || 'Formato de imagem inválido para gravação no banco de dados.');
+    }
+
     if (supabase && userId && !userId.startsWith('admin-')) {
       try {
         let { error } = await supabase
           .from('membros')
           .update({
-            url_avatar: avatarUrl,
+            url_avatar: safeAvatarUrl,
             atualizado_em: new Date().toISOString(),
           })
           .eq('id', userId);
@@ -3450,7 +3470,7 @@ export const AppChurchService = {
           await supabase
             .from('members')
             .update({
-              url_avatar: avatarUrl,
+              url_avatar: safeAvatarUrl,
               atualizado_em: new Date().toISOString(),
             })
             .eq('id', userId);
@@ -3463,7 +3483,7 @@ export const AppChurchService = {
     // 1. Atualiza na sessão ativa
     const currentSession = loadFromStorage<UserProfile | null>(STORAGE_KEYS.SESSION, null);
     if (currentSession) {
-      const updatedSession = { ...currentSession, avatarUrl };
+      const updatedSession = { ...currentSession, avatarUrl: safeAvatarUrl };
       saveToStorage(STORAGE_KEYS.SESSION, updatedSession);
     }
 
@@ -3471,7 +3491,7 @@ export const AppChurchService = {
     const allMembers = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     const updatedMembers = allMembers.map((m) =>
       m.id === userId || (currentSession?.login && m.login === currentSession.login)
-        ? { ...m, avatarUrl }
+        ? { ...m, avatarUrl: safeAvatarUrl }
         : m
     );
     saveToStorage(STORAGE_KEYS.MEMBERS, updatedMembers);

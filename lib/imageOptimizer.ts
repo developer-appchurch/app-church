@@ -25,6 +25,100 @@ export interface OptimizedImageResult {
   reductionLabel: string;
 }
 
+/**
+ * Valida se um arquivo selecionado é uma imagem suportada
+ */
+export function validateImageFile(file: File): { isValid: boolean; error?: string } {
+  if (!file) {
+    return { isValid: false, error: 'Nenhum arquivo selecionado.' };
+  }
+
+  // Limite máximo de segurança: 25MB (para evitar travamento no navegador do celular)
+  const MAX_RAW_SIZE = 25 * 1024 * 1024;
+  if (file.size > MAX_RAW_SIZE) {
+    return {
+      isValid: false,
+      error: `A imagem original é muito grande (${formatFileSize(file.size)}). O limite máximo suportado é de 25MB.`,
+    };
+  }
+
+  const validTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'image/bmp',
+    'image/avif',
+    'image/heic',
+    'image/heif',
+  ];
+
+  const hasValidType = file.type && (validTypes.includes(file.type.toLowerCase()) || file.type.startsWith('image/'));
+  const hasValidExt = /\.(jpe?g|png|webp|gif|bmp|avif|heic|heif)$/i.test(file.name);
+
+  if (!hasValidType && !hasValidExt) {
+    return {
+      isValid: false,
+      error: 'Formato de arquivo não suportado. Por favor, envie uma imagem válida (JPG, PNG ou WEBP).',
+    };
+  }
+
+  return { isValid: true };
+}
+
+/**
+ * Verifica se a string é uma URL WebP base64 válida
+ */
+export function isWebPDataUrl(str: string): boolean {
+  if (!str || typeof str !== 'string') return false;
+  return str.startsWith('data:image/webp;base64,') || str.startsWith('data:image/webp;');
+}
+
+/**
+ * Verifica se a string é uma URL HTTP/HTTPS externa válida
+ */
+export function isHttpUrl(str: string): boolean {
+  if (!str || typeof str !== 'string') return false;
+  return str.startsWith('http://') || str.startsWith('https://');
+}
+
+/**
+ * Validação rigorosa: Garante que apenas WebP (ou URL pública) seja salvo no banco
+ */
+export function validateImageForDatabase(
+  imageUrl: string | null | undefined,
+  fieldName: string = 'Imagem'
+): { isValid: boolean; error?: string } {
+  if (!imageUrl) {
+    return { isValid: true };
+  }
+
+  const trimmed = imageUrl.trim();
+  if (!trimmed) {
+    return { isValid: true };
+  }
+
+  if (isHttpUrl(trimmed)) {
+    return { isValid: true };
+  }
+
+  if (trimmed.startsWith('data:')) {
+    if (!trimmed.startsWith('data:image/webp')) {
+      return {
+        isValid: false,
+        error: `${fieldName} deve estar obrigatoriamente convertida no formato WebP (data:image/webp). Formato atual não permitido no banco.`,
+      };
+    }
+    return { isValid: true };
+  }
+
+  return {
+    isValid: false,
+    error: `${fieldName} possui um formato inválido. Deve ser uma URL segura ou imagem convertida em WebP.`,
+  };
+}
+
 export const IMAGE_PRESETS = {
   // Fotos de postagens do Feed (reuniões, batismos, comunhão)
   FEED_POST: {

@@ -51,6 +51,15 @@ export async function POST(req: NextRequest) {
     const cleanPastorLogin = input.pastorLogin.trim().toLowerCase();
     const cleanPastorPass = input.pastorPassword?.trim() || '123456';
 
+    if (input.logoUrl && input.logoUrl.trim().startsWith('data:')) {
+      if (!input.logoUrl.trim().startsWith('data:image/webp')) {
+        return NextResponse.json(
+          { error: 'O logotipo da igreja deve estar obrigatoriamente convertido no formato WebP.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const supabase = getSupabaseServerClient();
     if (!supabase) {
       return NextResponse.json(

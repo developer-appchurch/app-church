@@ -22,8 +22,15 @@ import {
   RefreshCw,
   X,
   ArrowUp,
+  AlertCircle,
 } from 'lucide-react';
-import { optimizeImageToWebP, IMAGE_PRESETS, formatFileSize } from '../lib/imageOptimizer';
+import {
+  optimizeImageToWebP,
+  validateImageFile,
+  validateImageForDatabase,
+  IMAGE_PRESETS,
+  formatFileSize,
+} from '../lib/imageOptimizer';
 import { uploadFeedImage, deleteFeedImage } from '../lib/feedStorage';
 import { AppChurchService, supabase } from '../lib/supabase';
 
@@ -115,6 +122,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
     statsLabel: string;
   } | null>(null);
   const [isOptimizingImage, setIsOptimizingImage] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<FeedPost['category']>('Célula');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -233,17 +241,28 @@ export const FeedView: React.FC<FeedViewProps> = ({
     return Boolean(commentAuthorName && commentAuthorName === currentUserName);
   };
 
-  // 2. Anexar Foto: Redimensionar no navegador para máx 1280px, WebP 0.8 e preview imediato
+  // 2. Anexar Foto: Validação, redimensionamento para máx 1280px e conversão estrita para WebP
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     e.target.value = '';
+    setImageError(null);
+
+    const validation = validateImageFile(file);
+    if (!validation.isValid) {
+      setImageError(validation.error || 'Arquivo de imagem inválido.');
+      return;
+    }
+
     setIsOptimizingImage(true);
 
     try {
-      // Otimização antecipada local para preview rápido e validação EXIF
+      // Otimização antecipada local para preview rápido e validação EXIF em formato WebP
       const optimized = await optimizeImageToWebP(file, IMAGE_PRESETS.FEED_POST);
+      if (!optimized.dataUrl.startsWith('data:image/webp')) {
+        throw new Error('Falha ao converter para o formato WebP.');
+      }
       setSelectedFile(file);
       setPreviewDataUrl(optimized.dataUrl);
       setImageMeta({
@@ -251,12 +270,13 @@ export const FeedView: React.FC<FeedViewProps> = ({
         height: optimized.height,
         statsLabel: `${optimized.reductionLabel} • ${formatFileSize(optimized.optimizedSize)}`,
       });
-    } catch (err) {
-      console.warn('Fallback de preview:', err);
-      setSelectedFile(file);
-      const reader = new FileReader();
-      reader.onload = () => setPreviewDataUrl(reader.result as string);
-      reader.readAsDataURL(file);
+      setImageError(null);
+    } catch (err: any) {
+      console.error('Falha ao processar e converter imagem do post para WebP:', err);
+      setImageError('Não foi possível converter a imagem para WebP. Por favor, envie uma foto válida (JPG, PNG ou WEBP).');
+      setSelectedFile(null);
+      setPreviewDataUrl('');
+      setImageMeta(null);
     } finally {
       setIsOptimizingImage(false);
     }
@@ -645,6 +665,14 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 rows={3}
                 className="w-full bg-[#f8fafc] border border-slate-200 rounded-xl p-3 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#052447] focus:ring-1 focus:ring-[#052447]"
               />
+
+              {/* Erro de Validação de Imagem */}
+              {imageError && (
+                <div className="flex items-center gap-2 p-3 mt-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold">
+                  <AlertCircle size={16} className="text-rose-600 shrink-0" />
+                  <span>{imageError}</span>
+                </div>
+              )}
 
               {/* Status de Otimização e Conversão no Navegador */}
               {isOptimizingImage && (

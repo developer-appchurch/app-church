@@ -44,6 +44,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'O nome do membro é obrigatório.' }, { status: 400 });
     }
 
+    if (avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim().startsWith('data:')) {
+      if (!avatarUrl.trim().startsWith('data:image/webp')) {
+        return NextResponse.json(
+          { error: 'A foto do membro deve estar obrigatoriamente convertida no formato WebP.' },
+          { status: 400 }
+        );
+      }
+    }
+
     const supabaseAdmin = getSupabaseAdminClient();
     const supabase = supabaseAdmin || getSupabaseServerClient();
 

@@ -29,7 +29,13 @@ import {
 } from 'lucide-react';
 import { HierarchicalLevelInput, RegisterChurchInput, UserProfile } from '../types';
 import { AppChurchService } from '../lib/supabase';
-import { optimizeImageToWebP, IMAGE_PRESETS, formatFileSize } from '../lib/imageOptimizer';
+import {
+  optimizeImageToWebP,
+  validateImageFile,
+  validateImageForDatabase,
+  IMAGE_PRESETS,
+  formatFileSize,
+} from '../lib/imageOptimizer';
 
 interface RegisterChurchViewProps {
   onBack?: () => void;
@@ -213,31 +219,39 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
     setPastorPassword(pass);
   };
 
-  // Upload do Logotipo (Drag & Drop / Input file) com conversão automática para WebP leve
+  // Upload do Logotipo (Drag & Drop / Input file) com validação e conversão estrita para WebP
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     e.target.value = '';
+    setErrorMessage('');
+
+    const validation = validateImageFile(file);
+    if (!validation.isValid) {
+      setErrorMessage(validation.error || 'Arquivo de imagem inválido.');
+      return;
+    }
+
     setIsOptimizingLogo(true);
     try {
       const result = await optimizeImageToWebP(file, IMAGE_PRESETS.LOGO);
+      if (!result.dataUrl.startsWith('data:image/webp')) {
+        throw new Error('A imagem não pôde ser convertida para WebP.');
+      }
       setLogoPreview(result.dataUrl);
       setLogoUrl(result.dataUrl);
       setLogoStats({
         size: formatFileSize(result.optimizedSize),
         reduction: result.reductionLabel,
       });
-    } catch (err) {
-      console.warn('Fallback ao ler logotipo:', err);
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        setLogoPreview(result);
-        setLogoUrl(result);
-        setLogoStats(null);
-      };
-      reader.readAsDataURL(file);
+      setErrorMessage('');
+    } catch (err: any) {
+      console.error('Falha ao processar e converter logotipo para WebP:', err);
+      setErrorMessage('Não foi possível converter o logotipo para WebP. Por favor, envie uma imagem válida (PNG, JPG ou WEBP).');
+      setLogoPreview('');
+      setLogoUrl('');
+      setLogoStats(null);
     } finally {
       setIsOptimizingLogo(false);
     }
@@ -326,6 +340,14 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
     if (!pastorPassword.trim()) {
       setErrorMessage('Informe uma senha de acesso para o Pastor.');
       return;
+    }
+
+    if (logoUrl.trim()) {
+      const logoValidation = validateImageForDatabase(logoUrl.trim(), 'Logotipo da Igreja');
+      if (!logoValidation.isValid) {
+        setErrorMessage(logoValidation.error || 'O logotipo deve estar no formato WebP.');
+        return;
+      }
     }
 
     setIsLoading(true);

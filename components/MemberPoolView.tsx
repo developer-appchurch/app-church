@@ -899,10 +899,27 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Telefone / WhatsApp</label>
                   <input
-                    type="text"
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={15}
                     value={newMemberPhone}
-                    onChange={(e) => setNewMemberPhone(e.target.value)}
-                    placeholder="(00) 00000-0000"
+                    onChange={(e) => {
+                      const rawDigits = e.target.value.replace(/\D/g, '').slice(0, 11);
+                      let formatted = rawDigits;
+                      if (rawDigits.length === 0) {
+                        formatted = '';
+                      } else if (rawDigits.length <= 2) {
+                        formatted = `(${rawDigits}`;
+                      } else if (rawDigits.length <= 6) {
+                        formatted = `(${rawDigits.slice(0, 2)}) ${rawDigits.slice(2)}`;
+                      } else if (rawDigits.length <= 10) {
+                        formatted = `(${rawDigits.slice(0, 2)}) ${rawDigits.slice(2, 6)}-${rawDigits.slice(6)}`;
+                      } else {
+                        formatted = `(${rawDigits.slice(0, 2)}) ${rawDigits.slice(2, 7)}-${rawDigits.slice(7, 11)}`;
+                      }
+                      setNewMemberPhone(formatted);
+                    }}
+                    placeholder="(00) 90000-0000"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800"
                   />
                 </div>
@@ -948,9 +965,9 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                 </div>
               </div>
 
-              {/* Escolha do Destino: Sem Célula vs Célula */}
+              {/* Escolha da Situação: Sem Célula vs Célula */}
               <div className="pt-2 border-t border-slate-100">
-                <label className="block text-xs font-bold text-slate-700 mb-2">Destino do Membro</label>
+                <label className="block text-xs font-bold text-slate-700 mb-2">Situação</label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <div
                     onClick={() => setNewMemberDestination('pool')}
@@ -962,7 +979,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                   >
                     <p className="font-bold flex items-center gap-1.5">
                       <Users size={14} className="text-amber-700" />
-                      <span>Cadastro Geral (Sem Célula)</span>
+                      <span>Sem Célula</span>
                     </p>
                     <p className="text-[11px] text-slate-500 font-normal mt-0.5">
                       Fica disponível no banco geral para vínculo posterior pelos líderes.
