@@ -333,8 +333,20 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         }
       );
 
+      // Atualiza a lista de membros no estado local se houve promoção de líderes
+      if (result.updatedMembers && result.updatedMembers.length > 0) {
+        setChurchMembers((prev) =>
+          prev.map((m) => {
+            const upd = result.updatedMembers?.find((u: any) => u.id === m.id);
+            return upd ? { ...m, role: upd.funcao, roleId: upd.papel_id } : m;
+          })
+        );
+      }
+
       // Invalidação pontual no React Query para sincronizar
       queryClient.invalidateQueries({ queryKey: ['churchUnits', effectiveChurchId] });
+      queryClient.invalidateQueries({ queryKey: ['churchMembers', effectiveChurchId] });
+      queryClient.invalidateQueries({ queryKey: ['memberPool', effectiveChurchId] });
 
       setSuccessBanner(
         result.leaders.length > 0

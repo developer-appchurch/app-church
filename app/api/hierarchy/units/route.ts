@@ -14,6 +14,69 @@ function generateUUID(): string {
   });
 }
 
+/**
+ * Determina o papel e nível hierárquico assumido com base no tipo de nível da unidade organizacional
+ */
+function resolveLeadershipRole(currentLevel: any, isLeafLevel: boolean, roles: any[]) {
+  if (!roles || roles.length === 0) {
+    return {
+      assumedRole: null,
+      assumedHierarchyLevel: isLeafLevel ? 2 : 3,
+      assumedRoleName: isLeafLevel ? 'Líder de Célula' : `Líder de ${currentLevel?.nome || 'Unidade'}`,
+      assumedRoleId: null,
+    };
+  }
+
+  const lvlName = currentLevel?.nome || '';
+  const lvlNorm = lvlName.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const lvlOrdem = typeof currentLevel?.ordem === 'number' ? currentLevel.ordem : null;
+
+  // 1. Tenta correspondência direta por slug ou nome (ex: lider-celula, lider-setor, lider-area, lider-distrito)
+  let matched = roles.find((r: any) => {
+    const rNorm = (r.nome || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const rSlug = (r.slug || '').toLowerCase();
+    return (
+      rSlug === `lider-${lvlNorm}` ||
+      rNorm === `lider de ${lvlNorm}` ||
+      rNorm.includes(`lider de ${lvlNorm}`) ||
+      (rSlug.includes(lvlNorm) && r.nivel_hierarquia > 1)
+    );
+  });
+
+  // 2. Se não encontrar diretamente pelo nome textual, usa a ordem padrão da hierarquia
+  if (!matched) {
+    if (lvlOrdem === 40 || isLeafLevel || lvlNorm.includes('celula')) {
+      matched = roles.find(
+        (r: any) => r.slug === 'lider-celula' || (r.nome && r.nome.includes('Célula') && r.nivel_hierarquia === 2)
+      );
+    } else if (lvlOrdem === 30 || lvlNorm.includes('setor')) {
+      matched = roles.find(
+        (r: any) => r.slug === 'lider-setor' || (r.nome && r.nome.includes('Setor') && r.nivel_hierarquia === 3)
+      );
+    } else if (lvlOrdem === 20 || lvlNorm.includes('area')) {
+      matched = roles.find(
+        (r: any) => r.slug === 'lider-area' || (r.nome && r.nome.includes('Área') && r.nivel_hierarquia === 4)
+      );
+    } else if (lvlOrdem === 10 || lvlNorm.includes('distrito')) {
+      matched = roles.find(
+        (r: any) => r.slug === 'lider-distrito' || (r.nome && r.nome.includes('Distrito') && r.nivel_hierarquia === 5)
+      );
+    }
+  }
+
+  const assumedHierarchyLevel = matched?.nivel_hierarquia || (isLeafLevel || lvlOrdem === 40 ? 2 : 3);
+  const assumedRoleName =
+    matched?.nome || (isLeafLevel || lvlOrdem === 40 ? 'Líder de Célula' : `Líder de ${lvlName || 'Unidade'}`);
+  const assumedRoleId = matched?.id || null;
+
+  return {
+    assumedRole: matched,
+    assumedHierarchyLevel,
+    assumedRoleName,
+    assumedRoleId,
+  };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -397,13 +460,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 5. Inserir múltiplos líderes na tabela unidade_lideres
+    // 5. Inserir múltiplos líderes na tabela unidade_lideres e atualizar papel_id/funcao se necessário
     const leadersAssigned: any[] = [];
     if (input.leaderMemberIds && input.leaderMemberIds.length > 0) {
+      // Buscar catálogo de papéis da igreja
+      const { data: roles } = await supabase
+        .from('papeis')
+        .select('id, nome, slug, nivel_hierarquia')
+        .order('nivel_hierarquia', { ascending: true });
+
+      const { assumedHierarchyLevel, assumedRoleName, assumedRoleId } = resolveLeadershipRole(
+        currentLevel,
+        Boolean(isLeafLevel),
+        roles || []
+      );
+
       const leaderRows = input.leaderMemberIds.map((mId) => ({
         unidade_id: unitId,
         pessoa_id: mId,
-        papel: 'Líder',
+        papel: assumedRoleName,
         ativo: true,
       }));
 
@@ -412,17 +487,59 @@ export async function POST(req: NextRequest) {
         console.warn('Aviso ao inserir unidade_lideres:', leaderErr.message);
       }
 
-      // Se for célula, atualiza unidade_id dos líderes que não possuíam célula vinculada
-      if (isLeafLevel) {
-        for (const mId of input.leaderMemberIds) {
-          await supabase
-            .from('membros')
-            .update({ unidade_id: unitId })
-            .eq('id', mId);
-          await supabase
-            .from('members')
-            .update({ celula_id: unitId })
-            .eq('id', mId);
+      // Buscar membros para verificar o nível hierárquico atual e promover se for menor
+      const { data: currentMembers } = await supabase
+        .from('membros')
+        .select('id, nome, papel_id, funcao, unidade_id')
+        .in('id', input.leaderMemberIds);
+
+      const rolesMap = new Map<string, number>();
+      (roles || []).forEach((r: any) => {
+        if (r.id) rolesMap.set(r.id, r.nivel_hierarquia);
+        if (r.nome) rolesMap.set(r.nome.toLowerCase(), r.nivel_hierarquia);
+        if (r.slug) rolesMap.set(r.slug.toLowerCase(), r.nivel_hierarquia);
+      });
+
+      if (currentMembers && currentMembers.length > 0) {
+        for (const m of currentMembers) {
+          let currentNivel = 1;
+          if (m.papel_id && rolesMap.has(m.papel_id)) {
+            currentNivel = rolesMap.get(m.papel_id)!;
+          } else if (m.funcao && rolesMap.has(m.funcao.toLowerCase())) {
+            currentNivel = rolesMap.get(m.funcao.toLowerCase())!;
+          }
+
+          const shouldUpgradeRole = currentNivel < assumedHierarchyLevel && Boolean(assumedRoleId);
+          const shouldUpdateCellId = Boolean(isLeafLevel);
+
+          if (shouldUpgradeRole || shouldUpdateCellId) {
+            const updatePayload: any = {
+              atualizado_em: new Date().toISOString(),
+            };
+            if (shouldUpgradeRole) {
+              updatePayload.papel_id = assumedRoleId;
+              updatePayload.funcao = assumedRoleName;
+            }
+            if (shouldUpdateCellId) {
+              updatePayload.unidade_id = unitId;
+            }
+
+            await supabase.from('membros').update(updatePayload).eq('id', m.id);
+
+            try {
+              const legPayload: any = {};
+              if (shouldUpgradeRole) {
+                legPayload.papel_id = assumedRoleId;
+                legPayload.funcao = assumedRoleName;
+              }
+              if (shouldUpdateCellId) {
+                legPayload.celula_id = unitId;
+              }
+              await supabase.from('members').update(legPayload).eq('id', m.id);
+            } catch {
+              // Ignora view/tabela legada se não suportar
+            }
+          }
         }
       }
 
@@ -446,7 +563,7 @@ export async function POST(req: NextRequest) {
         leadersAssigned.push({
           id: m.id,
           name: m.nome,
-          role: m.funcao || 'Líder',
+          role: m.funcao || assumedRoleName,
           avatarUrl: m.url_avatar,
           phone: m.telefone,
         });
@@ -513,15 +630,28 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Unidade não encontrada.' }, { status: 404 });
     }
 
-    // 2. Obter níveis para checar se é folha (célula)
+    // 2. Obter níveis para checar se é folha (célula) e dados do nível atual
     const { data: levels } = await supabase
       .from('nivel_tipo')
       .select('id, nome, ordem')
       .eq('igreja_id', churchId)
       .order('ordem', { ascending: true });
 
+    const currentLevel = (levels || []).find((l: any) => l.id === unit.nivel_tipo_id);
     const isLeafLevel =
       levels && levels.length > 0 && levels[levels.length - 1].id === unit.nivel_tipo_id;
+
+    // Buscar catálogo de papéis da igreja
+    const { data: roles } = await supabase
+      .from('papeis')
+      .select('id, nome, slug, nivel_hierarquia')
+      .order('nivel_hierarquia', { ascending: true });
+
+    const { assumedHierarchyLevel, assumedRoleName, assumedRoleId } = resolveLeadershipRole(
+      currentLevel,
+      Boolean(isLeafLevel),
+      roles || []
+    );
 
     // 3. Remover vínculos antigos na tabela unidade_lideres para esta unidade
     const { error: deleteErr } = await supabase
@@ -533,16 +663,18 @@ export async function PATCH(req: NextRequest) {
       console.warn('Aviso ao limpar líderes antigos de unidade_lideres:', deleteErr.message);
     }
 
-    // 4. Inserir novos líderes
+    // 4. Inserir novos líderes com o papel correspondente ao nível de liderança
     const safeLeaderIds: string[] = Array.isArray(leaderMemberIds)
       ? leaderMemberIds.filter((id) => typeof id === 'string' && id.trim() !== '')
       : [];
+
+    const updatedMembersList: any[] = [];
 
     if (safeLeaderIds.length > 0) {
       const leaderRows = safeLeaderIds.map((mId) => ({
         unidade_id: unitId,
         pessoa_id: mId,
-        papel: 'Líder',
+        papel: assumedRoleName,
         ativo: true,
       }));
 
@@ -551,17 +683,78 @@ export async function PATCH(req: NextRequest) {
         console.error('Erro ao inserir novos líderes em unidade_lideres:', insertErr);
       }
 
-      // Se for folha (célula), associa o unidade_id e celula_id aos líderes
-      if (isLeafLevel) {
-        for (const mId of safeLeaderIds) {
-          await supabase
-            .from('membros')
-            .update({ unidade_id: unitId })
-            .eq('id', mId);
-          await supabase
-            .from('members')
-            .update({ celula_id: unitId })
-            .eq('id', mId);
+      // Buscar membros para verificar o nível hierárquico atual e promover se for menor
+      const { data: currentMembers } = await supabase
+        .from('membros')
+        .select('id, nome, papel_id, funcao, unidade_id')
+        .in('id', safeLeaderIds);
+
+      const rolesMap = new Map<string, number>();
+      (roles || []).forEach((r: any) => {
+        if (r.id) rolesMap.set(r.id, r.nivel_hierarquia);
+        if (r.nome) rolesMap.set(r.nome.toLowerCase(), r.nivel_hierarquia);
+        if (r.slug) rolesMap.set(r.slug.toLowerCase(), r.nivel_hierarquia);
+      });
+
+      if (currentMembers && currentMembers.length > 0) {
+        for (const m of currentMembers) {
+          let currentNivel = 1; // Padrão 'Membro'
+          if (m.papel_id && rolesMap.has(m.papel_id)) {
+            currentNivel = rolesMap.get(m.papel_id)!;
+          } else if (m.funcao && rolesMap.has(m.funcao.toLowerCase())) {
+            currentNivel = rolesMap.get(m.funcao.toLowerCase())!;
+          }
+
+          // Se o papel_id/nivel_hierarquico atual for menor do que o nível de liderança que está assumindo,
+          // atualiza o novo papel_id e funcao na tabela membro
+          const shouldUpgradeRole = currentNivel < assumedHierarchyLevel && Boolean(assumedRoleId);
+          const shouldUpdateCellId = Boolean(isLeafLevel);
+
+          if (shouldUpgradeRole || shouldUpdateCellId) {
+            const updatePayload: any = {
+              atualizado_em: new Date().toISOString(),
+            };
+
+            if (shouldUpgradeRole) {
+              updatePayload.papel_id = assumedRoleId;
+              updatePayload.funcao = assumedRoleName;
+            }
+
+            if (shouldUpdateCellId) {
+              updatePayload.unidade_id = unitId;
+            }
+
+            const { error: updErr } = await supabase
+              .from('membros')
+              .update(updatePayload)
+              .eq('id', m.id);
+
+            if (updErr) {
+              console.error(`Erro ao atualizar membro ${m.id} na promoção de liderança:`, updErr);
+            } else {
+              updatedMembersList.push({
+                id: m.id,
+                nome: m.nome,
+                papel_id: shouldUpgradeRole ? assumedRoleId : m.papel_id,
+                funcao: shouldUpgradeRole ? assumedRoleName : m.funcao,
+              });
+            }
+
+            // Sincroniza também na view/tabela legada members se existir
+            try {
+              const legPayload: any = {};
+              if (shouldUpgradeRole) {
+                legPayload.papel_id = assumedRoleId;
+                legPayload.funcao = assumedRoleName;
+              }
+              if (shouldUpdateCellId) {
+                legPayload.celula_id = unitId;
+              }
+              await supabase.from('members').update(legPayload).eq('id', m.id);
+            } catch {
+              // Ignora caso não suporte
+            }
+          }
         }
       }
     }
@@ -588,13 +781,16 @@ export async function PATCH(req: NextRequest) {
       }
 
       if (membersInfo && membersInfo.length > 0) {
-        leadersAssigned = membersInfo.map((m: any) => ({
-          id: m.id,
-          name: m.nome,
-          role: m.funcao || 'Líder',
-          avatarUrl: m.url_avatar,
-          phone: m.telefone,
-        }));
+        leadersAssigned = membersInfo.map((m: any) => {
+          const upd = updatedMembersList.find((u) => u.id === m.id);
+          return {
+            id: m.id,
+            name: m.nome,
+            role: upd ? upd.funcao : (m.funcao || assumedRoleName),
+            avatarUrl: m.url_avatar,
+            phone: m.telefone,
+          };
+        });
         leaderNamesText = leadersAssigned.map((l) => l.name).join(' & ');
       }
     }
@@ -615,6 +811,7 @@ export async function PATCH(req: NextRequest) {
       success: true,
       unitId,
       leaders: leadersAssigned,
+      updatedMembers: updatedMembersList,
       message: 'Líderes atualizados com sucesso.',
     });
   } catch (err: any) {

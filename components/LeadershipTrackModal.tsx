@@ -17,6 +17,8 @@ import {
   Building2,
   Loader2,
   FileText,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 
@@ -49,8 +51,20 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   const [activeTab, setActiveTab] = useState<'track' | 'notes'>('track');
   const [memberNotes, setMemberNotes] = useState(member?.notes || '');
   const [savedAlert, setSavedAlert] = useState(false);
-  const [expandedStepNoteId, setExpandedStepNoteId] = useState<number | string | null>(null);
+  const [expandedStepIds, setExpandedStepIds] = useState<Set<number | string>>(new Set());
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
+
+  const toggleStepDetails = (stepId: number | string) => {
+    setExpandedStepIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(stepId)) {
+        next.delete(stepId);
+      } else {
+        next.add(stepId);
+      }
+      return next;
+    });
+  };
 
   // Carrega funções do banco para resolução dinâmica do nível hierárquico
   useEffect(() => {
@@ -361,7 +375,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
 
               {track?.steps.map((step, index) => {
                 const isCurrent = !step.completed && index + 1 === track.currentStepId;
-                const isExpanded = expandedStepNoteId === step.id;
+                const isExpanded = expandedStepIds.has(step.id);
 
                 return (
                   <div
@@ -437,53 +451,71 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setExpandedStepNoteId(isExpanded ? null : step.id);
+                                toggleStepDetails(step.id);
                               }}
-                              className={`p-1 rounded text-slate-400 hover:text-slate-600 transition cursor-pointer ${
-                                step.notes ? 'text-sky-700 bg-sky-100' : ''
+                              className={`p-1.5 rounded-lg border transition cursor-pointer flex items-center gap-1.5 text-xs font-semibold shrink-0 ${
+                                isExpanded
+                                  ? 'bg-sky-100 text-[#052447] border-sky-300 shadow-2xs'
+                                  : 'bg-white hover:bg-sky-50 text-slate-500 hover:text-[#052447] border-slate-200'
                               }`}
-                              title="Adicionar anotação para esta etapa"
+                              title={isExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}
+                              aria-label={isExpanded ? 'Ocultar detalhes' : 'Ver detalhes'}
                             >
-                              <FileText size={14} />
+                              {isExpanded ? (
+                                <EyeOff size={14} className="shrink-0 text-sky-800" />
+                              ) : (
+                                <Eye size={14} className="shrink-0 text-slate-600" />
+                              )}
+                              <span className="text-[11px] hidden sm:inline">
+                                {isExpanded ? 'Ocultar' : 'Ver detalhes'}
+                              </span>
+                              {Boolean(step.notes) && !isExpanded && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-sky-600 shrink-0" title="Possui observações" />
+                              )}
                             </button>
                           </div>
                         </div>
 
-                        {step.description && (
-                          <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                            {step.description}
-                          </p>
-                        )}
+                        {/* Componentes de detalhes (ocultos por padrão, visíveis ao clicar no ícone de ver detalhes) */}
+                        {isExpanded && (
+                          <div className="mt-2.5 pt-2.5 border-t border-slate-200/60 space-y-2 animate-in fade-in duration-150">
+                            {step.description && (
+                              <p className="text-xs text-slate-600 leading-relaxed bg-slate-50/80 p-2.5 rounded-lg border border-slate-200/70">
+                                {step.description}
+                              </p>
+                            )}
 
-                        {step.validatedBy && (
-                          <div className="text-[11px] text-slate-400 mt-1">
-                            Validado por: <span className="text-slate-600 font-medium">{step.validatedBy}</span>
+                            {step.validatedBy && (
+                              <div className="text-[11px] text-slate-500 flex items-center gap-1">
+                                <span>Validado por:</span>
+                                <span className="text-slate-700 font-semibold">{step.validatedBy}</span>
+                              </div>
+                            )}
+
+                            <div className="pt-0.5">
+                              <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                                Observações desta etapa:
+                              </label>
+                              <input
+                                type="text"
+                                value={step.notes || ''}
+                                readOnly={!canEdit}
+                                disabled={!canEdit}
+                                onChange={(e) => handleStepNoteChange(step.id, e.target.value)}
+                                placeholder={
+                                  canEdit
+                                    ? 'Ex: Concluiu com louvor, batizado pelo Pr. Paulo...'
+                                    : 'Nenhuma observação informada.'
+                                }
+                                className={`w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none text-slate-800 ${
+                                  canEdit ? 'bg-white focus:border-sky-800 focus:ring-1 focus:ring-sky-800' : 'bg-slate-100 cursor-default'
+                                }`}
+                              />
+                            </div>
                           </div>
                         )}
                       </div>
                     </div>
-
-                    {/* Campo expansível de anotação na etapa */}
-                    {isExpanded && (
-                      <div className="px-3.5 pb-3.5 pt-2 border-t border-slate-100 bg-white/70 space-y-2.5">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                            Observações desta etapa:
-                          </label>
-                          <input
-                            type="text"
-                            value={step.notes || ''}
-                            readOnly={!canEdit}
-                            disabled={!canEdit}
-                            onChange={(e) => handleStepNoteChange(step.id, e.target.value)}
-                            placeholder={canEdit ? 'Ex: Concluiu com louvor, batizado pelo Pr. Paulo...' : 'Nenhuma observação informada.'}
-                            className={`w-full text-xs p-2 rounded-lg border border-slate-300 focus:outline-none text-slate-800 ${
-                              canEdit ? 'bg-white focus:border-sky-800' : 'bg-slate-100 cursor-default'
-                            }`}
-                          />
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })}

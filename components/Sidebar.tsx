@@ -131,7 +131,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Minha Célula',
       sublabel: 'Membros, Frequência & Trilho',
       icon: Users,
-      badge: 'Principal',
     },
     {
       id: 'reports' as ActiveScreen,
@@ -156,7 +155,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Níveis Organizacionais',
       sublabel: 'Cadastro por nível (Área, Setor, Célula)',
       icon: Layers,
-      badge: 'Estrutura',
     },
     {
       id: 'church_overview' as ActiveScreen,
@@ -171,7 +169,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             label: 'Cadastrar Igreja',
             sublabel: 'Nova congregação & hierarquia',
             icon: Building2,
-            badge: 'Admin',
           },
         ]
       : []),
@@ -297,11 +294,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {item.badge && !isActive && (
-                      <span className="text-[10px] font-bold bg-sky-100 text-sky-800 px-2 py-0.5 rounded-full">
-                        {item.badge}
-                      </span>
-                    )}
                     <ChevronRight
                       size={16}
                       className={isActive ? 'text-sky-300' : 'text-slate-300'}

@@ -1079,7 +1079,7 @@ export const AppChurchService = {
     unitId: string,
     churchId: string,
     leaderMemberIds: string[]
-  ): Promise<{ success: boolean; leaders: UnitLeader[] }> {
+  ): Promise<{ success: boolean; leaders: UnitLeader[]; updatedMembers?: any[] }> {
     if (typeof window !== 'undefined') {
       try {
         const res = await fetch('/api/hierarchy/units', {
@@ -1102,7 +1102,11 @@ export const AppChurchService = {
             });
             saveToStorage(`${STORAGE_KEYS.CELLS}_${churchId}`, updated);
           }
-          return { success: true, leaders: data.leaders || [] };
+          return {
+            success: true,
+            leaders: data.leaders || [],
+            updatedMembers: data.updatedMembers || [],
+          };
         }
         throw new Error(data?.error || 'Falha ao vincular líderes.');
       } catch (err: any) {
