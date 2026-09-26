@@ -106,8 +106,8 @@ export async function GET(req: NextRequest) {
         flatQuery = flatQuery.eq('nivel_tipo_id', levelTypeId);
       }
 
-      // Buscar também contagens e líderes em lote (Passo 3: RPC / GROUP BY batch sem subconsultas nem view cells)
-      const [unitsRes, memberCountsRes, leadersBatchRes] = await Promise.all([
+      // Buscar também contagens, líderes e detalhes de células em lote
+      const [unitsRes, memberCountsRes, leadersBatchRes, celulasBatchRes] = await Promise.all([
         flatQuery,
         supabase
           .from('membros')
@@ -118,6 +118,9 @@ export async function GET(req: NextRequest) {
           .from('unidade_lideres')
           .select('unidade_id, pessoa_id, papel')
           .eq('ativo', true),
+        supabase
+          .from('celulas')
+          .select('unidade_id, bairro, endereco, dia_semana, horario'),
       ]);
 
       if (unitsRes.error) {
@@ -125,6 +128,10 @@ export async function GET(req: NextRequest) {
       }
 
       const rows = unitsRes.data || [];
+
+      // Mapeamento de dados específicos da célula
+      const celulasMap = new Map<string, any>();
+      (celulasBatchRes.data || []).forEach((c: any) => celulasMap.set(c.unidade_id, c));
 
       // Contagem em lote de membros
       const countMap = new Map<string, number>();
@@ -178,6 +185,7 @@ export async function GET(req: NextRequest) {
 
       const flatUnits = rows.map((u: any) => {
         const unitLeaders = unitLeadersMap.get(u.id) || [];
+        const celulaInfo = celulasMap.get(u.id);
         return {
           id: u.id,
           parentId: u.pai_id || null,
@@ -188,6 +196,10 @@ export async function GET(req: NextRequest) {
           memberCount: countMap.get(u.id) || 0,
           leaders: unitLeaders,
           leaderCount: unitLeaders.length,
+          meetingDay: celulaInfo?.dia_semana,
+          meetingTime: celulaInfo?.horario,
+          neighborhood: celulaInfo?.bairro,
+          address: celulaInfo?.endereco,
         };
       });
 
@@ -284,10 +296,20 @@ export async function GET(req: NextRequest) {
       }
     });
 
+    // Buscar dados específicos de células
+    const { data: celulasData } = await supabase
+      .from('celulas')
+      .select('unidade_id, bairro, endereco, dia_semana, horario')
+      .in('unidade_id', unitIds);
+
+    const celulasMap = new Map<string, any>();
+    (celulasData || []).forEach((c: any) => celulasMap.set(c.unidade_id, c));
+
     const formattedUnits: OrganizationalUnit[] = unitsData.map((u: any) => {
       const lvl = levelsMap.get(u.nivel_tipo_id) || { nome: 'Unidade', ordem: 99 };
       const unitLeaders = leadersMap.get(u.id) || [];
       const memberCount = countMap.get(u.id) || 0;
+      const celulaInfo = celulasMap.get(u.id);
 
       return {
         id: u.id,
@@ -301,6 +323,10 @@ export async function GET(req: NextRequest) {
         isActive: u.ativo !== false,
         leaders: unitLeaders,
         memberCount,
+        meetingDay: celulaInfo?.dia_semana,
+        meetingTime: celulaInfo?.horario,
+        neighborhood: celulaInfo?.bairro,
+        address: celulaInfo?.endereco,
         createdAt: u.criado_em,
       };
     });
@@ -408,14 +434,14 @@ export async function POST(req: NextRequest) {
         endereco: input.address?.trim() || '',
         dia_semana: input.meetingDay?.trim() || 'Quarta-feira',
         horario: input.meetingTime?.trim() || '19:30',
-        latitude: input.latitude || null,
-        longitude: input.longitude || null,
         quantidade_membros: 0,
       };
 
-      const { error: celulaErr } = await supabase.from('celulas').insert([celulaPayload]);
+      const { error: celulaErr } = await supabase
+        .from('celulas')
+        .upsert([celulaPayload], { onConflict: 'unidade_id' });
       if (celulaErr) {
-        console.warn('Aviso ao inserir em celulas:', celulaErr.message);
+        console.error('Erro ao salvar em celulas:', celulaErr);
       }
 
       // Buscar nome do setor/pai para popular tabela legada cells

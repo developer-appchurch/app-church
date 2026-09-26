@@ -47,7 +47,8 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
 }) => {
   const [levels, setLevels] = useState<ChurchHierarchicalLevel[]>([]);
   const [units, setUnits] = useState<OrganizationalUnit[]>([]);
-  const [members, setMembers] = useState<CellMember[]>([]);
+  const [totalMembers, setTotalMembers] = useState<number>(0);
+  const [linkedCount, setLinkedCount] = useState<number>(0);
   const [unlinkedCount, setUnlinkedCount] = useState<number>(0);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -68,7 +69,8 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
         if (!isMounted) return;
         setLevels(fetchedLevels);
         setUnits(fetchedUnits);
-        setMembers(fetchedPool.members);
+        setTotalMembers(fetchedPool.counts.total);
+        setLinkedCount(fetchedPool.counts.linked);
         setUnlinkedCount(fetchedPool.counts.unlinked);
 
         // Iniciar a árvore recolhida (Passo 7): por padrão recolhe todas as unidades que têm filhos
@@ -448,9 +450,9 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
             </p>
             <Users size={15} className="text-slate-400" />
           </div>
-          <p className="text-2xl font-black text-slate-900 mt-1">{members.length}</p>
+          <p className="text-2xl font-black text-slate-900 mt-1">{totalMembers}</p>
           <p className="text-[11px] text-slate-500 mt-0.5">
-            <strong className="text-emerald-700">{members.length - unlinkedCount}</strong> em células •{' '}
+            <strong className="text-emerald-700">{linkedCount}</strong> em células •{' '}
             <strong className="text-amber-700">{unlinkedCount}</strong> no pool
           </p>
         </div>
@@ -463,7 +465,7 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
             <UserCheck size={15} className="text-slate-400" />
           </div>
           <p className="text-2xl font-black text-slate-900 mt-1">{totalUniqueLeaders}</p>
-          <p className="text-[11px] text-slate-400 mt-0.5">Em todas as unidades</p>
+          <p className="text-[11px] text-slate-400 mt-0.5">Liderando na estrutura</p>
         </div>
       </div>
 

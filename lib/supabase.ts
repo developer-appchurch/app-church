@@ -1144,13 +1144,13 @@ export const AppChurchService = {
       try {
         const res = await fetch(`/api/members/pool?churchId=${churchId}&filter=${filter}`);
         const data = await res.json();
-        if (res.ok && data?.members && data.members.length > 0) {
+        if (res.ok && data?.success) {
           return {
-            members: data.members,
+            members: data.members || [],
             counts: data.counts || {
-              total: data.members.length,
-              unlinked: data.members.filter((m: any) => m.isUnlinked).length,
-              linked: data.members.filter((m: any) => !m.isUnlinked).length,
+              total: (data.members || []).length,
+              unlinked: (data.members || []).filter((m: any) => m.isUnlinked).length,
+              linked: (data.members || []).filter((m: any) => !m.isUnlinked).length,
             },
           };
         }

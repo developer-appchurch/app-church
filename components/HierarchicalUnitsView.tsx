@@ -496,46 +496,37 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     <div id="screen-hierarchy-units" className="bg-[#e9eff6] min-h-screen pb-16 font-sans w-full overflow-x-hidden">
       <div className="max-w-6xl mx-auto px-3 sm:px-6 pt-3 sm:pt-4 pb-4 space-y-4">
         {/* Header com Contexto da Igreja */}
-        <div className="bg-[#04213d] text-white rounded-xl sm:rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 sm:gap-4">
+        <div className="bg-[#04213d] text-white rounded-xl sm:rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
             <Layers size={24} />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-sky-300">
-                Gestão Estrutural
-              </span>
-              <span className="text-slate-400">•</span>
-              <span className="text-xs text-slate-300 font-medium">
-                {user.churchName}
-              </span>
-            </div>
             <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Cadastro de Níveis Organizacionais
+              Níveis Organizacionais
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
-              Defina as unidades da igreja seguindo a hierarquia configurada
+              Cadastre as unidades da igreja conforme hierarquia configurada
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0 flex-nowrap">
           {onNavigateOverview && (
             <button
               type="button"
               onClick={onNavigateOverview}
-              className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer border border-white/10"
+              className="px-3.5 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer border border-white/10 shrink-0 whitespace-nowrap"
             >
               <Compass size={14} />
-              <span>Ver Organograma</span>
+              <span>Organograma</span>
             </button>
           )}
           {onNavigatePool && (
             <button
               type="button"
               onClick={onNavigatePool}
-              className="px-3.5 py-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer border border-sky-400/30"
+              className="px-3.5 py-2 bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer border border-sky-400/30 shrink-0 whitespace-nowrap"
             >
               <Users size={14} />
               <span>Nossos Membros</span>
@@ -550,8 +541,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
           {levels.map((lvl, index) => {
             const isActive = lvl.id === activeLevelId;
             const count = units.filter((u) => u.levelTypeId === lvl.id).length;
-            const isFirst = index === 0;
-            const isLast = index === levels.length - 1;
             const isUnlocked = isLevelUnlocked(index);
 
             return (
@@ -569,8 +558,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   !isUnlocked
                     ? 'opacity-40 cursor-not-allowed bg-slate-100 text-slate-400 border border-slate-200'
                     : isActive
-                    ? 'bg-[#052447] text-white shadow-sm cursor-pointer'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 cursor-pointer'
+                    ? 'bg-[#052447] text-white shadow-xs border border-[#052447] cursor-pointer'
+                    : 'bg-white text-slate-600 hover:text-slate-900 hover:bg-slate-50 border border-slate-200/90 hover:border-slate-300 shadow-2xs cursor-pointer'
                 }`}
               >
                 {!isUnlocked ? (
@@ -594,23 +583,10 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                     className={`px-1.5 py-0.5 rounded-md text-[10px] ${
                       isActive
                         ? 'bg-white/20 text-white'
-                        : 'bg-slate-100 text-slate-600 font-normal'
+                        : 'bg-slate-100 text-slate-600 font-normal border border-slate-200/60'
                     }`}
                   >
-                    {count} {count === 1 ? 'unidade' : 'unidades'}
-                  </span>
-                )}
-                {isLast && (
-                  <span
-                    className={`text-[9px] px-1.5 py-0.5 rounded uppercase font-bold tracking-wider ${
-                      !isUnlocked
-                        ? 'bg-slate-200 text-slate-500'
-                        : isActive
-                        ? 'bg-emerald-400/30 text-emerald-200'
-                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                    }`}
-                  >
-                    Célula
+                    {count} Unid.
                   </span>
                 )}
                 {index < levels.length - 1 && (
@@ -717,10 +693,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                       </option>
                     ))}
                   </select>
-                  <p className="text-[11px] text-slate-400 mt-1">
-                    Este(a) {activeLevel.name} ficará subordinado(a) ao(à){' '}
-                    {parentLevel?.name} selecionado(a).
-                  </p>
                 </div>
               )}
 
@@ -758,9 +730,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                     <label className="text-xs font-bold text-slate-800">
                       Líderes do(a) {activeLevel.name}
                     </label>
-                    <span className="text-[10px] text-sky-800 font-bold bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
-                      Membros de {effectiveChurchName}
-                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-slate-500 font-medium">
