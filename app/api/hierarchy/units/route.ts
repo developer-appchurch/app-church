@@ -361,17 +361,50 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Obter níveis da igreja ordenados para validar hierarquia
-    const { data: levels, error: levelsErr } = await supabase
+    let { data: levels, error: levelsErr } = await supabase
       .from('nivel_tipo')
       .select('id, nome, ordem')
       .eq('igreja_id', input.churchId)
       .order('ordem', { ascending: true });
 
-    if (levelsErr || !levels || levels.length === 0) {
-      return NextResponse.json({ error: 'Níveis organizacionais não encontrados para esta igreja.' }, { status: 400 });
+    if (!levels || levels.length === 0) {
+      // Auto-provisionar níveis para esta igreja se não existirem
+      const defaultLevels = [
+        { id: generateUUID(), igreja_id: input.churchId, nome: 'Distrito', ordem: 10 },
+        { id: generateUUID(), igreja_id: input.churchId, nome: 'Área', ordem: 20 },
+        { id: generateUUID(), igreja_id: input.churchId, nome: 'Setor', ordem: 30 },
+        { id: generateUUID(), igreja_id: input.churchId, nome: 'Célula', ordem: 40 },
+      ];
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from('nivel_tipo')
+        .insert(defaultLevels)
+        .select('id, nome, ordem')
+        .order('ordem', { ascending: true });
+
+      if (!insertErr && inserted && inserted.length > 0) {
+        levels = inserted;
+      } else {
+        levels = defaultLevels;
+      }
     }
 
-    const currentLevelIndex = levels.findIndex((l: any) => l.id === input.levelTypeId);
+    // Resolver levelTypeId por ID exato, por nome ou por fallback de ordem
+    let currentLevelIndex = levels.findIndex((l: any) => l.id === input.levelTypeId);
+    if (currentLevelIndex === -1) {
+      const normalizedInput = (input.levelTypeId || '').toLowerCase().trim();
+      currentLevelIndex = levels.findIndex((l: any) => {
+        const lvlNameNorm = l.nome.toLowerCase().trim();
+        return (
+          lvlNameNorm === normalizedInput ||
+          (normalizedInput.startsWith('default-lvl-') && l.ordem === (parseInt(normalizedInput.split('-')[2], 10) + 1) * 10)
+        );
+      });
+      if (currentLevelIndex !== -1) {
+        input.levelTypeId = levels[currentLevelIndex].id;
+      }
+    }
+
     if (currentLevelIndex === -1) {
       return NextResponse.json({ error: 'Nível organizacional inválido para esta igreja.' }, { status: 400 });
     }

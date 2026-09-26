@@ -983,11 +983,30 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        const { data } = await supabase
+        let { data } = await supabase
           .from('nivel_tipo')
           .select('id, igreja_id, nome, ordem')
           .eq('igreja_id', churchId)
           .order('ordem', { ascending: true });
+
+        if (!data || data.length === 0) {
+          const defaultLevels = [
+            { id: generateUUID(), igreja_id: churchId, nome: 'Distrito', ordem: 10 },
+            { id: generateUUID(), igreja_id: churchId, nome: 'Área', ordem: 20 },
+            { id: generateUUID(), igreja_id: churchId, nome: 'Setor', ordem: 30 },
+            { id: generateUUID(), igreja_id: churchId, nome: 'Célula', ordem: 40 },
+          ];
+          const insertRes = await supabase
+            .from('nivel_tipo')
+            .insert(defaultLevels)
+            .select('id, igreja_id, nome, ordem')
+            .order('ordem', { ascending: true });
+          if (!insertRes.error && insertRes.data && insertRes.data.length > 0) {
+            data = insertRes.data;
+          } else {
+            data = defaultLevels;
+          }
+        }
 
         if (data && data.length > 0) {
           return data.map((l: any, idx: number) => ({
