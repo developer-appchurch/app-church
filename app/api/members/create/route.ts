@@ -114,13 +114,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Insere na tabela membros com o auth_user_id devidamente vinculado
+    // 2. Resolve papel_id exato a partir da função ou ID informado
+    const roleNorm = (role || 'Membro').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let resolvedRoleId = roleId && String(roleId).includes('-') ? roleId : null;
+
+    if (!resolvedRoleId) {
+      if (roleNorm.includes('admin')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000001';
+      else if (roleNorm.includes('pastor')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000002';
+      else if (roleNorm.includes('supervisor')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000008';
+      else if (roleNorm.includes('distrito')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000006';
+      else if (roleNorm.includes('rede')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000005';
+      else if (roleNorm.includes('area')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000004';
+      else if (roleNorm.includes('setor')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000009';
+      else if (roleNorm.includes('celula') || roleNorm.includes('lider')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000010';
+      else if (roleNorm.includes('treinamento')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000011';
+      else if (roleNorm.includes('anfitriao')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000012';
+      else if (roleNorm.includes('secretario')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000013';
+      else if (roleNorm.includes('intercessor')) resolvedRoleId = 'b2000000-0000-0000-0000-000000000014';
+      else resolvedRoleId = 'b2000000-0000-0000-0000-000000000003';
+    }
+
+    // 3. Insere na tabela membros com o auth_user_id devidamente vinculado
     const ptPayload: any = {
       id: memberId,
       igreja_id: validChurchId,
       unidade_id: validCellId,
-      papel_id: roleId && String(roleId).includes('-') ? roleId : 'b2000000-0000-0000-0000-000000000003',
-      funcao: role,
+      papel_id: resolvedRoleId,
+      funcao: role || 'Membro',
       nome: name.trim(),
       login: cleanLogin,
       senha_hash: cleanPass,

@@ -498,27 +498,33 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     members,
   ]);
 
-  // Permissão estrita de edição em Linha Direta:
-  // - Pastores / Administradores (Acesso total a todas as células)
-  // - Líderes diretos da célula ativa
-  // - Líderes superiores em linha direta (Líder do Setor pai desta célula, Líder da Área pai desta célula)
-  // - Bloqueia líderes laterais e de outras áreas/setores
+  // Permissão estrita de visualização/edição de dados da Célula:
+  // - Rejeita expressamente qualquer pessoa na função de nível 1 (Membro/Apoio nível 1)
+  // - Pastores e Administradores possuem acesso e cobertura integral
+  // - Líder direto da célula (cadastrado na lista de líderes do grupo)
+  // - Líder de qualquer unidade sob cuja cobertura esta célula se encontra (ex: Líder do Setor pai, Líder de Área pai, Rede, etc.)
   const canEditCurrentCell = useMemo(() => {
     if (!currentUser) return false;
+
+    // Qualquer pessoa na função de nível 1 (Membro ou Apoio) não tem acesso
+    if (userHierarchyLevel <= 1) return false;
+
+    // Pastores e administradores possuem cobertura total
     if (isPastorOrAdmin) return true;
 
-    // 1. Líder direto da célula
+    // 1. Líder vinculado diretamente ao grupo / célula
     const isDirectLeader =
       (cell.leaderMemberIds && cell.leaderMemberIds.includes(currentUser.id)) ||
-      (currentUser.currentCellId === cell.id && (isCellLeader || userHierarchyLevel >= 2)) ||
+      (currentUser.currentCellId === cell.id && isCellLeader) ||
       (currentUser.name && cell.leaderNames?.some((n) => n.toLowerCase() === currentUser.name.toLowerCase()));
 
     if (isDirectLeader) return true;
 
-    // 2. Linha direta ascendente na árvore organizacional
+    // 2. Unidade sob a cobertura de liderança do usuário (Líder de Setor onde a célula é filha, Líder de Área, etc.)
     if (units && units.length > 0) {
       const currentUnit = units.find((u) => u.id === cell.id);
       if (currentUnit) {
+        // Se o usuário estiver explicitamente listado nos líderes da unidade no banco
         if (
           currentUnit.leaders?.some(
             (l) => l.id === currentUser.id || l.name?.toLowerCase() === currentUser.name?.toLowerCase()
@@ -527,12 +533,13 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
           return true;
         }
 
+        // Percorrer a linha ascendente (Setor pai, Área pai, Rede, etc.)
         let currentParentId: string | null | undefined = currentUnit.parentId;
         while (currentParentId) {
           const parentUnit = units.find((u) => u.id === currentParentId);
           if (!parentUnit) break;
 
-          // Se é líder direto da unidade pai/ancestral desta célula
+          // Se o usuário for líder de uma unidade ancestral (Setor/Área que cobre esta célula)
           const isLeaderOfAncestor = parentUnit.leaders?.some(
             (l) => l.id === currentUser.id || l.name?.toLowerCase() === currentUser.name?.toLowerCase()
           );
@@ -540,14 +547,17 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             return true;
           }
 
-          // Se é líder de setor e o setor do usuário corresponde ao nome do pai direto
-          if (isSectorLeader && currentUser.sector && parentUnit.name.toLowerCase() === currentUser.sector.toLowerCase()) {
-            return true;
-          }
-
-          // Se é líder de área e a área do usuário corresponde ao nome do pai direto
-          if (isAreaLeader && currentUser.sector && parentUnit.name.toLowerCase() === currentUser.sector.toLowerCase()) {
-            return true;
+          // Se o setor do usuário coincide com o nome desta unidade ancestral sob sua cobertura
+          if (currentUser.sector) {
+            const userSectorNorm = currentUser.sector.trim().toLowerCase();
+            const parentNameNorm = parentUnit.name.trim().toLowerCase();
+            if (
+              userSectorNorm === parentNameNorm ||
+              parentNameNorm.includes(userSectorNorm) ||
+              userSectorNorm.includes(parentNameNorm)
+            ) {
+              return true;
+            }
           }
 
           currentParentId = parentUnit.parentId;
@@ -555,8 +565,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       }
     }
 
-    // 3. Fallback de Líder de Setor comparando setor do usuário com setor da célula ativa
-    if (isSectorLeader && currentUser.sector && cell.sectorName) {
+    // 3. Fallback de cobertura por setor / área associada à célula
+    if (currentUser.sector && cell.sectorName) {
       const userSec = currentUser.sector.trim().toLowerCase();
       const cellSec = cell.sectorName.trim().toLowerCase();
       if (userSec === cellSec || userSec.includes(cellSec) || cellSec.includes(userSec)) {
@@ -564,16 +574,22 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       }
     }
 
+    if (currentUser.sector && cell.areaName) {
+      const userSec = currentUser.sector.trim().toLowerCase();
+      const cellArea = cell.areaName.trim().toLowerCase();
+      if (userSec === cellArea || userSec.includes(cellArea) || cellArea.includes(userSec)) {
+        return true;
+      }
+    }
+
     return false;
   }, [
     currentUser,
+    userHierarchyLevel,
     isPastorOrAdmin,
     isCellLeader,
-    isSectorLeader,
-    isAreaLeader,
     cell,
     units,
-    userHierarchyLevel,
   ]);
 
   const handleOpenEditCellModal = () => {
@@ -1207,18 +1223,18 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 </div>
               )}
 
-              {/* Botão Editar Informações da Célula (Visível para líderes em linha direta e pastores) */}
+              {/* Botão Editar Informações da Célula (Visível apenas para líderes do grupo ou sob cobertura hierárquica) */}
               {canEditCurrentCell && (
                 <button
                   type="button"
                   id="btn-edit-cell-info"
                   onClick={handleOpenEditCellModal}
-                  className="px-3 py-2 text-xs font-bold text-sky-950 bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 active:scale-95"
+                  className="p-2 sm:px-3 sm:py-2 text-xs font-bold text-sky-950 bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 active:scale-95"
                   title="Editar informações da célula (Nome, Dia, Horário, Endereço, Foto)"
+                  aria-label="Editar informações da célula"
                 >
-                  <Edit3 size={14} className="text-sky-700" />
+                  <Edit3 size={15} className="text-sky-700 shrink-0" />
                   <span className="hidden sm:inline">Editar Célula</span>
-                  <span className="sm:hidden">Editar</span>
                 </button>
               )}
 

@@ -32,6 +32,7 @@ import {
   UserProfile,
   CellMember,
   UserRole,
+  Role,
 } from '../types';
 import { AppChurchService } from '../lib/supabase';
 
@@ -141,6 +142,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     }
   };
 
+  const [roles, setRoles] = useState<Role[]>([]);
+
   // Regra de Desbloqueio: Nível 0 é livre; Nível N só é liberado se o Nível N-1 já tiver pelo menos 1 unidade criada
   const isLevelUnlocked = (index: number) => {
     if (index === 0) return true;
@@ -154,16 +157,20 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
     async function fetchData() {
       try {
-        const [currentLvs, currentUnits, fetchedMembers] = await Promise.all([
+        const [currentLvs, currentUnits, fetchedMembers, fetchedRoles] = await Promise.all([
           cachedLevels.length > 0 ? Promise.resolve(cachedLevels) : AppChurchService.getChurchLevels(effectiveChurchId),
           cachedUnits.length > 0 ? Promise.resolve(cachedUnits) : AppChurchService.getUnits(effectiveChurchId, undefined, 'flat'),
           AppChurchService.getMembers(effectiveChurchId),
+          AppChurchService.getRoles(),
         ]);
 
         if (!isMounted) return;
         setLevels(currentLvs);
         setUnits(currentUnits);
         setChurchMembers(fetchedMembers);
+        if (fetchedRoles && fetchedRoles.length > 0) {
+          setRoles(fetchedRoles);
+        }
 
         if (currentLvs.length > 0) {
           let targetIndex = Math.min(initialLevelIndex, currentLvs.length - 1);
@@ -253,6 +260,50 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         (m.cellName && m.cellName.toLowerCase().includes(term))
     );
   }, [filteredChurchMembers, bindLeaderSearchTerm]);
+
+  // Nível de hierarquia do usuário logado
+  const userHierarchyLevel = useMemo(() => {
+    if (!user) return 1;
+    if (user.isSystemAdmin || user.role === 'Administrador' || user.login === 'admin') {
+      return 999;
+    }
+    if (roles.length > 0) {
+      const matched = roles.find(
+        (r) =>
+          (user.roleId && r.id === user.roleId) ||
+          r.name?.toLowerCase() === user.role?.toLowerCase() ||
+          r.slug?.toLowerCase() === user.role?.toLowerCase() ||
+          (user.role &&
+            (r.name?.toLowerCase().includes(user.role.toLowerCase()) ||
+              user.role.toLowerCase().includes(r.name?.toLowerCase())))
+      );
+      if (matched) return matched.hierarchyLevel;
+    }
+    const roleLower = (user.role || '').toLowerCase();
+    if (roleLower.includes('pastor')) return 7;
+    if (roleLower.includes('distrito')) return 6;
+    if (roleLower.includes('rede')) return 5;
+    if (roleLower.includes('área') || roleLower.includes('area')) return 4;
+    if (roleLower.includes('setor')) return 3;
+    if (roleLower.includes('célula') || roleLower.includes('celula') || roleLower.includes('lider')) return 2;
+    return 1;
+  }, [user, roles]);
+
+  // Funções que o usuário pode atribuir (até o seu próprio nível)
+  const assignableRoles = useMemo(() => {
+    if (roles.length === 0) return [];
+    if (userHierarchyLevel >= 999) return roles;
+    return roles
+      .filter((r) => r.hierarchyLevel <= userHierarchyLevel)
+      .sort((a, b) => a.hierarchyLevel - b.hierarchyLevel || a.name.localeCompare(b.name));
+  }, [roles, userHierarchyLevel]);
+
+  // Sincroniza papel inicial do novo líder com os papéis permitidos
+  useEffect(() => {
+    if (assignableRoles.length > 0 && !assignableRoles.some((r) => r.name === newLeaderRole)) {
+      setNewLeaderRole(assignableRoles[0].name as UserRole);
+    }
+  }, [assignableRoles, newLeaderRole]);
 
   // Pai selecionado efetivo (calculado dinamicamente para evitar cascading renders)
   const effectiveParentId = useMemo(() => {
@@ -1237,12 +1288,15 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                     onChange={(e) => setNewLeaderRole(e.target.value as UserRole)}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer"
                   >
-                    <option value="Líder de Célula">Líder de Célula</option>
-                    <option value="Líder de Setor">Líder de Setor</option>
-                    <option value="Supervisor">Supervisor</option>
-                    <option value="Pastor">Pastor</option>
-                    <option value="Líder em Treinamento">Líder em Treinamento</option>
-                    <option value="Membro">Membro</option>
+                    {assignableRoles.length > 0 ? (
+                      assignableRoles.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="Membro">Membro</option>
+                    )}
                   </select>
                 </div>
 

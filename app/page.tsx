@@ -705,10 +705,8 @@ export default function Home() {
             <NossasCelulasView
               currentUser={user}
               churchName={user.churchName}
-              onSelectCell={(cellId) => {
-                setSelectedCellId(cellId);
-                setActiveScreen('my_cell');
-              }}
+              cells={effectiveCells}
+              onUpdateCell={handleUpdateCell}
             />
           )}
 

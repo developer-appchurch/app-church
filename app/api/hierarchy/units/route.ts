@@ -15,6 +15,49 @@ function generateUUID(): string {
 }
 
 /**
+ * Determina o papel atual de um membro e resolve papel_id caso esteja nulo no banco
+ */
+function resolveMemberCurrentRole(m: any, roles: any[]) {
+  if (m.papel_id && roles && roles.length > 0) {
+    const matchedById = roles.find((r: any) => r.id === m.papel_id);
+    if (matchedById) {
+      return {
+        roleId: matchedById.id,
+        roleName: matchedById.nome,
+        hierarchyLevel: matchedById.nivel_hierarquia || 1,
+      };
+    }
+  }
+
+  if (m.funcao && roles && roles.length > 0) {
+    const fNorm = m.funcao.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const matchedByName = roles.find((r: any) => {
+      const rNorm = (r.nome || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const rSlug = (r.slug || '').toLowerCase();
+      return rNorm === fNorm || rSlug === fNorm || rNorm.includes(fNorm) || fNorm.includes(rNorm);
+    });
+    if (matchedByName) {
+      return {
+        roleId: matchedByName.id,
+        roleName: matchedByName.nome,
+        hierarchyLevel: matchedByName.nivel_hierarquia || 1,
+      };
+    }
+  }
+
+  // Fallback padrão: Membro (Nível 1)
+  const defaultMembro = (roles || []).find(
+    (r: any) => r.slug === 'membro' || (r.nome && r.nome.toLowerCase().includes('membro')) || r.nivel_hierarquia === 1
+  );
+
+  return {
+    roleId: defaultMembro?.id || 'b2000000-0000-0000-0000-000000000003',
+    roleName: defaultMembro?.nome || (m.funcao || 'Membro'),
+    hierarchyLevel: defaultMembro?.nivel_hierarquia || 1,
+  };
+}
+
+/**
  * Determina o papel e nível hierárquico assumido com base no tipo de nível da unidade organizacional
  */
 function resolveLeadershipRole(currentLevel: any, isLeafLevel: boolean, roles: any[]) {
@@ -570,33 +613,24 @@ export async function POST(req: NextRequest) {
         .select('id, nome, papel_id, funcao, unidade_id')
         .in('id', input.leaderMemberIds);
 
-      const rolesMap = new Map<string, number>();
-      (roles || []).forEach((r: any) => {
-        if (r.id) rolesMap.set(r.id, r.nivel_hierarquia);
-        if (r.nome) rolesMap.set(r.nome.toLowerCase(), r.nivel_hierarquia);
-        if (r.slug) rolesMap.set(r.slug.toLowerCase(), r.nivel_hierarquia);
-      });
-
       if (currentMembers && currentMembers.length > 0) {
         for (const m of currentMembers) {
-          let currentNivel = 1;
-          if (m.papel_id && rolesMap.has(m.papel_id)) {
-            currentNivel = rolesMap.get(m.papel_id)!;
-          } else if (m.funcao && rolesMap.has(m.funcao.toLowerCase())) {
-            currentNivel = rolesMap.get(m.funcao.toLowerCase())!;
-          }
-
-          const shouldUpgradeRole = currentNivel < assumedHierarchyLevel && Boolean(assumedRoleId);
+          const currentRoleInfo = resolveMemberCurrentRole(m, roles || []);
+          const shouldUpgradeRole = currentRoleInfo.hierarchyLevel < assumedHierarchyLevel && Boolean(assumedRoleId);
           const shouldUpdateCellId = Boolean(isLeafLevel);
 
-          if (shouldUpgradeRole || shouldUpdateCellId) {
+          const finalRoleId = shouldUpgradeRole ? assumedRoleId : currentRoleInfo.roleId;
+          const finalRoleName = shouldUpgradeRole ? assumedRoleName : currentRoleInfo.roleName;
+
+          // Atualiza se for promover, se for vincular célula folha, ou se o papel_id/funcao estava ausente/desatualizado
+          const needsRoleSync = !m.papel_id || !m.funcao || m.papel_id !== finalRoleId || m.funcao !== finalRoleName;
+
+          if (shouldUpgradeRole || shouldUpdateCellId || needsRoleSync) {
             const updatePayload: any = {
+              papel_id: finalRoleId,
+              funcao: finalRoleName,
               atualizado_em: new Date().toISOString(),
             };
-            if (shouldUpgradeRole) {
-              updatePayload.papel_id = assumedRoleId;
-              updatePayload.funcao = assumedRoleName;
-            }
             if (shouldUpdateCellId) {
               updatePayload.unidade_id = unitId;
             }
@@ -604,11 +638,10 @@ export async function POST(req: NextRequest) {
             await supabase.from('membros').update(updatePayload).eq('id', m.id);
 
             try {
-              const legPayload: any = {};
-              if (shouldUpgradeRole) {
-                legPayload.papel_id = assumedRoleId;
-                legPayload.funcao = assumedRoleName;
-              }
+              const legPayload: any = {
+                papel_id: finalRoleId,
+                funcao: finalRoleName,
+              };
               if (shouldUpdateCellId) {
                 legPayload.celula_id = unitId;
               }
@@ -775,27 +808,22 @@ export async function PATCH(req: NextRequest) {
 
       if (currentMembers && currentMembers.length > 0) {
         for (const m of currentMembers) {
-          let currentNivel = 1; // Padrão 'Membro'
-          if (m.papel_id && rolesMap.has(m.papel_id)) {
-            currentNivel = rolesMap.get(m.papel_id)!;
-          } else if (m.funcao && rolesMap.has(m.funcao.toLowerCase())) {
-            currentNivel = rolesMap.get(m.funcao.toLowerCase())!;
-          }
-
-          // Se o papel_id/nivel_hierarquico atual for menor do que o nível de liderança que está assumindo,
-          // atualiza o novo papel_id e funcao na tabela membro
-          const shouldUpgradeRole = currentNivel < assumedHierarchyLevel && Boolean(assumedRoleId);
+          const currentRoleInfo = resolveMemberCurrentRole(m, roles || []);
+          const shouldUpgradeRole = currentRoleInfo.hierarchyLevel < assumedHierarchyLevel && Boolean(assumedRoleId);
           const shouldUpdateCellId = Boolean(isLeafLevel);
 
-          if (shouldUpgradeRole || shouldUpdateCellId) {
+          const finalRoleId = shouldUpgradeRole ? assumedRoleId : currentRoleInfo.roleId;
+          const finalRoleName = shouldUpgradeRole ? assumedRoleName : currentRoleInfo.roleName;
+
+          // Se for promover, se for vincular célula folha, ou se o papel_id/funcao estava ausente/desatualizado no banco
+          const needsRoleSync = !m.papel_id || !m.funcao || m.papel_id !== finalRoleId || m.funcao !== finalRoleName;
+
+          if (shouldUpgradeRole || shouldUpdateCellId || needsRoleSync) {
             const updatePayload: any = {
+              papel_id: finalRoleId,
+              funcao: finalRoleName,
               atualizado_em: new Date().toISOString(),
             };
-
-            if (shouldUpgradeRole) {
-              updatePayload.papel_id = assumedRoleId;
-              updatePayload.funcao = assumedRoleName;
-            }
 
             if (shouldUpdateCellId) {
               updatePayload.unidade_id = unitId;
@@ -808,22 +836,21 @@ export async function PATCH(req: NextRequest) {
 
             if (updErr) {
               console.error(`Erro ao atualizar membro ${m.id} na promoção de liderança:`, updErr);
-            } else {
-              updatedMembersList.push({
-                id: m.id,
-                nome: m.nome,
-                papel_id: shouldUpgradeRole ? assumedRoleId : m.papel_id,
-                funcao: shouldUpgradeRole ? assumedRoleName : m.funcao,
-              });
             }
+
+            updatedMembersList.push({
+              id: m.id,
+              nome: m.nome,
+              papel_id: finalRoleId,
+              funcao: finalRoleName,
+            });
 
             // Sincroniza também na view/tabela legada members se existir
             try {
-              const legPayload: any = {};
-              if (shouldUpgradeRole) {
-                legPayload.papel_id = assumedRoleId;
-                legPayload.funcao = assumedRoleName;
-              }
+              const legPayload: any = {
+                papel_id: finalRoleId,
+                funcao: finalRoleName,
+              };
               if (shouldUpdateCellId) {
                 legPayload.celula_id = unitId;
               }
@@ -831,6 +858,13 @@ export async function PATCH(req: NextRequest) {
             } catch {
               // Ignora caso não suporte
             }
+          } else {
+            updatedMembersList.push({
+              id: m.id,
+              nome: m.nome,
+              papel_id: finalRoleId,
+              funcao: finalRoleName,
+            });
           }
         }
       }

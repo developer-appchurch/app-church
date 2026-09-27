@@ -105,7 +105,32 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? getBrowserSupabaseClient()
   : null;
 
-// Local Storage Multi-Tenant Store keys for caching & offline tolerance
+export function resolveRoleIdByName(roleName?: string, explicitId?: string): string {
+  if (explicitId && typeof explicitId === 'string' && explicitId.trim().length > 0) {
+    return explicitId.trim();
+  }
+  const norm = (roleName || 'Membro')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+
+  if (norm.includes('admin')) return 'b2000000-0000-0000-0000-000000000001';
+  if (norm.includes('pastor')) return 'b2000000-0000-0000-0000-000000000002';
+  if (norm.includes('supervisor')) return 'b2000000-0000-0000-0000-000000000008';
+  if (norm.includes('distrito')) return 'b2000000-0000-0000-0000-000000000006';
+  if (norm.includes('rede')) return 'b2000000-0000-0000-0000-000000000005';
+  if (norm.includes('area')) return 'b2000000-0000-0000-0000-000000000004';
+  if (norm.includes('setor')) return 'b2000000-0000-0000-0000-000000000009';
+  if (norm.includes('celula') || norm.includes('lider')) return 'b2000000-0000-0000-0000-000000000010';
+  if (norm.includes('treinamento')) return 'b2000000-0000-0000-0000-000000000011';
+  if (norm.includes('anfitriao')) return 'b2000000-0000-0000-0000-000000000012';
+  if (norm.includes('secretario')) return 'b2000000-0000-0000-0000-000000000013';
+  if (norm.includes('intercessor')) return 'b2000000-0000-0000-0000-000000000014';
+  return 'b2000000-0000-0000-0000-000000000003';
+}
+
+// Multi-Tenant Session Cache & Local Storage Multi-Tenant Store keys for caching & offline tolerance
 const STORAGE_KEYS = {
   CHURCHES: 'appchurch_churches_uuid_v4',
   USERS: 'appchurch_users_uuid_v4',
@@ -451,7 +476,7 @@ export const AppChurchService = {
             name: m.nome,
             login: m.login || cleanLogin,
             role: (m.funcao as UserRole) || 'Membro',
-            roleId: m.papel_id || m.funcao_id,
+            roleId: resolveRoleIdByName(m.funcao, m.papel_id || m.funcao_id),
             sector,
             currentCellId: resolvedUnitId || '',
             email: m.email || `${m.login || cleanLogin}@appchurch.local`,
@@ -1214,7 +1239,7 @@ export const AppChurchService = {
               name: m.nome,
               login: m.login || '',
               role: (m.funcao as UserRole) || 'Membro',
-              roleId: m.papel_id || m.funcao_id,
+              roleId: resolveRoleIdByName(m.funcao, m.papel_id || m.funcao_id),
               neighborhood: m.bairro || 'Centro',
               birthday: m.aniversario || '01/01',
               phone: m.telefone || '',
@@ -1695,7 +1720,7 @@ export const AppChurchService = {
             id: m.id,
             churchId: m.igreja_id || churchId,
             cellId: m.unidade_id || m.celula_id || m.cell_id || '',
-            roleId: m.papel_id || m.funcao_id,
+            roleId: resolveRoleIdByName(m.funcao, m.papel_id || m.funcao_id),
             role: (m.funcao as UserRole) || 'Membro',
             name: m.nome,
             login: m.login || '',
@@ -3504,16 +3529,100 @@ export const AppChurchService = {
   },
 
   /**
-   * Update Member Role in Supabase + local cache
+   * Update Member Role in Supabase + local cache com Lógica de Prioridade Hierárquica Estrita.
+   * Compara o novo papel com o papel atual do membro e retém o de MAIOR nível hierárquico.
+   * Evita que uma atribuição ou edição em nível de célula rebaixe um líder de setor/área/pastor para nível comum.
    */
-  async updateMemberRole(memberId: string, roleId: string, roleName: UserRole): Promise<void> {
+  async updateMemberRole(
+    memberId: string,
+    requestedRoleId: string,
+    requestedRoleName: UserRole,
+    forceOverride: boolean = false
+  ): Promise<{ roleId: string; roleName: UserRole; retainedHigherRole: boolean }> {
+    const allRoles = await this.getRoles();
+
+    // 1. Identifica dados atuais do membro no cache ou no banco
+    const cachedMembers = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, []);
+    const cachedMember = cachedMembers.find((m) => m.id === memberId);
+
+    let currentHierarchyLevel = 1;
+    let currentRoleId = cachedMember?.roleId || '';
+    let currentRoleName: UserRole = (cachedMember?.role || 'Membro') as UserRole;
+
+    if (cachedMember) {
+      const matchCached = allRoles.find(
+        (r) =>
+          r.id === cachedMember.roleId ||
+          r.name?.toLowerCase() === cachedMember.role?.toLowerCase() ||
+          r.slug?.toLowerCase() === cachedMember.role?.toLowerCase()
+      );
+      if (matchCached) {
+        currentHierarchyLevel = matchCached.hierarchyLevel;
+        currentRoleId = matchCached.id;
+        currentRoleName = matchCached.name;
+      }
+    }
+
+    if (supabase) {
+      try {
+        const { data: dbMem } = await supabase
+          .from('membros')
+          .select('id, papel_id, funcao')
+          .eq('id', memberId)
+          .maybeSingle();
+
+        if (dbMem) {
+          const matched = allRoles.find(
+            (r) =>
+              r.id === dbMem.papel_id ||
+              r.name?.toLowerCase() === dbMem.funcao?.toLowerCase() ||
+              r.slug?.toLowerCase() === dbMem.funcao?.toLowerCase()
+          );
+          if (matched) {
+            currentHierarchyLevel = matched.hierarchyLevel;
+            currentRoleId = matched.id;
+            currentRoleName = matched.name;
+          } else if (dbMem.funcao) {
+            currentRoleId = dbMem.papel_id || resolveRoleIdByName(dbMem.funcao);
+            currentRoleName = dbMem.funcao as UserRole;
+          }
+        }
+      } catch (err) {
+        console.warn('Aviso ao consultar papel atual do membro no banco:', err);
+      }
+    }
+
+    // 2. Identifica o nível do papel requisitado
+    const targetRole = allRoles.find(
+      (r) =>
+        r.id === requestedRoleId ||
+        r.name?.toLowerCase() === requestedRoleName?.toLowerCase() ||
+        r.slug?.toLowerCase() === requestedRoleName?.toLowerCase()
+    );
+
+    const targetHierarchyLevel = targetRole ? targetRole.hierarchyLevel : 1;
+    const targetRoleId = targetRole?.id || resolveRoleIdByName(requestedRoleName, requestedRoleId);
+    const targetRoleName = targetRole?.name || requestedRoleName;
+
+    // 3. Regra de Prioridade Hierárquica: Retém sempre o de maior nível hierárquico
+    let finalRoleId = targetRoleId;
+    let finalRoleName = targetRoleName;
+    let retainedHigherRole = false;
+
+    if (!forceOverride && currentHierarchyLevel > targetHierarchyLevel) {
+      finalRoleId = currentRoleId || resolveRoleIdByName(currentRoleName);
+      finalRoleName = currentRoleName;
+      retainedHigherRole = true;
+    }
+
+    // 4. Salva no banco de dados
     if (supabase) {
       try {
         let { error } = await supabase
           .from('membros')
           .update({
-            papel_id: roleId,
-            funcao: roleName,
+            papel_id: finalRoleId,
+            funcao: finalRoleName,
             atualizado_em: new Date().toISOString(),
           })
           .eq('id', memberId);
@@ -3522,8 +3631,8 @@ export const AppChurchService = {
           await supabase
             .from('members')
             .update({
-              funcao_id: roleId,
-              funcao: roleName,
+              funcao_id: finalRoleId,
+              funcao: finalRoleName,
               atualizado_em: new Date().toISOString(),
             })
             .eq('id', memberId);
@@ -3533,11 +3642,98 @@ export const AppChurchService = {
       }
     }
 
+    // 5. Atualiza storage local
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     const updated = allMembers.map((m) =>
-      m.id === memberId ? { ...m, roleId, role: roleName } : m
+      m.id === memberId ? { ...m, roleId: finalRoleId, role: finalRoleName } : m
     );
     saveToStorage(STORAGE_KEYS.MEMBERS, updated);
+
+    return {
+      roleId: finalRoleId,
+      roleName: finalRoleName,
+      retainedHigherRole,
+    };
+  },
+
+  /**
+   * Atualização de dados de membro com PRIORIDADE HIERÁRQUICA estrita para papel_id e funcao.
+   */
+  async updateMember(
+    memberId: string,
+    updates: Partial<Omit<CellMember, 'id'>>,
+    options?: { forceRoleOverride?: boolean }
+  ): Promise<CellMember> {
+    let finalRoleId = updates.roleId;
+    let finalRoleName = updates.role;
+
+    if (updates.role || updates.roleId) {
+      const roleResult = await this.updateMemberRole(
+        memberId,
+        updates.roleId || resolveRoleIdByName(updates.role),
+        (updates.role || 'Membro') as UserRole,
+        options?.forceRoleOverride
+      );
+      finalRoleId = roleResult.roleId;
+      finalRoleName = roleResult.roleName;
+    }
+
+    if (supabase) {
+      try {
+        const ptPayload: any = {
+          atualizado_em: new Date().toISOString(),
+        };
+        if (updates.name !== undefined) ptPayload.nome = updates.name.trim();
+        if (updates.neighborhood !== undefined) ptPayload.bairro = updates.neighborhood.trim();
+        if (updates.birthday !== undefined) ptPayload.aniversario = updates.birthday.trim();
+        if (updates.phone !== undefined) ptPayload.telefone = updates.phone.trim();
+        if (updates.email !== undefined) ptPayload.email = updates.email.trim();
+        if (updates.attendanceStatus !== undefined) ptPayload.status_frequencia = updates.attendanceStatus;
+        if (updates.attendancePercentage !== undefined) ptPayload.percentual_frequencia = updates.attendancePercentage;
+        if (updates.avatarUrl !== undefined) ptPayload.url_avatar = updates.avatarUrl?.trim() || null;
+        if (updates.notes !== undefined) ptPayload.observacoes = updates.notes?.trim() || null;
+        if (updates.cellId !== undefined) ptPayload.unidade_id = updates.cellId?.trim() || null;
+        if (finalRoleId) ptPayload.papel_id = finalRoleId;
+        if (finalRoleName) ptPayload.funcao = finalRoleName;
+
+        await supabase.from('membros').update(ptPayload).eq('id', memberId);
+      } catch (err) {
+        console.warn('Erro ao atualizar campos do membro no Supabase:', err);
+      }
+    }
+
+    const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+    const existing: CellMember = allMembers.find((m) => m.id === memberId) || {
+      id: memberId,
+      name: updates.name || 'Membro',
+      role: (finalRoleName || 'Membro') as UserRole,
+      roleId: finalRoleId || resolveRoleIdByName(finalRoleName),
+      churchId: updates.churchId || '',
+      cellId: updates.cellId || '',
+      neighborhood: updates.neighborhood || 'Centro',
+      birthday: updates.birthday || '01/01',
+      attendanceStatus: (updates.attendanceStatus || 'green') as AttendanceStatus,
+      attendancePercentage: updates.attendancePercentage ?? 100,
+    };
+
+    const updatedItem: CellMember = {
+      ...existing,
+      ...updates,
+      id: memberId,
+      role: (finalRoleName || existing.role) as UserRole,
+      roleId: finalRoleId || existing.roleId,
+      neighborhood: updates.neighborhood !== undefined ? updates.neighborhood : existing.neighborhood,
+      birthday: updates.birthday !== undefined ? updates.birthday : existing.birthday,
+      attendanceStatus: updates.attendanceStatus !== undefined ? updates.attendanceStatus : existing.attendanceStatus,
+      attendancePercentage: updates.attendancePercentage !== undefined ? updates.attendancePercentage : existing.attendancePercentage,
+    };
+
+    saveToStorage(
+      STORAGE_KEYS.MEMBERS,
+      allMembers.map((m) => (m.id === memberId ? updatedItem : m))
+    );
+
+    return updatedItem;
   },
 
   /**

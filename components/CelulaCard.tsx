@@ -70,15 +70,6 @@ const CelulaCardComponent: React.FC<CelulaCardProps> = ({ celula, onSelect }) =>
             <span>{celula.memberCount}</span>
           </div>
         )}
-
-        {/* Tag do Setor na base da foto */}
-        {celula.sectorName && (
-          <div className="absolute bottom-1.5 left-1.5 sm:bottom-2.5 sm:left-2.5 max-w-[88%] truncate">
-            <span className="inline-block px-1.5 py-0.5 bg-sky-950/80 backdrop-blur-md text-sky-200 text-[8.5px] sm:text-[10px] font-semibold rounded sm:rounded-md uppercase tracking-wider truncate">
-              {celula.sectorName}
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Conteúdo Abaixo da Foto */}

@@ -150,18 +150,67 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
   const [newMemberCellId, setNewMemberCellId] = useState<string>('');
   const [isCreatingMember, setIsCreatingMember] = useState<boolean>(false);
 
-  // 1. React Query: Busca em lote das células e unidades para os seletores
+  // 1. React Query: Busca em lote das células, unidades e catálogo de papéis para os seletores
   const { data: helperData } = useQuery({
     queryKey: ['church-structure', user.churchId],
     queryFn: async () => {
-      const [cells, units] = await Promise.all([
+      const [cells, units, roles] = await Promise.all([
         AppChurchService.getCells(user.churchId),
         AppChurchService.getUnits(user.churchId),
+        AppChurchService.getRoles(),
       ]);
-      return { cells, units };
+      return { cells, units, roles };
     },
     staleTime: 1000 * 60 * 5,
   });
+
+  const availableRoles = useMemo(() => {
+    return helperData?.roles || [];
+  }, [helperData]);
+
+  // Nível de hierarquia do usuário logado
+  const userHierarchyLevel = useMemo(() => {
+    if (!user) return 1;
+    if (user.isSystemAdmin || user.role === 'Administrador' || user.login === 'admin') {
+      return 999;
+    }
+    if (availableRoles.length > 0) {
+      const matched = availableRoles.find(
+        (r) =>
+          (user.roleId && r.id === user.roleId) ||
+          r.name?.toLowerCase() === user.role?.toLowerCase() ||
+          r.slug?.toLowerCase() === user.role?.toLowerCase() ||
+          (user.role &&
+            (r.name?.toLowerCase().includes(user.role.toLowerCase()) ||
+              user.role.toLowerCase().includes(r.name?.toLowerCase())))
+      );
+      if (matched) return matched.hierarchyLevel;
+    }
+    const roleLower = (user.role || '').toLowerCase();
+    if (roleLower.includes('pastor')) return 7;
+    if (roleLower.includes('distrito')) return 6;
+    if (roleLower.includes('rede')) return 5;
+    if (roleLower.includes('área') || roleLower.includes('area')) return 4;
+    if (roleLower.includes('setor')) return 3;
+    if (roleLower.includes('célula') || roleLower.includes('celula') || roleLower.includes('lider')) return 2;
+    return 1;
+  }, [user, availableRoles]);
+
+  // Funções que o usuário logado tem permissão de atribuir (até o seu próprio nível)
+  const assignableRoles = useMemo(() => {
+    if (availableRoles.length === 0) return [];
+    if (userHierarchyLevel >= 999) return availableRoles;
+    return availableRoles
+      .filter((r) => r.hierarchyLevel <= userHierarchyLevel)
+      .sort((a, b) => a.hierarchyLevel - b.hierarchyLevel || a.name.localeCompare(b.name));
+  }, [availableRoles, userHierarchyLevel]);
+
+  // Garante que o papel inicial selecionado pertença aos papéis permitidos
+  useEffect(() => {
+    if (assignableRoles.length > 0 && !assignableRoles.some((r) => r.name === newMemberRole)) {
+      setNewMemberRole(assignableRoles[0].name as UserRole);
+    }
+  }, [assignableRoles, newMemberRole]);
 
   const availableCells = useMemo(() => {
     const map = new Map<string, { id: string; name: string; sector?: string }>();
@@ -955,12 +1004,15 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                     onChange={(e) => setNewMemberRole(e.target.value as UserRole)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer"
                   >
-                    <option value="Membro">Membro</option>
-                    <option value="Líder de Célula">Líder de Célula</option>
-                    <option value="Supervisor">Supervisor</option>
-                    <option value="Líder de Setor">Líder de Setor</option>
-                    <option value="Líder de Área">Líder de Área</option>
-                    <option value="Pastor">Pastor</option>
+                    {assignableRoles.length > 0 ? (
+                      assignableRoles.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="Membro">Membro</option>
+                    )}
                   </select>
                 </div>
               </div>
