@@ -43,7 +43,7 @@ self.addEventListener('push', (event) => {
   const options = {
     body: notificationData.body,
     icon: notificationData.icon || '/android-chrome-192x192.png',
-    badge: notificationData.badge || '/android-chrome-192x192.png',
+    badge: notificationData.badge || '/badge-icon.png',
     vibrate: [200, 100, 200],
     tag: tag,
     renotify: true,
