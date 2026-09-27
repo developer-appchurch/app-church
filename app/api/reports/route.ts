@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
 
     let query = supabase
       .from('relatorios_semanais')
-      .select('*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome)')
+      .select('*')
       .eq('unidade_id', cellId)
       .order('data_relatorio', { ascending: false })
       .order('criado_em', { ascending: false });
@@ -105,31 +105,6 @@ export async function GET(req: NextRequest) {
 
     let { data, error } = await query;
 
-    // Se houver erro de relacionamento de chave estrangeira com lancador, faz query simples
-    if (error && error.message.includes('relation')) {
-      let fallbackQuery = supabase
-        .from('relatorios_semanais')
-        .select('*')
-        .eq('unidade_id', cellId)
-        .order('data_relatorio', { ascending: false })
-        .order('criado_em', { ascending: false });
-
-      if (churchId) {
-        fallbackQuery = fallbackQuery.eq('igreja_id', churchId);
-      }
-      if (mode === 'recent') {
-        fallbackQuery = fallbackQuery.gte('data_relatorio', minDateStr);
-      } else if (mode === 'older') {
-        fallbackQuery = fallbackQuery
-          .lt('data_relatorio', minDateStr)
-          .range(offset, offset + limit - 1);
-      }
-
-      const res = await fallbackQuery;
-      data = res.data;
-      error = res.error;
-    }
-
     if (error) {
       console.error('[GET /api/reports] Erro:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
@@ -137,6 +112,21 @@ export async function GET(req: NextRequest) {
 
     const reportRows = data || [];
     const reportIds = reportRows.map((r: any) => r.id).filter(Boolean);
+
+    // Mapeamento dos nomes dos lançadores de forma limpa e sem falhas de foreign key
+    const lancadorIds = Array.from(new Set(reportRows.map((r: any) => r.lancado_por).filter(Boolean)));
+    const lancadorMap = new Map<string, string>();
+    if (lancadorIds.length > 0) {
+      try {
+        const { data: lancadores } = await supabase
+          .from('membros')
+          .select('id, nome')
+          .in('id', lancadorIds);
+        (lancadores || []).forEach((l: any) => lancadorMap.set(l.id, l.nome));
+      } catch {
+        // Fallback gracioso
+      }
+    }
 
     // Contagem de relatórios mais antigos no banco
     let hasOlderReports = false;
@@ -195,7 +185,7 @@ export async function GET(req: NextRequest) {
 
       return {
         ...row,
-        lancado_por_nome: row.lancador?.nome || 'Líder Responsável',
+        lancado_por_nome: lancadorMap.get(row.lancado_por) || row.lancador?.nome || 'Líder Responsável',
         observacao: observacaoTexto,
         observacao_texto: observacaoTexto,
         presentes_ids: presentesIds,

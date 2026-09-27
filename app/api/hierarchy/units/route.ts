@@ -120,6 +120,21 @@ function resolveLeadershipRole(currentLevel: any, isLeafLevel: boolean, roles: a
   };
 }
 
+// Cache em memória de unidades da hierarquia (60s) para evitar consultas repetidas ao banco
+const serverHierarchyUnitsCache = new Map<string, { data: any; expiry: number }>();
+
+function invalidateServerHierarchyUnitsCache(churchId?: string) {
+  if (!churchId) {
+    serverHierarchyUnitsCache.clear();
+    return;
+  }
+  for (const k of Array.from(serverHierarchyUnitsCache.keys())) {
+    if (k.startsWith(`units:${churchId}:`)) {
+      serverHierarchyUnitsCache.delete(k);
+    }
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -129,6 +144,13 @@ export async function GET(req: NextRequest) {
 
     if (!churchId) {
       return NextResponse.json({ error: 'Parâmetro churchId é obrigatório.' }, { status: 400 });
+    }
+
+    const cacheKey = `units:${churchId}:${mode}:${levelTypeId || 'all'}`;
+    const now = Date.now();
+    const cached = serverHierarchyUnitsCache.get(cacheKey);
+    if (cached && cached.expiry > now) {
+      return NextResponse.json(cached.data);
     }
 
     const supabase = getSupabaseServerClient();
@@ -149,21 +171,14 @@ export async function GET(req: NextRequest) {
         flatQuery = flatQuery.eq('nivel_tipo_id', levelTypeId);
       }
 
-      // Buscar também contagens, líderes e detalhes de células em lote
-      const [unitsRes, memberCountsRes, leadersBatchRes, celulasBatchRes] = await Promise.all([
+      // Executa consulta das unidades e contagem de membros por unidade da igreja
+      const [unitsRes, memberCountsRes] = await Promise.all([
         flatQuery,
         supabase
           .from('membros')
           .select('unidade_id')
           .eq('igreja_id', churchId)
           .not('unidade_id', 'is', null),
-        supabase
-          .from('unidade_lideres')
-          .select('unidade_id, pessoa_id, papel')
-          .eq('ativo', true),
-        supabase
-          .from('celulas')
-          .select('unidade_id, bairro, endereco, dia_semana, horario'),
       ]);
 
       if (unitsRes.error) {
@@ -171,6 +186,27 @@ export async function GET(req: NextRequest) {
       }
 
       const rows = unitsRes.data || [];
+      const unitIds = rows.map((u: any) => u.id);
+
+      // Consulta líderes e detalhes de célula EXCLUSIVAMENTE para os unitIds desta igreja (evita full table scan)
+      let leadersBatchRes: any = { data: [] };
+      let celulasBatchRes: any = { data: [] };
+
+      if (unitIds.length > 0) {
+        const [leadersRes, celulasRes] = await Promise.all([
+          supabase
+            .from('unidade_lideres')
+            .select('unidade_id, pessoa_id, papel')
+            .in('unidade_id', unitIds)
+            .eq('ativo', true),
+          supabase
+            .from('celulas')
+            .select('unidade_id, bairro, endereco, dia_semana, horario')
+            .in('unidade_id', unitIds),
+        ]);
+        leadersBatchRes = leadersRes;
+        celulasBatchRes = celulasRes;
+      }
 
       // Mapeamento de dados específicos da célula
       const celulasMap = new Map<string, any>();
@@ -186,8 +222,8 @@ export async function GET(req: NextRequest) {
 
       // Líderes em lote: buscar detalhes dos líderes vinculados a qualquer unidade
       const activeLeaderRows = leadersBatchRes.data || [];
-      const leaderPessoaIds = Array.from(
-        new Set(activeLeaderRows.map((l: any) => l.pessoa_id).filter(Boolean))
+      const leaderPessoaIds: string[] = Array.from(
+        new Set<string>(activeLeaderRows.map((l: any) => l.pessoa_id).filter(Boolean))
       );
 
       const leaderMemberMap = new Map<string, any>();
@@ -249,10 +285,12 @@ export async function GET(req: NextRequest) {
         };
       });
 
-      return NextResponse.json({
+      const resultPayload = {
         success: true,
         units: flatUnits,
-      });
+      };
+      serverHierarchyUnitsCache.set(cacheKey, { data: resultPayload, expiry: Date.now() + 60 * 1000 });
+      return NextResponse.json(resultPayload);
     }
 
     // 2. Modo Completo com resolução em lote (Compatibilidade)
@@ -378,10 +416,12 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    return NextResponse.json({
+    const fullPayload = {
       success: true,
       units: formattedUnits,
-    });
+    };
+    serverHierarchyUnitsCache.set(cacheKey, { data: fullPayload, expiry: Date.now() + 60 * 1000 });
+    return NextResponse.json(fullPayload);
   } catch (err: any) {
     console.error('Erro na rota /api/hierarchy/units GET:', err);
     return NextResponse.json({ error: err?.message || 'Erro interno.' }, { status: 500 });
@@ -701,6 +741,8 @@ export async function POST(req: NextRequest) {
       createdAt: new Date().toISOString(),
     };
 
+    invalidateServerHierarchyUnitsCache(input.churchId);
+
     return NextResponse.json({
       success: true,
       unit: createdUnit,
@@ -917,6 +959,8 @@ export async function PATCH(req: NextRequest) {
         // Ignora caso 'cells' tenha sido dropada
       }
     }
+
+    invalidateServerHierarchyUnitsCache();
 
     return NextResponse.json({
       success: true,

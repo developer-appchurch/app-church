@@ -180,6 +180,58 @@ export interface DatabaseConnectionStatus {
   details?: string;
 }
 
+// ==========================================
+// In-Memory Request Deduplication & Cache
+// Evita requisições redundantes ou concorrentes ao Supabase
+// ==========================================
+const inflightPromises = new Map<string, Promise<any>>();
+const memoryCache = new Map<string, { data: any; expiry: number }>();
+
+export function getCachedOrExecute<T>(
+  key: string,
+  ttlMs: number,
+  fn: () => Promise<T>,
+  force: boolean = false
+): Promise<T> {
+  const now = Date.now();
+  if (!force) {
+    const cached = memoryCache.get(key);
+    if (cached && cached.expiry > now) {
+      return Promise.resolve(cached.data as T);
+    }
+    const inflight = inflightPromises.get(key);
+    if (inflight) {
+      return inflight as Promise<T>;
+    }
+  }
+
+  const p = fn()
+    .then((result) => {
+      memoryCache.set(key, { data: result, expiry: Date.now() + ttlMs });
+      inflightPromises.delete(key);
+      return result;
+    })
+    .catch((err) => {
+      inflightPromises.delete(key);
+      throw err;
+    });
+
+  inflightPromises.set(key, p);
+  return p;
+}
+
+export function invalidateMemoryCache(prefix?: string): void {
+  if (!prefix) {
+    memoryCache.clear();
+    return;
+  }
+  for (const k of Array.from(memoryCache.keys())) {
+    if (k.startsWith(prefix)) {
+      memoryCache.delete(k);
+    }
+  }
+}
+
 /**
  * Service orchestrating Supabase queries with relational UUID schema,
  * ensuring multi-tenant isolation by igreja_id and seamless fallback caching.
@@ -225,62 +277,70 @@ export const AppChurchService = {
 
   /**
    * Diagnostic check verifying active connection to Supabase PostgreSQL database
+   * Cache em memória de 5 minutos para eliminar queries desnecessárias de heartbeat
    */
-  async checkConnection(): Promise<DatabaseConnectionStatus> {
-    const startTime = Date.now();
-    const endpointHost = supabaseUrl.replace(/^https?:\/\//, '');
+  async checkConnection(force: boolean = false): Promise<DatabaseConnectionStatus> {
+    return getCachedOrExecute(
+      'check-connection',
+      5 * 60 * 1000,
+      async () => {
+        const startTime = Date.now();
+        const endpointHost = supabaseUrl.replace(/^https?:\/\//, '');
 
-    if (!supabase) {
-      return {
-        connected: false,
-        isCloud: false,
-        message: 'Cliente Supabase não configurado.',
-        endpoint: endpointHost,
-        lastChecked: new Date().toLocaleTimeString('pt-BR'),
-      };
-    }
+        if (!supabase) {
+          return {
+            connected: false,
+            isCloud: false,
+            message: 'Cliente Supabase não configurado.',
+            endpoint: endpointHost,
+            lastChecked: new Date().toLocaleTimeString('pt-BR'),
+          };
+        }
 
-    try {
-      // Query igrejas table (or churches view) to test read access
-      let { data, error } = await supabase.from('igrejas').select('id, nome').limit(1);
-      if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-        const legRes = await supabase.from('churches').select('id, nome').limit(1);
-        data = legRes.data;
-        error = legRes.error;
-      }
-      const elapsed = Date.now() - startTime;
+        try {
+          // Query igrejas table (or churches view) to test read access
+          let { data, error } = await supabase.from('igrejas').select('id, nome').limit(1);
+          if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+            const legRes = await supabase.from('churches').select('id, nome').limit(1);
+            data = legRes.data;
+            error = legRes.error;
+          }
+          const elapsed = Date.now() - startTime;
 
-      if (error) {
-        return {
-          connected: false,
-          isCloud: true,
-          message: `Erro ao consultar Supabase: ${error.message}`,
-          endpoint: endpointHost,
-          responseTimeMs: elapsed,
-          lastChecked: new Date().toLocaleTimeString('pt-BR'),
-          details: error.details || error.hint,
-        };
-      }
+          if (error) {
+            return {
+              connected: false,
+              isCloud: true,
+              message: `Erro ao consultar Supabase: ${error.message}`,
+              endpoint: endpointHost,
+              responseTimeMs: elapsed,
+              lastChecked: new Date().toLocaleTimeString('pt-BR'),
+              details: error.details || error.hint,
+            };
+          }
 
-      return {
-        connected: true,
-        isCloud: true,
-        message: `Conectado ao Supabase Cloud (${data && data.length > 0 ? data[0].nome : 'Online'})`,
-        endpoint: endpointHost,
-        responseTimeMs: elapsed,
-        lastChecked: new Date().toLocaleTimeString('pt-BR'),
-      };
-    } catch (err: any) {
-      const elapsed = Date.now() - startTime;
-      return {
-        connected: false,
-        isCloud: false,
-        message: err?.message || 'Falha na comunicação de rede com Supabase',
-        endpoint: endpointHost,
-        responseTimeMs: elapsed,
-        lastChecked: new Date().toLocaleTimeString('pt-BR'),
-      };
-    }
+          return {
+            connected: true,
+            isCloud: true,
+            message: `Conectado ao Supabase Cloud (${data && data.length > 0 ? data[0].nome : 'Online'})`,
+            endpoint: endpointHost,
+            responseTimeMs: elapsed,
+            lastChecked: new Date().toLocaleTimeString('pt-BR'),
+          };
+        } catch (err: any) {
+          const elapsed = Date.now() - startTime;
+          return {
+            connected: false,
+            isCloud: false,
+            message: err?.message || 'Falha na comunicação de rede com Supabase',
+            endpoint: endpointHost,
+            responseTimeMs: elapsed,
+            lastChecked: new Date().toLocaleTimeString('pt-BR'),
+          };
+        }
+      },
+      force
+    );
   },
 
   /**
@@ -993,91 +1053,103 @@ export const AppChurchService = {
 
   /**
    * Obtém os níveis hierárquicos formatados com identificação de Raiz e Folha
+   * Com cache em memória e desduplicação de chamadas
    */
-  async getChurchLevels(churchId: string): Promise<ChurchHierarchicalLevel[]> {
-    if (typeof window !== 'undefined') {
-      try {
-        const res = await fetch(`/api/hierarchy/levels?churchId=${churchId}`);
-        const data = await res.json();
-        if (res.ok && data?.levels && data.levels.length > 0) {
-          return data.levels;
-        }
-      } catch (err) {
-        console.warn('Falha ao buscar níveis via API, tentando fallback direto:', err);
-      }
-    }
-
-    if (supabase) {
-      try {
-        let { data } = await supabase
-          .from('nivel_tipo')
-          .select('id, igreja_id, nome, ordem')
-          .eq('igreja_id', churchId)
-          .order('ordem', { ascending: true });
-
-        if (!data || data.length === 0) {
-          const defaultLevels = [
-            { id: generateUUID(), igreja_id: churchId, nome: 'Distrito', ordem: 10 },
-            { id: generateUUID(), igreja_id: churchId, nome: 'Área', ordem: 20 },
-            { id: generateUUID(), igreja_id: churchId, nome: 'Setor', ordem: 30 },
-            { id: generateUUID(), igreja_id: churchId, nome: 'Célula', ordem: 40 },
-          ];
-          const insertRes = await supabase
-            .from('nivel_tipo')
-            .insert(defaultLevels)
-            .select('id, igreja_id, nome, ordem')
-            .order('ordem', { ascending: true });
-          if (!insertRes.error && insertRes.data && insertRes.data.length > 0) {
-            data = insertRes.data;
-          } else {
-            data = defaultLevels;
+  async getChurchLevels(churchId: string, force: boolean = false): Promise<ChurchHierarchicalLevel[]> {
+    return getCachedOrExecute(`levels:${churchId || 'all'}`, 5 * 60 * 1000, async () => {
+      if (typeof window !== 'undefined') {
+        try {
+          const res = await fetch(`/api/hierarchy/levels?churchId=${churchId}`);
+          const data = await res.json();
+          if (res.ok && data?.levels && data.levels.length > 0) {
+            return data.levels;
           }
+        } catch (err) {
+          console.warn('Falha ao buscar níveis via API, tentando fallback direto:', err);
         }
-
-        if (data && data.length > 0) {
-          return data.map((l: any, idx: number) => ({
-            id: l.id,
-            churchId: l.igreja_id,
-            name: l.nome,
-            order: l.ordem,
-            isRoot: idx === 0,
-            isLeaf: idx === data.length - 1,
-          }));
-        }
-      } catch (err) {
-        console.warn('Falha no fallback direto de niveis:', err);
       }
-    }
 
-    const defaultNames = ['Distrito', 'Área', 'Setor', 'Célula'];
-    return defaultNames.map((name, idx) => ({
-      id: `default-lvl-${idx}`,
-      churchId,
-      name,
-      order: (idx + 1) * 10,
-      isRoot: idx === 0,
-      isLeaf: idx === defaultNames.length - 1,
-    }));
+      if (supabase) {
+        try {
+          let { data } = await supabase
+            .from('nivel_tipo')
+            .select('id, igreja_id, nome, ordem')
+            .eq('igreja_id', churchId)
+            .order('ordem', { ascending: true });
+
+          if (!data || data.length === 0) {
+            const defaultLevels = [
+              { id: generateUUID(), igreja_id: churchId, nome: 'Distrito', ordem: 10 },
+              { id: generateUUID(), igreja_id: churchId, nome: 'Área', ordem: 20 },
+              { id: generateUUID(), igreja_id: churchId, nome: 'Setor', ordem: 30 },
+              { id: generateUUID(), igreja_id: churchId, nome: 'Célula', ordem: 40 },
+            ];
+            const insertRes = await supabase
+              .from('nivel_tipo')
+              .insert(defaultLevels)
+              .select('id, igreja_id, nome, ordem')
+              .order('ordem', { ascending: true });
+            if (!insertRes.error && insertRes.data && insertRes.data.length > 0) {
+              data = insertRes.data;
+            } else {
+              data = defaultLevels;
+            }
+          }
+
+          if (data && data.length > 0) {
+            return data.map((l: any, idx: number) => ({
+              id: l.id,
+              churchId: l.igreja_id,
+              name: l.nome,
+              order: l.ordem,
+              isRoot: idx === 0,
+              isLeaf: idx === data.length - 1,
+            }));
+          }
+        } catch (err) {
+          console.warn('Falha no fallback direto de niveis:', err);
+        }
+      }
+
+      const defaultNames = ['Distrito', 'Área', 'Setor', 'Célula'];
+      return defaultNames.map((name, idx) => ({
+        id: `default-lvl-${idx}`,
+        churchId,
+        name,
+        order: (idx + 1) * 10,
+        isRoot: idx === 0,
+        isLeaf: idx === defaultNames.length - 1,
+      }));
+    }, force);
   },
 
   /**
    * Obtém as unidades organizacionais de um nível ou de todos os níveis da igreja
+   * Com cache em memória e desduplicação de chamadas
    */
-  async getUnits(churchId: string, levelTypeId?: string, mode: 'flat' | 'full' = 'flat'): Promise<OrganizationalUnit[]> {
-    if (typeof window !== 'undefined') {
-      try {
-        let url = `/api/hierarchy/units?churchId=${churchId}&mode=${mode}`;
-        if (levelTypeId) url += `&levelTypeId=${levelTypeId}`;
-        const res = await fetch(url);
-        const data = await res.json();
-        if (res.ok && data?.units) {
-          return data.units;
+  async getUnits(
+    churchId: string,
+    levelTypeId?: string,
+    mode: 'flat' | 'full' = 'flat',
+    force: boolean = false
+  ): Promise<OrganizationalUnit[]> {
+    const cacheKey = `units:${churchId || 'all'}:${mode}:${levelTypeId || 'all'}`;
+    return getCachedOrExecute(cacheKey, 60 * 1000, async () => {
+      if (typeof window !== 'undefined') {
+        try {
+          let url = `/api/hierarchy/units?churchId=${churchId}&mode=${mode}`;
+          if (levelTypeId) url += `&levelTypeId=${levelTypeId}`;
+          const res = await fetch(url);
+          const data = await res.json();
+          if (res.ok && data?.units) {
+            return data.units;
+          }
+        } catch (err) {
+          console.warn('Falha ao buscar unidades via API:', err);
         }
-      } catch (err) {
-        console.warn('Falha ao buscar unidades via API:', err);
       }
-    }
-    return [];
+      return [];
+    }, force);
   },
 
   /**
@@ -1350,160 +1422,163 @@ export const AppChurchService = {
   /**
    * Get Cells - STRICTLY filtered by churchId
    * Busca diretamente das tabelas físicas unidades, celulas, unidade_lideres e membros
+   * Com cache em memória e desduplicação de chamadas concorrentes
    */
-  async getCells(churchId: string): Promise<CellGroup[]> {
-    if (supabase) {
-      try {
-        // 1. Busca todas as unidades ativas da igreja
-        let unitQuery = supabase
-          .from('unidades')
-          .select('id, igreja_id, nome, pai_id')
-          .eq('ativo', true);
-
-        if (churchId && churchId !== 'church-master' && churchId !== 'all') {
-          unitQuery = unitQuery.eq('igreja_id', churchId);
-        }
-
-        let { data: units, error: uErr } = await unitQuery;
-
-        if ((!units || units.length === 0) && churchId && churchId !== 'all') {
-          const allUnitsRes = await supabase
+  async getCells(churchId: string, force: boolean = false): Promise<CellGroup[]> {
+    return getCachedOrExecute(`cells:${churchId || 'all'}`, 60 * 1000, async () => {
+      if (supabase) {
+        try {
+          // 1. Busca todas as unidades ativas da igreja
+          let unitQuery = supabase
             .from('unidades')
             .select('id, igreja_id, nome, pai_id')
             .eq('ativo', true);
-          units = allUnitsRes.data;
-          uErr = allUnitsRes.error;
-        }
 
-        if (!uErr && units && units.length > 0) {
-          const unitIds = units.map((u: any) => u.id);
-
-          // 2. Opcional: Busca detalhes complementares em 'celulas' (para compatibilidade suave)
-          const celulaMap = new Map<string, any>();
-          try {
-            const { data: celulasData } = await supabase
-              .from('celulas')
-              .select('unidade_id, bairro, endereco, dia_semana, dia_reuniao, horario, horario_reuniao, quantidade_membros, foto_url')
-              .in('unidade_id', unitIds);
-
-            (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
-          } catch {
-            // Tabela celulas é opcional
+          if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+            unitQuery = unitQuery.eq('igreja_id', churchId);
           }
 
-          // 3. Mapeia nomes das unidades superiores (setor / distrito / área)
-          const parentNameMap = new Map<string, string>();
-          const parentIdMap = new Map<string, string>();
-          units.forEach((u: any) => {
-            parentNameMap.set(u.id, u.nome);
-            if (u.pai_id) parentIdMap.set(u.id, u.pai_id);
-          });
+          let { data: units, error: uErr } = await unitQuery;
 
-          // 4. Busca líderes atribuídos em unidade_lideres
-          const { data: leadersData } = await supabase
-            .from('unidade_lideres')
-            .select('unidade_id, pessoa_id, papel')
-            .in('unidade_id', unitIds)
-            .eq('ativo', true);
-
-          const leaderPessoaIds = (leadersData || []).map((l: any) => l.pessoa_id);
-          const leaderMemberMap = new Map<string, string>();
-          if (leaderPessoaIds.length > 0) {
-            const { data: leaderMembers } = await supabase
-              .from('membros')
-              .select('id, nome')
-              .in('id', leaderPessoaIds);
-            (leaderMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m.nome));
+          if ((!units || units.length === 0) && churchId && churchId !== 'all') {
+            const allUnitsRes = await supabase
+              .from('unidades')
+              .select('id, igreja_id, nome, pai_id')
+              .eq('ativo', true);
+            units = allUnitsRes.data;
+            uErr = allUnitsRes.error;
           }
 
-          const leadersByUnit = new Map<string, string[]>();
-          const leaderNamesByUnit = new Map<string, string[]>();
-          (leadersData || []).forEach((l: any) => {
-            if (l.unidade_id && l.pessoa_id) {
-              const idList = leadersByUnit.get(l.unidade_id) || [];
-              if (!idList.includes(l.pessoa_id)) {
-                idList.push(l.pessoa_id);
-              }
-              leadersByUnit.set(l.unidade_id, idList);
+          if (!uErr && units && units.length > 0) {
+            const unitIds = units.map((u: any) => u.id);
 
-              const memName = leaderMemberMap.get(l.pessoa_id);
-              if (memName) {
-                const nameList = leaderNamesByUnit.get(l.unidade_id) || [];
-                if (!nameList.includes(memName)) {
-                  nameList.push(memName);
+            // 2. Opcional: Busca detalhes complementares em 'celulas' (para compatibilidade suave)
+            const celulaMap = new Map<string, any>();
+            try {
+              const { data: celulasData } = await supabase
+                .from('celulas')
+                .select('unidade_id, bairro, endereco, dia_semana, dia_reuniao, horario, horario_reuniao, quantidade_membros, foto_url')
+                .in('unidade_id', unitIds);
+
+              (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
+            } catch {
+              // Tabela celulas é opcional
+            }
+
+            // 3. Mapeia nomes das unidades superiores (setor / distrito / área)
+            const parentNameMap = new Map<string, string>();
+            const parentIdMap = new Map<string, string>();
+            units.forEach((u: any) => {
+              parentNameMap.set(u.id, u.nome);
+              if (u.pai_id) parentIdMap.set(u.id, u.pai_id);
+            });
+
+            // 4. Busca líderes atribuídos em unidade_lideres
+            const { data: leadersData } = await supabase
+              .from('unidade_lideres')
+              .select('unidade_id, pessoa_id, papel')
+              .in('unidade_id', unitIds)
+              .eq('ativo', true);
+
+            const leaderPessoaIds = (leadersData || []).map((l: any) => l.pessoa_id);
+            const leaderMemberMap = new Map<string, string>();
+            if (leaderPessoaIds.length > 0) {
+              const { data: leaderMembers } = await supabase
+                .from('membros')
+                .select('id, nome')
+                .in('id', leaderPessoaIds);
+              (leaderMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m.nome));
+            }
+
+            const leadersByUnit = new Map<string, string[]>();
+            const leaderNamesByUnit = new Map<string, string[]>();
+            (leadersData || []).forEach((l: any) => {
+              if (l.unidade_id && l.pessoa_id) {
+                const idList = leadersByUnit.get(l.unidade_id) || [];
+                if (!idList.includes(l.pessoa_id)) {
+                  idList.push(l.pessoa_id);
                 }
-                leaderNamesByUnit.set(l.unidade_id, nameList);
+                leadersByUnit.set(l.unidade_id, idList);
+
+                const memName = leaderMemberMap.get(l.pessoa_id);
+                if (memName) {
+                  const nameList = leaderNamesByUnit.get(l.unidade_id) || [];
+                  if (!nameList.includes(memName)) {
+                    nameList.push(memName);
+                  }
+                  leaderNamesByUnit.set(l.unidade_id, nameList);
+                }
               }
+            });
+
+            // 5. Contagem real de membros por unidade
+            const { data: membersCount } = await supabase
+              .from('membros')
+              .select('unidade_id')
+              .eq('igreja_id', churchId);
+            const countMap = new Map<string, number>();
+            (membersCount || []).forEach((m: any) => {
+              if (m.unidade_id) {
+                countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
+              }
+            });
+
+            // Unidades que são células (possuem entrada em 'celulas' ou são unidades folha)
+            const parentIdsSet = new Set(units.map((u: any) => u.pai_id).filter(Boolean));
+            let targetUnits = units.filter((u: any) => celulaMap.has(u.id) || !parentIdsSet.has(u.id));
+            if (targetUnits.length === 0) targetUnits = units;
+
+            const cells: CellGroup[] = targetUnits.map((u: any) => {
+              const cInfo = celulaMap.get(u.id);
+              const parentName = u.pai_id ? parentNameMap.get(u.pai_id) : 'Setor Geral';
+              const grandparentId = u.pai_id ? parentIdMap.get(u.pai_id) : null;
+              const areaName = grandparentId ? parentNameMap.get(grandparentId) : undefined;
+              const leaderNames = leaderNamesByUnit.get(u.id) || [];
+              let formattedLeader = 'Não informado';
+              if (leaderNames.length === 1) {
+                formattedLeader = leaderNames[0];
+              } else if (leaderNames.length === 2) {
+                formattedLeader = `${leaderNames[0]} e ${leaderNames[1]}`;
+              } else if (leaderNames.length > 2) {
+                formattedLeader = `${leaderNames.slice(0, -1).join(', ')} e ${leaderNames[leaderNames.length - 1]}`;
+              }
+
+              const calcCount = countMap.get(u.id);
+              const dbCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : (cInfo?.quantidade_membros || 0);
+              const finalCount = calcCount !== undefined ? calcCount : dbCount;
+
+              return {
+                id: u.id,
+                churchId: u.igreja_id,
+                name: u.nome,
+                leaderName: formattedLeader,
+                leaderNames: leaderNames,
+                sectorName: parentName || 'Setor Geral',
+                address: u.endereco || cInfo?.endereco || (u.bairro ? `Bairro ${u.bairro}` : 'Endereço da Célula'),
+                meetingDay: u.dia_semana || u.dia_reuniao || cInfo?.dia_semana || cInfo?.dia_reuniao || 'Quinta-feira',
+                meetingTime: u.horario || u.horario_reuniao || cInfo?.horario || cInfo?.horario_reuniao || '19:30',
+                memberCount: finalCount,
+                parentUnitId: u.pai_id || null,
+                parentName: parentName || undefined,
+                areaName: areaName || undefined,
+                areaUnitId: grandparentId || null,
+                leaderMemberIds: leadersByUnit.get(u.id) || [],
+              };
+            });
+
+            if (cells.length > 0) {
+              saveToStorage(`${STORAGE_KEYS.CELLS}_${churchId}`, cells);
+              return cells;
             }
-          });
-
-          // 5. Contagem real de membros por unidade
-          const { data: membersCount } = await supabase
-            .from('membros')
-            .select('unidade_id')
-            .eq('igreja_id', churchId);
-          const countMap = new Map<string, number>();
-          (membersCount || []).forEach((m: any) => {
-            if (m.unidade_id) {
-              countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
-            }
-          });
-
-          // Unidades que são células (possuem entrada em 'celulas' ou são unidades folha)
-          const parentIdsSet = new Set(units.map((u: any) => u.pai_id).filter(Boolean));
-          let targetUnits = units.filter((u: any) => celulaMap.has(u.id) || !parentIdsSet.has(u.id));
-          if (targetUnits.length === 0) targetUnits = units;
-
-          const cells: CellGroup[] = targetUnits.map((u: any) => {
-            const cInfo = celulaMap.get(u.id);
-            const parentName = u.pai_id ? parentNameMap.get(u.pai_id) : 'Setor Geral';
-            const grandparentId = u.pai_id ? parentIdMap.get(u.pai_id) : null;
-            const areaName = grandparentId ? parentNameMap.get(grandparentId) : undefined;
-            const leaderNames = leaderNamesByUnit.get(u.id) || [];
-            let formattedLeader = 'Não informado';
-            if (leaderNames.length === 1) {
-              formattedLeader = leaderNames[0];
-            } else if (leaderNames.length === 2) {
-              formattedLeader = `${leaderNames[0]} e ${leaderNames[1]}`;
-            } else if (leaderNames.length > 2) {
-              formattedLeader = `${leaderNames.slice(0, -1).join(', ')} e ${leaderNames[leaderNames.length - 1]}`;
-            }
-
-            const calcCount = countMap.get(u.id);
-            const dbCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : (cInfo?.quantidade_membros || 0);
-            const finalCount = calcCount !== undefined ? calcCount : dbCount;
-
-            return {
-              id: u.id,
-              churchId: u.igreja_id,
-              name: u.nome,
-              leaderName: formattedLeader,
-              leaderNames: leaderNames,
-              sectorName: parentName || 'Setor Geral',
-              address: u.endereco || cInfo?.endereco || (u.bairro ? `Bairro ${u.bairro}` : 'Endereço da Célula'),
-              meetingDay: u.dia_semana || u.dia_reuniao || cInfo?.dia_semana || cInfo?.dia_reuniao || 'Quinta-feira',
-              meetingTime: u.horario || u.horario_reuniao || cInfo?.horario || cInfo?.horario_reuniao || '19:30',
-              memberCount: finalCount,
-              parentUnitId: u.pai_id || null,
-              parentName: parentName || undefined,
-              areaName: areaName || undefined,
-              areaUnitId: grandparentId || null,
-              leaderMemberIds: leadersByUnit.get(u.id) || [],
-            };
-          });
-
-          if (cells.length > 0) {
-            saveToStorage(`${STORAGE_KEYS.CELLS}_${churchId}`, cells);
-            return cells;
           }
+        } catch (e) {
+          console.warn('Erro ao buscar células no Supabase:', e);
         }
-      } catch (e) {
-        console.warn('Erro ao buscar células no Supabase:', e);
       }
-    }
-    const cached = loadFromStorage<CellGroup[]>(`${STORAGE_KEYS.CELLS}_${churchId}`, []);
-    if (cached.length > 0) return cached;
-    return INITIAL_CELLS.filter((c) => c.churchId === churchId);
+      const cached = loadFromStorage<CellGroup[]>(`${STORAGE_KEYS.CELLS}_${churchId}`, []);
+      if (cached.length > 0) return cached;
+      return INITIAL_CELLS.filter((c) => c.churchId === churchId);
+    }, force);
   },
 
   /**
@@ -1668,113 +1743,117 @@ export const AppChurchService = {
   /**
    * Get Members - STRICTLY filtered by churchId and optionally cellId
    * Usa projeção de colunas explícitas (sem senha_hash) para evitar erro de RLS/Column Security e nunca zera a lista em caso de falha.
+   * Com cache em memória e desduplicação de chamadas concorrentes
    */
-  async getMembers(churchId: string, cellId?: string): Promise<CellMember[]> {
-    const EXPLICIT_MEMBER_COLUMNS = 'id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
-    const EXPLICIT_LEGACY_COLUMNS = 'id, igreja_id, celula_id, funcao_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
+  async getMembers(churchId: string, cellId?: string, force: boolean = false): Promise<CellMember[]> {
+    const cacheKey = `members:${churchId || 'all'}:${cellId || 'all'}`;
+    return getCachedOrExecute(cacheKey, 60 * 1000, async () => {
+      const EXPLICIT_MEMBER_COLUMNS = 'id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
+      const EXPLICIT_LEGACY_COLUMNS = 'id, igreja_id, celula_id, funcao_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
 
-    if (supabase) {
-      try {
-        let data: any[] | null = null;
-        let error: any = null;
+      if (supabase) {
+        try {
+          let data: any[] | null = null;
+          let error: any = null;
 
-        let query = supabase.from('membros').select(EXPLICIT_MEMBER_COLUMNS);
-        if (churchId && churchId !== 'church-master' && churchId !== 'all') {
-          query = query.eq('igreja_id', churchId);
-        }
-        if (cellId) {
-          query = query.eq('unidade_id', cellId);
-        }
-        const initialRes = await query.order('nome');
-        data = initialRes.data;
-        error = initialRes.error;
-
-        if (error) {
-          console.error('[AppChurchService.getMembers] Erro real retornado pelo Supabase (tabela membros):', {
-            code: error.code,
-            message: error.message,
-            details: error.details,
-            hint: error.hint,
-          });
-        }
-
-        // Se a tabela membros falhar ou não existir, tenta a tabela legacy members
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.code === '42703')) {
-          let legQuery = supabase.from('members').select(EXPLICIT_LEGACY_COLUMNS);
+          let query = supabase.from('membros').select(EXPLICIT_MEMBER_COLUMNS);
           if (churchId && churchId !== 'church-master' && churchId !== 'all') {
-            legQuery = legQuery.eq('igreja_id', churchId);
+            query = query.eq('igreja_id', churchId);
           }
-          if (cellId) legQuery = legQuery.eq('celula_id', cellId);
-          const legRes = await legQuery.order('nome');
-          if (legRes.error) {
-            console.error('[AppChurchService.getMembers] Erro real retornado pela tabela legacy members:', legRes.error);
-          } else {
-            data = legRes.data;
-            error = null;
-          }
-        }
-
-        // Se a consulta foi bem sucedida e retornou dados do banco
-        if (!error && data && Array.isArray(data)) {
-          const members: CellMember[] = data.map((m: any) => ({
-            id: m.id,
-            churchId: m.igreja_id || churchId,
-            cellId: m.unidade_id || m.celula_id || m.cell_id || '',
-            roleId: resolveRoleIdByName(m.funcao, m.papel_id || m.funcao_id),
-            role: (m.funcao as UserRole) || 'Membro',
-            name: m.nome,
-            login: m.login || '',
-            neighborhood: m.bairro || '',
-            birthday: m.aniversario || '',
-            phone: m.telefone || '',
-            email: m.email || '',
-            attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
-            attendancePercentage: m.percentual_frequencia ?? 100,
-            avatarUrl: m.url_avatar || '',
-            authUserId: m.auth_user_id || undefined,
-            auth_user_id: m.auth_user_id || undefined,
-            notes: m.observacoes || '',
-          }));
-
-          // Atualiza cache local apenas quando a consulta tem sucesso
-          saveToStorage(STORAGE_KEYS.MEMBERS, members);
-
           if (cellId) {
-            return members.filter((m) => m.cellId === cellId);
+            query = query.eq('unidade_id', cellId);
           }
-          return members;
-        }
+          const initialRes = await query.order('nome');
+          data = initialRes.data;
+          error = initialRes.error;
 
-        // Se houve erro na consulta, mantém os dados anteriores do cache para NUNCA zerar a lista na UI
-        if (error) {
-          const cached = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, []);
-          if (cached && cached.length > 0) {
-            let filtered = cached;
+          if (error) {
+            console.error('[AppChurchService.getMembers] Erro real retornado pelo Supabase (tabela membros):', {
+              code: error.code,
+              message: error.message,
+              details: error.details,
+              hint: error.hint,
+            });
+          }
+
+          // Se a tabela membros falhar ou não existir, tenta a tabela legacy members
+          if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.code === '42703')) {
+            let legQuery = supabase.from('members').select(EXPLICIT_LEGACY_COLUMNS);
             if (churchId && churchId !== 'church-master' && churchId !== 'all') {
-              filtered = filtered.filter((m) => m.churchId === churchId);
+              legQuery = legQuery.eq('igreja_id', churchId);
             }
-            if (cellId) {
-              filtered = filtered.filter((m) => m.cellId === cellId);
+            if (cellId) legQuery = legQuery.eq('celula_id', cellId);
+            const legRes = await legQuery.order('nome');
+            if (legRes.error) {
+              console.error('[AppChurchService.getMembers] Erro real retornado pela tabela legacy members:', legRes.error);
+            } else {
+              data = legRes.data;
+              error = null;
             }
-            console.warn('[AppChurchService.getMembers] Mantendo dados anteriores do cache devido a erro no banco.');
-            return filtered.length > 0 ? filtered : cached;
           }
-        }
-      } catch (e: any) {
-        console.error('[AppChurchService.getMembers] Exceção ao consultar membros no Supabase:', e);
-      }
-    }
 
-    // Fallback de preservação de dados: nunca zera a lista se houver registros anteriores
-    const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
-    let filtered = allMembers;
-    if (churchId && churchId !== 'church-master' && churchId !== 'all') {
-      filtered = filtered.filter((m) => m.churchId === churchId);
-    }
-    if (cellId) {
-      filtered = filtered.filter((m) => m.cellId === cellId);
-    }
-    return filtered.length > 0 ? filtered : allMembers;
+          // Se a consulta foi bem sucedida e retornou dados do banco
+          if (!error && data && Array.isArray(data)) {
+            const members: CellMember[] = data.map((m: any) => ({
+              id: m.id,
+              churchId: m.igreja_id || churchId,
+              cellId: m.unidade_id || m.celula_id || m.cell_id || '',
+              roleId: resolveRoleIdByName(m.funcao, m.papel_id || m.funcao_id),
+              role: (m.funcao as UserRole) || 'Membro',
+              name: m.nome,
+              login: m.login || '',
+              neighborhood: m.bairro || '',
+              birthday: m.aniversario || '',
+              phone: m.telefone || '',
+              email: m.email || '',
+              attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
+              attendancePercentage: m.percentual_frequencia ?? 100,
+              avatarUrl: m.url_avatar || '',
+              authUserId: m.auth_user_id || undefined,
+              auth_user_id: m.auth_user_id || undefined,
+              notes: m.observacoes || '',
+            }));
+
+            // Atualiza cache local apenas quando a consulta tem sucesso
+            saveToStorage(STORAGE_KEYS.MEMBERS, members);
+
+            if (cellId) {
+              return members.filter((m) => m.cellId === cellId);
+            }
+            return members;
+          }
+
+          // Se houve erro na consulta, mantém os dados anteriores do cache para NUNCA zerar a lista na UI
+          if (error) {
+            const cached = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, []);
+            if (cached && cached.length > 0) {
+              let filtered = cached;
+              if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+                filtered = filtered.filter((m) => m.churchId === churchId);
+              }
+              if (cellId) {
+                filtered = filtered.filter((m) => m.cellId === cellId);
+              }
+              console.warn('[AppChurchService.getMembers] Mantendo dados anteriores do cache devido a erro no banco.');
+              return filtered.length > 0 ? filtered : cached;
+            }
+          }
+        } catch (e: any) {
+          console.error('[AppChurchService.getMembers] Exceção ao consultar membros no Supabase:', e);
+        }
+      }
+
+      // Fallback de preservação de dados: nunca zera a lista se houver registros anteriores
+      const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+      let filtered = allMembers;
+      if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+        filtered = filtered.filter((m) => m.churchId === churchId);
+      }
+      if (cellId) {
+        filtered = filtered.filter((m) => m.cellId === cellId);
+      }
+      return filtered.length > 0 ? filtered : allMembers;
+    }, force);
   },
 
   /**
@@ -3377,41 +3456,44 @@ export const AppChurchService = {
   /**
    * Roles (Tabela de Funções / Papéis)
    * Ordenado do menor para o maior nível de hierarquia
+   * Com cache em memória de 5 minutos
    */
-  async getRoles(): Promise<Role[]> {
-    if (supabase) {
-      try {
-        let { data, error } = await supabase
-          .from('papeis')
-          .select('*')
-          .order('nivel_hierarquia', { ascending: true })
-          .order('nome', { ascending: true });
-
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          const legRes = await supabase
-            .from('roles')
+  async getRoles(force: boolean = false): Promise<Role[]> {
+    return getCachedOrExecute('roles', 5 * 60 * 1000, async () => {
+      if (supabase) {
+        try {
+          let { data, error } = await supabase
+            .from('papeis')
             .select('*')
             .order('nivel_hierarquia', { ascending: true })
             .order('nome', { ascending: true });
-          data = legRes.data;
-          error = legRes.error;
-        }
 
-        if (!error && data && data.length > 0) {
-          return data.map((r: any) => ({
-            id: r.id,
-            name: r.nome,
-            slug: r.slug,
-            description: r.descricao,
-            hierarchyLevel: r.nivel_hierarquia,
-            badgeColor: r.cor_distintivo,
-          }));
+          if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+            const legRes = await supabase
+              .from('roles')
+              .select('*')
+              .order('nivel_hierarquia', { ascending: true })
+              .order('nome', { ascending: true });
+            data = legRes.data;
+            error = legRes.error;
+          }
+
+          if (!error && data && data.length > 0) {
+            return data.map((r: any) => ({
+              id: r.id,
+              name: r.nome,
+              slug: r.slug,
+              description: r.descricao,
+              hierarchyLevel: r.nivel_hierarquia,
+              badgeColor: r.cor_distintivo,
+            }));
+          }
+        } catch (e) {
+          console.warn('Fallback para roles locais', e);
         }
-      } catch (e) {
-        console.warn('Fallback para roles locais', e);
       }
-    }
-    return [...INITIAL_ROLES].sort((a, b) => a.hierarchyLevel - b.hierarchyLevel || a.name.localeCompare(b.name));
+      return [...INITIAL_ROLES].sort((a, b) => a.hierarchyLevel - b.hierarchyLevel || a.name.localeCompare(b.name));
+    }, force);
   },
 
   /**

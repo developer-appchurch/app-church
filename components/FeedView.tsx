@@ -791,9 +791,9 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 id="feed-post-caption-input"
                 value={newPostCaption}
                 onChange={(e) => setNewPostCaption(e.target.value)}
-                placeholder={`O que Deus fez na Célula ${currentCell.name} essa semana? Compartilhe fotos, louvores e testemunhos...`}
-                rows={3}
-                className="w-full bg-[#f8fafc] border border-slate-200 rounded-xl p-3 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#052447] focus:ring-1 focus:ring-[#052447]"
+                placeholder={`O que Deus fez na Célula - ${currentCell.name} essa semana?`}
+                rows={2}
+                className="w-full bg-[#f8fafc] border border-slate-200 rounded-xl py-2 px-3 sm:p-3 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#052447] focus:ring-1 focus:ring-[#052447] min-h-[50px] sm:min-h-[70px] resize-y"
               />
 
               {/* Erro de Validação de Imagem */}

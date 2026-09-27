@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
     const search = (searchParams.get('search') || '').trim();
     const diaSemana = (searchParams.get('diaSemana') || '').trim();
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
-    const pageSize = Math.min(50, Math.max(1, parseInt(searchParams.get('pageSize') || '12', 10)));
+    const pageSize = Math.min(1000, Math.max(1, parseInt(searchParams.get('pageSize') || '500', 10)));
 
     if (!churchId) {
       return NextResponse.json(

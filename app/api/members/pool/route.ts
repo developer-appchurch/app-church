@@ -28,6 +28,26 @@ export interface MemberListItem {
   isUnlinked: boolean;
 }
 
+// Cache em memória de unidades por igreja (2 minutos) para evitar queries repetitivas na paginação
+const serverUnitsCache = new Map<string, { data: any[]; expiry: number }>();
+
+async function getCachedUnits(supabase: any, churchId: string) {
+  const now = Date.now();
+  const cached = serverUnitsCache.get(churchId);
+  if (cached && cached.expiry > now) {
+    return { data: cached.data, error: null };
+  }
+  const res = await supabase
+    .from('unidades')
+    .select('id, nome')
+    .eq('igreja_id', churchId)
+    .eq('ativo', true);
+  if (!res.error && res.data) {
+    serverUnitsCache.set(churchId, { data: res.data, expiry: now + 2 * 60 * 1000 });
+  }
+  return res;
+}
+
 /**
  * GET /api/members/pool
  * 
@@ -88,12 +108,8 @@ export async function GET(req: NextRequest) {
 
         return q;
       })(),
-      supabase
-        .from('unidades')
-        .select('id, nome')
-        .eq('igreja_id', churchId)
-        .eq('ativo', true),
-      isFirstPage
+      getCachedUnits(supabase, churchId),
+      isFirstPage && !search
         ? Promise.all([
             supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId),
             supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId).is('unidade_id', null),

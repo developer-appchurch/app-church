@@ -415,13 +415,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <div className="text-xs font-bold text-[#04213d] leading-tight">
                         Notificações de Relatório
                       </div>
-                      <div className="text-[10px] text-slate-500 leading-tight">
-                        {isPushSubscribed
-                          ? 'Lembretes automáticos ativados'
-                          : pushPermission === 'denied'
-                          ? 'Bloqueado no navegador'
-                          : 'Lembretes de relatório pendente'}
-                      </div>
                     </div>
                   </div>
 
@@ -488,7 +481,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ) : (
                       <>
                         <Bell size={13} />
-                        <span>Ativar Notificações Push</span>
+                        <span>Ativar Notificações</span>
                       </>
                     )}
                   </button>

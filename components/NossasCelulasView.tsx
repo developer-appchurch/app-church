@@ -124,7 +124,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
       const res = await getCelulasByIgreja({
         churchId,
         page: 1,
-        pageSize: 500, // Carrega todas as células da congregação para filtragem 100% instantânea em memória
+        pageSize: 1000, // Carrega todas as células da congregação em lote único
       });
       return res.celulas;
     },
@@ -132,29 +132,16 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
     staleTime: 1000 * 60 * 15,
   });
 
-  // Lista mestre de células combinando props iniciais, props de células do app e cache do React Query
-  const masterCelulas: CelulaCardItem[] = useMemo(() => {
-    if (queriedCelulas && queriedCelulas.length > 0) {
+  // Lista de células direta do React Query ou dados iniciais passados explicitamente
+  const allCelulas: CelulaCardItem[] = useMemo(() => {
+    if (queriedCelulas) {
       return queriedCelulas;
-    }
-    if (cells && cells.length > 0) {
-      return cells.map(mapCellGroupToCardItem);
     }
     if (initialCelulas && initialCelulas.length > 0) {
       return initialCelulas;
     }
     return [];
-  }, [queriedCelulas, cells, initialCelulas]);
-
-  const [localCelulas, setLocalCelulas] = useState<CelulaCardItem[]>([]);
-
-  useEffect(() => {
-    if (masterCelulas.length > 0) {
-      setLocalCelulas(masterCelulas);
-    }
-  }, [masterCelulas]);
-
-  const allCelulas = localCelulas.length > 0 ? localCelulas : masterCelulas;
+  }, [queriedCelulas, initialCelulas]);
 
   // 3. Estados de Filtros Rápidos (Em Memória / Instantâneo)
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -431,13 +418,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
         leaderMemberIds: updated.leaderMemberIds || selectedCell.leaderMemberIds,
       };
 
-      setLocalCelulas((prev) =>
-        prev.map((c) =>
-          c.id === selectedCell.id || c.unidadeId === selectedCell.unidadeId ? updatedCardItem : c
-        )
-      );
-
-      // 2. Atualização otimista no cache do React Query
+      // 1. Atualização otimista e instantânea no cache do React Query
       queryClient.setQueryData(['celulas-gallery', churchId], (old: CelulaCardItem[] | undefined) => {
         if (!old) return [updatedCardItem];
         return old.map((c) =>
@@ -445,7 +426,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
         );
       });
 
-      // 3. Notifica callback externo
+      // 2. Notifica callback externo
       if (onUpdateCell) {
         await onUpdateCell(updated);
       }

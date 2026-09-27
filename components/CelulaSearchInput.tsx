@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useTransition } from 'react';
-import { Search, X, Loader2, Calendar } from 'lucide-react';
+import { Search, X, Loader2 } from 'lucide-react';
 
 interface CelulaSearchInputProps {
   onSearchChange: (search: string) => void;
@@ -19,7 +19,6 @@ const DIAS_SEMANA = [
   { id: 'Quinta', label: 'Qui' },
   { id: 'Sexta', label: 'Sex' },
   { id: 'Sábado', label: 'Sáb' },
-  { id: 'Domingo', label: 'Dom' },
 ];
 
 export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
@@ -85,13 +84,8 @@ export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
       </div>
 
       {/* Filtros Rápidos de Dia da Semana & Contador de Resultados */}
-      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full no-scrollbar">
-          <div className="flex items-center gap-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider mr-1 shrink-0">
-            <Calendar size={13} className="text-slate-500" />
-            <span className="hidden sm:inline">Dia:</span>
-          </div>
-
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
+        <div className="grid grid-cols-7 gap-1 sm:flex sm:items-center sm:gap-1.5 w-full sm:w-auto">
           {DIAS_SEMANA.map((d) => {
             const isActive = selectedDiaSemana === d.id;
             return (
@@ -103,10 +97,10 @@ export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
                     onDiaSemanaChange(d.id);
                   });
                 }}
-                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all shrink-0 cursor-pointer ${
+                className={`w-full sm:w-auto px-1.5 sm:px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-lg transition-all text-center cursor-pointer border ${
                   isActive
-                    ? 'bg-[#052447] text-white shadow-2xs font-bold'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-900'
+                    ? 'bg-[#052447] text-white border-[#052447] shadow-xs font-bold ring-1 ring-[#052447]/30'
+                    : 'bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border-slate-300 hover:border-slate-400 shadow-2xs'
                 }`}
               >
                 {d.label}
@@ -116,7 +110,7 @@ export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
         </div>
 
         {typeof totalCount === 'number' && (
-          <div className="text-[11px] font-semibold text-slate-500 shrink-0">
+          <div className="text-[11px] font-semibold text-slate-500 text-right shrink-0">
             Total: <span className="font-bold text-[#052447]">{totalCount}</span> células
           </div>
         )}

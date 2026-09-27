@@ -178,7 +178,7 @@ export default function Home() {
     },
     enabled: Boolean(user?.churchId),
     placeholderData: keepPreviousData,
-    staleTime: 1000 * 60 * 2,
+    staleTime: 1000 * 60 * 5, // 5 minutos de cache ativo
   });
 
   // 2. React Query: Consulta de Membros com keepPreviousData e enabled condicionado a churchId
@@ -193,7 +193,7 @@ export default function Home() {
     },
     enabled: Boolean(user?.churchId),
     placeholderData: keepPreviousData,
-    staleTime: 1000 * 60 * 2,
+    staleTime: 1000 * 60 * 5, // 5 minutos de cache ativo
   });
 
   // Combina dados em cache/estado com dados do React Query garantindo que NUNCA zere em falhas
@@ -204,11 +204,9 @@ export default function Home() {
   const loadChurchData = useCallback(
     async (churchId: string, initialCellId?: string, currentUserId?: string) => {
       try {
-        const [churchCells, churchMembers, churchPosts, churchAnnouncements] = await Promise.all([
+        const [churchCells, churchMembers] = await Promise.all([
           AppChurchService.getCells(churchId),
           AppChurchService.getMembers(churchId),
-          AppChurchService.getFeedPosts(churchId, undefined, currentUserId, 10),
-          AppChurchService.getAnnouncements(churchId),
         ]);
 
         if (churchCells && churchCells.length > 0) {
@@ -222,14 +220,6 @@ export default function Home() {
 
         if (churchMembers && churchMembers.length > 0) {
           setMembers(churchMembers);
-        }
-
-        if (churchPosts) {
-          setPosts(churchPosts);
-        }
-
-        if (churchAnnouncements) {
-          setAnnouncements(churchAnnouncements);
         }
       } catch (err) {
         console.warn('Erro ao carregar dados da igreja:', err);
@@ -323,10 +313,7 @@ export default function Home() {
         setMembers(freshMembers);
       }
 
-      await Promise.all([
-        AppChurchService.getFeedPosts(user.churchId, undefined, user.id, 10).then(setPosts),
-        AppChurchService.getAnnouncements(user.churchId).then(setAnnouncements),
-      ]);
+      queryClient.invalidateQueries({ queryKey: ['feed_posts'] });
 
       const status = await AppChurchService.checkConnection();
       setConnectionStatus(status);

@@ -29,6 +29,7 @@ import {
   CellMember,
 } from '../types';
 import { AppChurchService } from '../lib/supabase';
+import { ChurchMemberGrowthChart } from './ChurchMemberGrowthChart';
 
 interface ChurchHierarchyOverviewViewProps {
   user: UserProfile;
@@ -75,6 +76,7 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
   const [totalMembers, setTotalMembers] = useState<number>(0);
   const [linkedCount, setLinkedCount] = useState<number>(0);
   const [unlinkedCount, setUnlinkedCount] = useState<number>(0);
+  const [membersList, setMembersList] = useState<CellMember[]>([]);
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -112,6 +114,7 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
         setTotalMembers(fetchedPool.counts.total);
         setLinkedCount(fetchedPool.counts.linked);
         setUnlinkedCount(fetchedPool.counts.unlinked);
+        setMembersList(fetchedPool.members || []);
 
         // Iniciar a árvore recolhida (Passo 7): por padrão recolhe todas as unidades que têm filhos
         const initialCollapsed = new Set<string>();
@@ -575,6 +578,17 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
           <p className="text-[11px] text-slate-400 mt-0.5">Liderando na estrutura</p>
         </div>
       </div>
+
+      {/* Gráfico Estratégico de Curva de Crescimento de Membros */}
+      <ChurchMemberGrowthChart
+        churchId={user.churchId}
+        totalMembers={totalMembers}
+        linkedCount={linkedCount}
+        unlinkedCount={unlinkedCount}
+        units={units}
+        members={membersList}
+        churchName={user.churchName}
+      />
 
       {/* Controles de Árvore */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">

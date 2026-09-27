@@ -19,9 +19,9 @@ export const ConnectionBadge: React.FC<ConnectionBadgeProps> = ({ className = ''
   useEffect(() => {
     let isMounted = true;
 
-    const initialFetch = async () => {
+    const initialFetch = async (force = false) => {
       try {
-        const res = await AppChurchService.checkConnection();
+        const res = await AppChurchService.checkConnection(force);
         if (isMounted) setStatus(res);
       } catch {
         if (isMounted) {
@@ -36,10 +36,11 @@ export const ConnectionBadge: React.FC<ConnectionBadgeProps> = ({ className = ''
       }
     };
 
+    // Consulta inicial única (utiliza cache em memória se já consultado)
     initialFetch();
 
     const handleOnline = () => {
-      initialFetch();
+      initialFetch(true);
     };
 
     const handleOffline = () => {
@@ -54,14 +55,10 @@ export const ConnectionBadge: React.FC<ConnectionBadgeProps> = ({ className = ''
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Periodic check every 60 seconds
-    const timer = setInterval(initialFetch, 60000);
-
     return () => {
       isMounted = false;
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
-      clearInterval(timer);
     };
   }, []);
 
