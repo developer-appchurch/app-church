@@ -1,9 +1,17 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import Image from 'next/image';
 import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile, Role, OrganizationalUnit } from '../types';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 import { AppChurchService } from '../lib/supabase';
+import {
+  optimizeImageToWebP,
+  validateImageFile,
+  validateImageForDatabase,
+  IMAGE_PRESETS,
+  formatFileSize,
+} from '../lib/imageOptimizer';
 import {
   Search,
   Plus,
@@ -20,6 +28,14 @@ import {
   Network,
   Layers,
   Users,
+  Edit3,
+  Camera,
+  Upload,
+  Clock,
+  Calendar,
+  Sparkles,
+  Check,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface MyCellViewProps {
@@ -36,6 +52,7 @@ interface MyCellViewProps {
     newStatus: AttendanceStatus,
     newPercentage: number
   ) => void;
+  onUpdateCell?: (updatedCell: CellGroup) => Promise<void> | void;
 }
 
 /**
@@ -70,6 +87,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   onOpenLeadershipTrack,
   onAddMember,
   onUpdateAttendance,
+  onUpdateCell,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('todos');
@@ -79,6 +97,22 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [selectedMemberForAttendance, setSelectedMemberForAttendance] = useState<CellMember | null>(
     null
   );
+
+  // Edit Cell form state
+  const [isEditCellModalOpen, setIsEditCellModalOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editMeetingDay, setEditMeetingDay] = useState('');
+  const [editMeetingTime, setEditMeetingTime] = useState('');
+  const [editNeighborhood, setEditNeighborhood] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editFotoUrl, setEditFotoUrl] = useState('');
+  const [isOptimizingCellPhoto, setIsOptimizingCellPhoto] = useState(false);
+  const [cellPhotoStats, setCellPhotoStats] = useState<{ size: string; reduction: string } | null>(null);
+  const [cellPhotoError, setCellPhotoError] = useState<string | null>(null);
+  const [isSavingCell, setIsSavingCell] = useState(false);
+  const [editCellSuccess, setEditCellSuccess] = useState(false);
+  const [editCellError, setEditCellError] = useState<string | null>(null);
+  const cellFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // New member form state
   const [newName, setNewName] = useState('');
@@ -415,6 +449,179 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     units,
     members,
   ]);
+
+  // Permissão estrita de edição em Linha Direta:
+  // - Pastores / Administradores (Acesso total a todas as células)
+  // - Líderes diretos da célula ativa
+  // - Líderes superiores em linha direta (Líder do Setor pai desta célula, Líder da Área pai desta célula)
+  // - Bloqueia líderes laterais e de outras áreas/setores
+  const canEditCurrentCell = useMemo(() => {
+    if (!currentUser) return false;
+    if (isPastorOrAdmin) return true;
+
+    // 1. Líder direto da célula
+    const isDirectLeader =
+      (cell.leaderMemberIds && cell.leaderMemberIds.includes(currentUser.id)) ||
+      (currentUser.currentCellId === cell.id && (isCellLeader || userHierarchyLevel >= 2)) ||
+      (currentUser.name && cell.leaderNames?.some((n) => n.toLowerCase() === currentUser.name.toLowerCase()));
+
+    if (isDirectLeader) return true;
+
+    // 2. Linha direta ascendente na árvore organizacional
+    if (units && units.length > 0) {
+      const currentUnit = units.find((u) => u.id === cell.id);
+      if (currentUnit) {
+        if (
+          currentUnit.leaders?.some(
+            (l) => l.id === currentUser.id || l.name?.toLowerCase() === currentUser.name?.toLowerCase()
+          )
+        ) {
+          return true;
+        }
+
+        let currentParentId: string | null | undefined = currentUnit.parentId;
+        while (currentParentId) {
+          const parentUnit = units.find((u) => u.id === currentParentId);
+          if (!parentUnit) break;
+
+          // Se é líder direto da unidade pai/ancestral desta célula
+          const isLeaderOfAncestor = parentUnit.leaders?.some(
+            (l) => l.id === currentUser.id || l.name?.toLowerCase() === currentUser.name?.toLowerCase()
+          );
+          if (isLeaderOfAncestor) {
+            return true;
+          }
+
+          // Se é líder de setor e o setor do usuário corresponde ao nome do pai direto
+          if (isSectorLeader && currentUser.sector && parentUnit.name.toLowerCase() === currentUser.sector.toLowerCase()) {
+            return true;
+          }
+
+          // Se é líder de área e a área do usuário corresponde ao nome do pai direto
+          if (isAreaLeader && currentUser.sector && parentUnit.name.toLowerCase() === currentUser.sector.toLowerCase()) {
+            return true;
+          }
+
+          currentParentId = parentUnit.parentId;
+        }
+      }
+    }
+
+    // 3. Fallback de Líder de Setor comparando setor do usuário com setor da célula ativa
+    if (isSectorLeader && currentUser.sector && cell.sectorName) {
+      const userSec = currentUser.sector.trim().toLowerCase();
+      const cellSec = cell.sectorName.trim().toLowerCase();
+      if (userSec === cellSec || userSec.includes(cellSec) || cellSec.includes(userSec)) {
+        return true;
+      }
+    }
+
+    return false;
+  }, [
+    currentUser,
+    isPastorOrAdmin,
+    isCellLeader,
+    isSectorLeader,
+    isAreaLeader,
+    cell,
+    units,
+    userHierarchyLevel,
+  ]);
+
+  const handleOpenEditCellModal = () => {
+    setEditName(cell.name || '');
+    setEditMeetingDay(cell.meetingDay || 'Quarta-feira');
+    setEditMeetingTime(cell.meetingTime || '19:30');
+    setEditNeighborhood(cell.bairro || '');
+    setEditAddress(cell.address || '');
+    setEditFotoUrl(cell.fotoUrl || '');
+    setCellPhotoStats(null);
+    setCellPhotoError(null);
+    setEditCellError(null);
+    setEditCellSuccess(false);
+    setIsEditCellModalOpen(true);
+  };
+
+  const handleCellPhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    e.target.value = '';
+    setCellPhotoError(null);
+
+    const validation = validateImageFile(file);
+    if (!validation.isValid) {
+      setCellPhotoError(validation.error || 'Arquivo de imagem inválido.');
+      return;
+    }
+
+    setIsOptimizingCellPhoto(true);
+    try {
+      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.FEED_POST);
+      if (!result.dataUrl.startsWith('data:image/webp')) {
+        throw new Error('A foto não pôde ser convertida para WebP.');
+      }
+      setEditFotoUrl(result.dataUrl);
+      setCellPhotoStats({
+        size: formatFileSize(result.optimizedSize),
+        reduction: result.reductionLabel,
+      });
+      setCellPhotoError(null);
+    } catch (err: any) {
+      console.error('Falha ao processar foto da célula:', err);
+      setCellPhotoError('Não foi possível converter a foto para WebP. Por favor, envie uma foto válida.');
+    } finally {
+      setIsOptimizingCellPhoto(false);
+    }
+  };
+
+  const handleSaveCellEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setEditCellError(null);
+
+    if (!editName.trim()) {
+      setEditCellError('Por favor, informe o nome da célula.');
+      return;
+    }
+
+    if (editFotoUrl && editFotoUrl.startsWith('data:')) {
+      const dbValidation = validateImageForDatabase(editFotoUrl, 'Foto da célula');
+      if (!dbValidation.isValid) {
+        setEditCellError(dbValidation.error || 'A foto deve estar em formato WebP leve.');
+        return;
+      }
+    }
+
+    setIsSavingCell(true);
+    try {
+      const updated = await AppChurchService.updateCell({
+        cellId: cell.id,
+        churchId: cell.churchId || currentUser?.churchId || '',
+        name: editName.trim(),
+        meetingDay: editMeetingDay.trim(),
+        meetingTime: editMeetingTime.trim(),
+        neighborhood: editNeighborhood.trim(),
+        address: editAddress.trim(),
+        fotoUrl: editFotoUrl.trim() || undefined,
+        userMemberId: currentUser?.id,
+      });
+
+      if (onUpdateCell) {
+        await onUpdateCell(updated);
+      }
+
+      setEditCellSuccess(true);
+      setTimeout(() => {
+        setEditCellSuccess(false);
+        setIsEditCellModalOpen(false);
+      }, 900);
+    } catch (err: any) {
+      console.error('Erro ao salvar alterações da célula:', err);
+      setEditCellError(err?.message || 'Erro ao salvar alterações da célula.');
+    } finally {
+      setIsSavingCell(false);
+    }
+  };
 
   // Sincroniza a célula ativa caso esteja fora da cobertura permitida para o usuário
   useEffect(() => {
@@ -879,8 +1086,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             <span className="hidden lg:inline">Legenda</span>
           </button>
 
-          {/* Seletor de Células (A-Z) & Botão Novo Membro Lado a Lado */}
-          {(accessibleCells.length > 1 || userHierarchyLevel > 1) && (
+          {/* Seletor de Células (A-Z), Botão Editar Célula & Botão Novo Membro */}
+          {(accessibleCells.length > 1 || userHierarchyLevel > 1 || canEditCurrentCell) && (
             <div className="flex flex-row items-center gap-2 justify-start lg:justify-end shrink-0 pt-2 lg:pt-0 border-t border-slate-100 lg:border-t-0 w-full lg:w-auto">
               {/* Seletor de Célula em Ordem Alfabética (A-Z) apenas com o nome da célula */}
               {accessibleCells.length > 1 && (
@@ -900,6 +1107,21 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     ))}
                   </select>
                 </div>
+              )}
+
+              {/* Botão Editar Informações da Célula (Visível para líderes em linha direta e pastores) */}
+              {canEditCurrentCell && (
+                <button
+                  type="button"
+                  id="btn-edit-cell-info"
+                  onClick={handleOpenEditCellModal}
+                  className="px-3 py-2 text-xs font-bold text-sky-950 bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 active:scale-95"
+                  title="Editar informações da célula (Nome, Dia, Horário, Endereço, Foto)"
+                >
+                  <Edit3 size={14} className="text-sky-700" />
+                  <span className="hidden sm:inline">Editar Célula</span>
+                  <span className="sm:hidden">Editar</span>
+                </button>
               )}
 
               {/* Botão Novo Membro (Visível apenas para nível hierárquico acima de 1) */}
@@ -1504,6 +1726,250 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     </>
                   ) : (
                     <span>Cadastrar Membro</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Editar Informações da Célula */}
+      {isEditCellModalOpen && (
+        <div
+          id="modal-edit-cell"
+          className="fixed inset-0 z-60 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150 select-none text-slate-800"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col border border-slate-200 animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-[#04213d] text-white p-4 sm:p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-300 flex items-center justify-center shrink-0">
+                  <Edit3 size={18} />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-base text-white truncate">Editar Informações da Célula</h3>
+                  <p className="text-xs text-sky-200 truncate">{cell.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-close-edit-cell-modal"
+                onClick={() => setIsEditCellModalOpen(false)}
+                className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
+                aria-label="Fechar modal"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body / Form */}
+            <form onSubmit={handleSaveCellEdit} className="flex flex-col">
+              <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+                {/* Feedback Erro / Sucesso */}
+                {editCellError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-800 font-semibold flex items-center gap-2 animate-in fade-in">
+                    <AlertCircle size={16} className="text-rose-600 shrink-0" />
+                    <span>{editCellError}</span>
+                  </div>
+                )}
+
+                {editCellSuccess && (
+                  <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2 animate-in fade-in">
+                    <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                    <span>Informações da célula atualizadas com sucesso!</span>
+                  </div>
+                )}
+
+                {/* Nome da Célula */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nome da Célula: <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="Ex: Célula Betel, Célula Koinonia"
+                    className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium"
+                  />
+                </div>
+
+                {/* Grid: Dia da Semana & Horário */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <Calendar size={13} className="text-sky-700" />
+                      <span>Dia da Reunião:</span>
+                    </label>
+                    <select
+                      value={editMeetingDay}
+                      onChange={(e) => setEditMeetingDay(e.target.value)}
+                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium bg-white cursor-pointer"
+                    >
+                      <option value="Segunda-feira">Segunda-feira</option>
+                      <option value="Terça-feira">Terça-feira</option>
+                      <option value="Quarta-feira">Quarta-feira</option>
+                      <option value="Quinta-feira">Quinta-feira</option>
+                      <option value="Sexta-feira">Sexta-feira</option>
+                      <option value="Sábado">Sábado</option>
+                      <option value="Domingo">Domingo</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <Clock size={13} className="text-sky-700" />
+                      <span>Horário da Reunião:</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editMeetingTime}
+                      onChange={(e) => setEditMeetingTime(e.target.value)}
+                      placeholder="Ex: 19:30 ou 20:00"
+                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium"
+                    />
+                  </div>
+                </div>
+
+                {/* Grid: Bairro & Endereço */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <MapPin size={13} className="text-rose-500" />
+                      <span>Bairro:</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editNeighborhood}
+                      onChange={(e) => setEditNeighborhood(e.target.value)}
+                      placeholder="Ex: Centro, Junco, Cohab"
+                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Endereço Completo:
+                    </label>
+                    <input
+                      type="text"
+                      value={editAddress}
+                      onChange={(e) => setEditAddress(e.target.value)}
+                      placeholder="Ex: Rua Sumaré, 245"
+                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800"
+                    />
+                  </div>
+                </div>
+
+                {/* Seção da Foto da Célula */}
+                <div className="pt-2 border-t border-slate-100 space-y-2.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    Foto da Célula (opcional):
+                  </label>
+
+                  <div className="flex items-center gap-3">
+                    <div
+                      onClick={() => cellFileInputRef.current?.click()}
+                      className="w-20 h-14 rounded-xl border-2 border-dashed border-sky-300 overflow-hidden bg-slate-100 shrink-0 relative group cursor-pointer flex items-center justify-center"
+                      title="Clique para carregar foto da célula"
+                    >
+                      {editFotoUrl ? (
+                        <Image
+                          src={editFotoUrl}
+                          alt="Foto da célula"
+                          width={80}
+                          height={56}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                          unoptimized
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <Camera size={20} className="text-slate-400 group-hover:text-sky-600 transition-colors" />
+                      )}
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Upload size={16} className="text-white" />
+                      </div>
+                    </div>
+
+                    <div className="flex-1 space-y-1">
+                      <button
+                        type="button"
+                        onClick={() => cellFileInputRef.current?.click()}
+                        disabled={isOptimizingCellPhoto}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 text-xs font-semibold rounded-xl transition cursor-pointer"
+                      >
+                        {isOptimizingCellPhoto ? (
+                          <Loader2 size={13} className="animate-spin text-sky-600" />
+                        ) : (
+                          <Upload size={13} />
+                        )}
+                        <span>Carregar Foto do Dispositivo</span>
+                      </button>
+                      <input
+                        ref={cellFileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleCellPhotoSelected}
+                      />
+                      <p className="text-[10px] text-slate-400">
+                        Convertida automaticamente para WebP leve.
+                      </p>
+                    </div>
+                  </div>
+
+                  {cellPhotoStats && (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold">
+                      <Sparkles size={12} className="text-emerald-600" />
+                      <span>WebP Otimizado: {cellPhotoStats.size} ({cellPhotoStats.reduction})</span>
+                    </div>
+                  )}
+
+                  {cellPhotoError && (
+                    <div className="p-2 rounded-lg bg-rose-50 text-rose-800 border border-rose-200 text-xs font-semibold">
+                      {cellPhotoError}
+                    </div>
+                  )}
+
+                  {/* Input de URL alternativo */}
+                  <div>
+                    <input
+                      type="url"
+                      value={editFotoUrl}
+                      onChange={(e) => setEditFotoUrl(e.target.value)}
+                      placeholder="Ou informe o link da imagem (URL https://...)"
+                      className="w-full text-xs p-2 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsEditCellModalOpen(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  id="btn-confirm-save-cell-edit"
+                  disabled={isSavingCell || !editName.trim()}
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSavingCell ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <span>Salvar Alterações</span>
                   )}
                 </button>
               </div>

@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     // 1. Busca todas as unidades ativas da igreja
     let unitsQuery = supabase
       .from('unidades')
-      .select('id, igreja_id, nome, pai_id')
+      .select('*')
       .eq('ativo', true);
 
     if (churchId !== 'all' && churchId !== 'church-master') {
@@ -56,20 +56,20 @@ export async function GET(req: NextRequest) {
 
     const unitIds = rawUnits.map((u) => u.id);
 
-    // 2. Busca detalhes físicos da tabela 'celulas' (bairro, endereço, dia_semana, horario, foto_url)
-    const { data: celulasRows, error: celulasError } = await supabase
-      .from('celulas')
-      .select('unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros, foto_url')
-      .in('unidade_id', unitIds);
-
-    if (celulasError && !celulasError.message?.includes('foto_url')) {
-      console.warn('Aviso ao consultar celulas:', celulasError.message);
-    }
-
+    // 2. Opcional: Busca detalhes complementares em 'celulas' (para fallback durante migração suave)
     const celulaDetailMap = new Map<string, any>();
-    (celulasRows || []).forEach((c: any) => {
-      celulaDetailMap.set(c.unidade_id, c);
-    });
+    try {
+      const { data: celulasRows } = await supabase
+        .from('celulas')
+        .select('*')
+        .in('unidade_id', unitIds);
+
+      (celulasRows || []).forEach((c: any) => {
+        celulaDetailMap.set(c.unidade_id, c);
+      });
+    } catch {
+      // Tabela 'celulas' é opcional; dados primários estão em 'unidades'
+    }
 
     // 3. Mapeia unidades pai (setores / áreas)
     const parentNameMap = new Map<string, string>();
@@ -113,7 +113,7 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    // 5. Contagem de membros por unidade
+    // 5. Contagem em tempo real de membros por unidade (como garantia além da coluna quantidade_membros)
     const { data: membersCountData } = await supabase
       .from('membros')
       .select('unidade_id')
@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
     let cellUnits = rawUnits.filter((u: any) => celulaDetailMap.has(u.id) || !parentIdsSet.has(u.id));
     if (cellUnits.length === 0) cellUnits = rawUnits;
 
-    // 7. Monta a lista completa de células
+    // 7. Monta a lista completa de células com todos os dados exclusivos lidos de 'unidades'
     const allCelulas: CelulaCardItem[] = cellUnits.map((u: any) => {
       const detail = celulaDetailMap.get(u.id);
       const parentName = u.pai_id ? parentNameMap.get(u.pai_id) : 'Setor Geral';
@@ -140,17 +140,41 @@ export async function GET(req: NextRequest) {
       const leaderNames = leaderNamesByUnit.get(u.id) || [];
       const leaderIds = leadersByUnit.get(u.id) || [];
 
+      // Mapeia prioritariamente as colunas de 'unidades' e fallback suave para 'celulas'
+      const realDiaSemana =
+        u?.dia_semana ||
+        u?.dia_reuniao ||
+        detail?.dia_semana ||
+        detail?.dia_reuniao ||
+        '';
+
+      const realHorario =
+        u?.horario ||
+        u?.horario_reuniao ||
+        detail?.horario ||
+        detail?.horario_reuniao ||
+        '';
+
+      const realBairro = u?.bairro || detail?.bairro || 'Bairro Central';
+      const realEndereco = u?.endereco || detail?.endereco || 'Endereço da Célula';
+      const realFotoUrl = u?.foto_url || detail?.foto_url || undefined;
+      
+      // Contagem atualizada e atualizável
+      const calculatedCount = countMap.get(u.id);
+      const dbMemberCount = typeof u?.quantidade_membros === 'number' ? u.quantidade_membros : (detail?.quantidade_membros ?? 0);
+      const finalMemberCount = calculatedCount !== undefined ? calculatedCount : dbMemberCount;
+
       return {
         id: u.id,
         unidadeId: u.id,
         churchId: u.igreja_id,
         nome: u.nome,
-        bairro: detail?.bairro || 'Bairro Central',
-        endereco: detail?.endereco || 'Rua Principal da Célula',
-        diaSemana: detail?.dia_semana || 'Quinta-feira',
-        horario: detail?.horario || '19:30',
-        fotoUrl: detail?.foto_url || undefined,
-        memberCount: countMap.get(u.id) || detail?.quantidade_membros || 0,
+        bairro: realBairro,
+        endereco: realEndereco,
+        diaSemana: realDiaSemana || 'Dia a definir',
+        horario: realHorario || 'Horário a definir',
+        fotoUrl: realFotoUrl,
+        memberCount: finalMemberCount,
         leaderNames,
         leaderMemberIds: leaderIds,
         sectorName: parentName,

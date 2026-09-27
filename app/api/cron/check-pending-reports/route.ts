@@ -116,7 +116,7 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
     if ((!units || units.length === 0) || (uErr && uErr.message.includes('column'))) {
       const allUnitsRes = await supabase
         .from('unidades')
-        .select('id, igreja_id, nome, pai_id');
+        .select('*');
       if (!allUnitsRes.error && allUnitsRes.data) {
         units = allUnitsRes.data;
         uErr = null;
@@ -125,19 +125,23 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
 
     if (units && units.length > 0) {
       const unitIds = units.map((u: any) => u.id);
-      const { data: celulasData } = await supabase
-        .from('celulas')
-        .select('unidade_id, dia_semana')
-        .in('unidade_id', unitIds);
+      let celulaMap = new Map<string, any>();
+      try {
+        const { data: celulasData } = await supabase
+          .from('celulas')
+          .select('unidade_id, dia_semana, dia_reuniao')
+          .in('unidade_id', unitIds);
 
-      const celulaMap = new Map<string, any>();
-      (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
+        (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
+      } catch {
+        // Tabela celulas é opcional
+      }
 
       rawCells = units.map((u: any) => ({
         id: u.id,
         nome: u.nome,
         igreja_id: u.igreja_id,
-        dia_reuniao: celulaMap.get(u.id)?.dia_semana || 'Terça-feira',
+        dia_reuniao: u.dia_semana || u.dia_reuniao || celulaMap.get(u.id)?.dia_semana || celulaMap.get(u.id)?.dia_reuniao || 'Terça-feira',
       }));
     } else {
       // Tenta tabela unidades_organizacionais se unidades não existir

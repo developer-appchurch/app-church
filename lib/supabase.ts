@@ -1353,14 +1353,18 @@ export const AppChurchService = {
         if (!uErr && units && units.length > 0) {
           const unitIds = units.map((u: any) => u.id);
 
-          // 2. Busca detalhes de células (dia, horário, endereço, etc.)
-          const { data: celulasData } = await supabase
-            .from('celulas')
-            .select('unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros')
-            .in('unidade_id', unitIds);
-
+          // 2. Opcional: Busca detalhes complementares em 'celulas' (para compatibilidade suave)
           const celulaMap = new Map<string, any>();
-          (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
+          try {
+            const { data: celulasData } = await supabase
+              .from('celulas')
+              .select('unidade_id, bairro, endereco, dia_semana, dia_reuniao, horario, horario_reuniao, quantidade_membros, foto_url')
+              .in('unidade_id', unitIds);
+
+            (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
+          } catch {
+            // Tabela celulas é opcional
+          }
 
           // 3. Mapeia nomes das unidades superiores (setor / distrito / área)
           const parentNameMap = new Map<string, string>();
@@ -1439,6 +1443,11 @@ export const AppChurchService = {
             } else if (leaderNames.length > 2) {
               formattedLeader = `${leaderNames.slice(0, -1).join(', ')} e ${leaderNames[leaderNames.length - 1]}`;
             }
+
+            const calcCount = countMap.get(u.id);
+            const dbCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : (cInfo?.quantidade_membros || 0);
+            const finalCount = calcCount !== undefined ? calcCount : dbCount;
+
             return {
               id: u.id,
               churchId: u.igreja_id,
@@ -1446,10 +1455,10 @@ export const AppChurchService = {
               leaderName: formattedLeader,
               leaderNames: leaderNames,
               sectorName: parentName || 'Setor Geral',
-              address: cInfo?.endereco || 'Rua Sumaré, 245 - Junco',
-              meetingDay: cInfo?.dia_semana || cInfo?.dia_reuniao || 'Quinta-feira',
-              meetingTime: cInfo?.horario || cInfo?.horario_reuniao || '19:30',
-              memberCount: countMap.get(u.id) || cInfo?.quantidade_membros || 0,
+              address: u.endereco || cInfo?.endereco || (u.bairro ? `Bairro ${u.bairro}` : 'Endereço da Célula'),
+              meetingDay: u.dia_semana || u.dia_reuniao || cInfo?.dia_semana || cInfo?.dia_reuniao || 'Quinta-feira',
+              meetingTime: u.horario || u.horario_reuniao || cInfo?.horario || cInfo?.horario_reuniao || '19:30',
+              memberCount: finalCount,
               parentUnitId: u.pai_id || null,
               parentName: parentName || undefined,
               areaName: areaName || undefined,
@@ -1548,6 +1557,87 @@ export const AppChurchService = {
     saveToStorage(`${STORAGE_KEYS.CELLS}_${payload.churchId}`, [fallbackCell, ...cachedChurch.filter((c) => c.id !== fallbackId)]);
 
     return fallbackCell;
+  },
+
+  /**
+   * Atualiza informações de uma célula existente (Nome, Dia, Horário, Endereço, Foto, etc.)
+   */
+  async updateCell(payload: {
+    cellId: string;
+    churchId: string;
+    name?: string;
+    meetingDay?: string;
+    meetingTime?: string;
+    neighborhood?: string;
+    address?: string;
+    fotoUrl?: string;
+    parentUnitId?: string | null;
+    userMemberId?: string;
+  }): Promise<CellGroup> {
+    if (typeof window !== 'undefined') {
+      try {
+        const response = await fetch('/api/cells/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (response.ok && data?.success && data?.cell) {
+          const updatedCell: CellGroup = data.cell;
+
+          // Atualiza cache local de células
+          const cached = loadFromStorage<CellGroup[]>(`${STORAGE_KEYS.CELLS}_${payload.churchId}`, []);
+          saveToStorage(
+            `${STORAGE_KEYS.CELLS}_${payload.churchId}`,
+            cached.map((c) => (c.id === updatedCell.id ? { ...c, ...updatedCell } : c))
+          );
+
+          const globalCached = loadFromStorage<CellGroup[]>(STORAGE_KEYS.CELLS, INITIAL_CELLS);
+          saveToStorage(
+            STORAGE_KEYS.CELLS,
+            globalCached.map((c) => (c.id === updatedCell.id ? { ...c, ...updatedCell } : c))
+          );
+
+          return updatedCell;
+        } else if (data?.error) {
+          throw new Error(data.error);
+        }
+      } catch (err: any) {
+        if (err?.message && !err.message.includes('fetch')) {
+          throw err;
+        }
+        console.warn('Falha na rota /api/cells/update, tentando modo local:', err);
+      }
+    }
+
+    // Fallback local caso offline
+    const cached = loadFromStorage<CellGroup[]>(`${STORAGE_KEYS.CELLS}_${payload.churchId}`, []);
+    const existing = cached.find((c) => c.id === payload.cellId);
+    const updated: CellGroup = {
+      ...(existing || {
+        id: payload.cellId,
+        churchId: payload.churchId,
+        name: payload.name || 'Célula',
+        leaderName: 'Líder',
+        sectorName: 'Setor Geral',
+        address: payload.address || '',
+        meetingDay: payload.meetingDay || 'Quarta-feira',
+        meetingTime: payload.meetingTime || '19:30',
+        memberCount: 0,
+      }),
+      ...(payload.name ? { name: payload.name } : {}),
+      ...(payload.meetingDay ? { meetingDay: payload.meetingDay } : {}),
+      ...(payload.meetingTime ? { meetingTime: payload.meetingTime } : {}),
+      ...(payload.neighborhood ? { bairro: payload.neighborhood } : {}),
+      ...(payload.address ? { address: payload.address } : {}),
+      ...(payload.fotoUrl ? { fotoUrl: payload.fotoUrl } : {}),
+    };
+
+    saveToStorage(
+      `${STORAGE_KEYS.CELLS}_${payload.churchId}`,
+      cached.map((c) => (c.id === updated.id ? updated : c))
+    );
+    return updated;
   },
 
   /**

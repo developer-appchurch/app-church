@@ -4,7 +4,7 @@ import React, { memo } from 'react';
 import Image from 'next/image';
 import { CelulaCardItem } from '@/types';
 import { getCellOptimizedImageUrl } from '@/lib/celulasService';
-import { MapPin, Calendar, Clock, Users, ChevronRight, UserCheck } from 'lucide-react';
+import { MapPin, Calendar, Clock, Users, ChevronRight } from 'lucide-react';
 
 interface CelulaCardProps {
   celula: CelulaCardItem;
@@ -14,19 +14,13 @@ interface CelulaCardProps {
 const CelulaCardComponent: React.FC<CelulaCardProps> = ({ celula, onSelect }) => {
   const imageUrl = getCellOptimizedImageUrl(celula.fotoUrl, celula.id || celula.nome, 600, 80);
 
-  // Formata dia da semana limpo (ex: "Quinta" em vez de "Quinta-feira")
-  const shortDay = (celula.diaSemana || 'Sexta').replace(/-feira/i, '').trim();
-  const cleanTime = (celula.horario || '19:30').replace(/^(\d{1,2}):(\d{2})$/, '$1h$2').trim();
+  // Formata dia da semana e horário reais sem valores fictícios fixos
+  const rawDay = celula.diaSemana && celula.diaSemana !== 'Dia a definir' ? celula.diaSemana : '';
+  const shortDay = rawDay ? rawDay.replace(/-feira/i, '').trim() : '';
+  const rawTime = celula.horario && celula.horario !== 'Horário a definir' ? celula.horario : '';
+  const cleanTime = rawTime ? rawTime.replace(/^(\d{1,2}):(\d{2})$/, '$1h$2').trim() : '';
 
-  // Formata líderes
-  const leaderDisplay =
-    celula.leaderNames.length === 1
-      ? celula.leaderNames[0]
-      : celula.leaderNames.length === 2
-      ? `${celula.leaderNames[0]} e ${celula.leaderNames[1]}`
-      : celula.leaderNames.length > 2
-      ? `${celula.leaderNames.slice(0, -1).join(', ')} e ${celula.leaderNames[celula.leaderNames.length - 1]}`
-      : 'Liderança local';
+  const hasSchedule = Boolean(shortDay || cleanTime);
 
   return (
     <div
@@ -51,13 +45,23 @@ const CelulaCardComponent: React.FC<CelulaCardProps> = ({ celula, onSelect }) =>
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-black/20 pointer-events-none" />
 
         {/* Badge superior: Dia da semana & Horário */}
-        <div className="absolute top-1.5 left-1.5 sm:top-2.5 sm:left-2.5 flex items-center gap-1 sm:gap-1.5 px-1.5 py-0.5 sm:px-2.5 sm:py-1 bg-white/95 backdrop-blur-md text-[#052447] text-[9.5px] sm:text-[11px] font-bold rounded-md sm:rounded-lg shadow-xs border border-white/40">
-          <Calendar size={11} className="text-sky-600 shrink-0 hidden xxs:inline" />
-          <span>{shortDay}</span>
-          <span className="text-slate-300">•</span>
-          <Clock size={10} className="text-slate-400 shrink-0" />
-          <span>{cleanTime}</span>
-        </div>
+        {hasSchedule && (
+          <div className="absolute top-1.5 left-1.5 sm:top-2.5 sm:left-2.5 flex items-center gap-1 sm:gap-1.5 px-1.5 py-0.5 sm:px-2.5 sm:py-1 bg-white/95 backdrop-blur-md text-[#052447] text-[9.5px] sm:text-[11px] font-bold rounded-md sm:rounded-lg shadow-xs border border-white/40">
+            {shortDay && (
+              <>
+                <Calendar size={11} className="text-sky-600 shrink-0 hidden xxs:inline" />
+                <span>{shortDay}</span>
+              </>
+            )}
+            {shortDay && cleanTime && <span className="text-slate-300">•</span>}
+            {cleanTime && (
+              <>
+                <Clock size={10} className="text-slate-400 shrink-0" />
+                <span>{cleanTime}</span>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Badge superior direito: Contagem de Membros */}
         {celula.memberCount > 0 && (
@@ -98,25 +102,10 @@ const CelulaCardComponent: React.FC<CelulaCardProps> = ({ celula, onSelect }) =>
               </>
             )}
           </p>
-
-          {/* Líderes da Célula */}
-          <div className="mt-2 pt-2 sm:mt-2.5 sm:pt-2.5 border-t border-slate-100 flex items-center gap-1.5 text-xs text-slate-700">
-            <div className="p-1 bg-sky-50 text-sky-700 rounded-md shrink-0">
-              <UserCheck size={12} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <span className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider text-slate-400 block leading-tight">
-                {celula.leaderNames.length > 1 ? 'Líderes' : 'Líder'}
-              </span>
-              <p className="font-medium text-slate-800 text-[11px] sm:text-xs truncate" title={leaderDisplay}>
-                {leaderDisplay}
-              </p>
-            </div>
-          </div>
         </div>
 
         {/* Rodapé do Card com CTA sutil */}
-        <div className="mt-2 pt-1.5 sm:mt-3 sm:pt-2 flex items-center justify-between text-[10px] sm:text-xs font-bold text-sky-800 group-hover:text-sky-950 border-t border-slate-50">
+        <div className="mt-2.5 pt-2 sm:mt-3 sm:pt-2 flex items-center justify-between text-[10px] sm:text-xs font-bold text-sky-800 group-hover:text-sky-950 border-t border-slate-100">
           <span className="text-[10px] sm:text-[11px] font-semibold text-slate-400 group-hover:text-sky-700 transition-colors truncate">
             Ver detalhes
           </span>

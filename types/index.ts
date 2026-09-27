@@ -115,6 +115,8 @@ export interface CellGroup {
   leaderNames?: string[];
   sectorName: string;
   address: string;
+  bairro?: string;
+  fotoUrl?: string;
   meetingDay: string;
   meetingTime: string;
   memberCount: number;
@@ -309,6 +311,7 @@ export interface OrganizationalUnit {
   meetingTime?: string;
   neighborhood?: string;
   address?: string;
+  fotoUrl?: string;
   latitude?: number;
   longitude?: number;
   memberCount: number;

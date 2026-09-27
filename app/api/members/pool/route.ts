@@ -280,14 +280,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Falha ao cadastrar membro: ${insertErr.message}` }, { status: 500 });
     }
 
-    // Se vinculado à célula, atualizar contagem de membros em celulas se aplicável
+    // Se vinculado à célula, atualizar contagem de membros em unidades (e celulas como fallback)
     if (validCellId) {
       try {
         const { count: countPt } = await supabase
           .from('membros')
           .select('*', { count: 'exact', head: true })
           .eq('unidade_id', validCellId);
-        await supabase.from('celulas').update({ quantidade_membros: countPt || 1 }).eq('unidade_id', validCellId);
+        
+        const currentCount = countPt || 1;
+        await supabase.from('unidades').update({ quantidade_membros: currentCount }).eq('id', validCellId);
+        try {
+          await supabase.from('celulas').update({ quantidade_membros: currentCount }).eq('unidade_id', validCellId);
+        } catch {}
       } catch {}
     }
 
@@ -395,14 +400,19 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 
-    // Atualiza contadores
+    // Atualiza contadores na tabela unidades
     if (validCellId) {
       try {
         const { count } = await supabase
           .from('membros')
           .select('*', { count: 'exact', head: true })
           .eq('unidade_id', validCellId);
-        await supabase.from('celulas').update({ quantidade_membros: count || 1 }).eq('unidade_id', validCellId);
+        
+        const countVal = count || 1;
+        await supabase.from('unidades').update({ quantidade_membros: countVal }).eq('id', validCellId);
+        try {
+          await supabase.from('celulas').update({ quantidade_membros: countVal }).eq('unidade_id', validCellId);
+        } catch {}
       } catch {}
     }
 
@@ -465,14 +475,19 @@ export async function DELETE(req: NextRequest) {
       await deleteAuthUserForMember(authUserId);
     }
 
-    // Recalcula contadores de célula se aplicável
+    // Recalcula contadores de célula em unidades
     if (oldUnitId) {
       try {
         const { count } = await supabase
           .from('membros')
           .select('*', { count: 'exact', head: true })
           .eq('unidade_id', oldUnitId);
-        await supabase.from('celulas').update({ quantidade_membros: count || 0 }).eq('unidade_id', oldUnitId);
+        
+        const countVal = count || 0;
+        await supabase.from('unidades').update({ quantidade_membros: countVal }).eq('id', oldUnitId);
+        try {
+          await supabase.from('celulas').update({ quantidade_membros: countVal }).eq('unidade_id', oldUnitId);
+        } catch {}
       } catch {}
     }
 

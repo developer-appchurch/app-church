@@ -61,13 +61,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    // 1. Busca unidade base
-    const { data: unit, error: unitErr } = await supabase
+    // 1. Busca unidade base com todas as colunas
+    const { data: rawUnit, error: unitErr } = await supabase
       .from('unidades')
-      .select('id, igreja_id, nivel_tipo_id, pai_id, nome, ativo, criado_em')
+      .select('*')
       .eq('id', unitId)
       .eq('igreja_id', churchId)
       .maybeSingle();
+
+    const unit = rawUnit as any;
 
     if (unitErr || !unit) {
       return NextResponse.json({ error: 'Unidade não encontrada.' }, { status: 404 });
@@ -144,7 +146,7 @@ export async function GET(req: NextRequest) {
       }));
     }
 
-    const celData = celulaRes.data;
+    const celData = celulaRes?.data;
     const membersList = (membersRes.data || []).map((m: any) => ({
       id: m.id,
       name: m.nome,
@@ -152,6 +154,11 @@ export async function GET(req: NextRequest) {
       avatarUrl: m.url_avatar,
       phone: m.telefone,
     }));
+
+    const finalMemberCount =
+      typeof unit.quantidade_membros === 'number'
+        ? unit.quantidade_membros
+        : membersList.length;
 
     const response: UnitDetailResponse = {
       id: unit.id,
@@ -162,13 +169,13 @@ export async function GET(req: NextRequest) {
       parentId: unit.pai_id,
       parentName: parentRes.data?.nome,
       isActive: unit.ativo !== false,
-      meetingDay: celData?.dia_semana,
-      meetingTime: celData?.horario,
-      neighborhood: celData?.bairro,
-      address: celData?.endereco,
-      latitude: celData?.latitude ? Number(celData.latitude) : undefined,
-      longitude: celData?.longitude ? Number(celData.longitude) : undefined,
-      memberCount: membersList.length,
+      meetingDay: unit.dia_semana || unit.dia_reuniao || celData?.dia_semana || celData?.dia_reuniao,
+      meetingTime: unit.horario || unit.horario_reuniao || celData?.horario || celData?.horario_reuniao,
+      neighborhood: unit.bairro || celData?.bairro,
+      address: unit.endereco || celData?.endereco,
+      latitude: (unit.latitude || celData?.latitude) ? Number(unit.latitude || celData?.latitude) : undefined,
+      longitude: (unit.longitude || celData?.longitude) ? Number(unit.longitude || celData?.longitude) : undefined,
+      memberCount: finalMemberCount,
       leaders: leaderDetails,
       members: membersList,
       cobertura: coberturaList,

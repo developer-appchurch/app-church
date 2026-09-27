@@ -398,21 +398,37 @@ export async function POST(req: NextRequest) {
             id: seedUnitId,
             igreja_id: churchId,
             tipo_unidade_id: tipoNivel?.id || null,
+            nivel_tipo_id: tipoNivel?.id || null,
             nome: 'Célula Betel',
+            bairro: 'Centro',
+            endereco: `${input.city.trim()} - Centro`,
+            dia_semana: 'Quarta-feira',
+            dia_reuniao: 'Quarta-feira',
+            horario: '19:30',
+            horario_reuniao: '19:30',
+            quantidade_membros: 1,
+            ativo: true,
           },
         ]);
 
-        // 3. Cria a celula vinculada
-        await supabase.from('celulas').insert([
-          {
-            id: seedCellId,
-            unidade_id: seedUnitId,
-            dia_reuniao: 'Quarta-feira',
-            horario_reuniao: '19:30',
-            endereco: `${input.city.trim()} - Centro`,
-            bairro: 'Centro',
-          },
-        ]);
+        // 3. Opcional: Cria a celula vinculada se a tabela celulas existir
+        try {
+          await supabase.from('celulas').insert([
+            {
+              id: seedCellId,
+              unidade_id: seedUnitId,
+              dia_semana: 'Quarta-feira',
+              dia_reuniao: 'Quarta-feira',
+              horario: '19:30',
+              horario_reuniao: '19:30',
+              endereco: `${input.city.trim()} - Centro`,
+              bairro: 'Centro',
+              quantidade_membros: 1,
+            },
+          ]);
+        } catch {
+          // Tabela celulas é opcional
+        }
 
         // 4. Atribui a unidade_id / celula_id ao pastor e tenta novamente
         pastorMemberPt.unidade_id = seedUnitId;

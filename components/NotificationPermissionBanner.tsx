@@ -18,6 +18,7 @@ export const NotificationPermissionBanner: React.FC<NotificationPermissionBanner
     isSubscribed,
     isLoading,
     subscribeToPush,
+    refreshPermission,
   } = usePushNotifications(user.id);
 
   const [isDismissed, setIsDismissed] = useState<boolean>(() => {
@@ -36,6 +37,38 @@ export const NotificationPermissionBanner: React.FC<NotificationPermissionBanner
   });
 
   const [successToast, setSuccessToast] = useState(false);
+
+  // Reavalia o estado de dismiss e permissões ao montar e quando ocorrerem eventos
+  useEffect(() => {
+    const updateState = () => {
+      refreshPermission();
+      if (typeof window === 'undefined') return;
+      const supported =
+        'serviceWorker' in navigator &&
+        'PushManager' in window &&
+        'Notification' in window;
+      if (!supported) {
+        setIsDismissed(true);
+        return;
+      }
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        setIsDismissed(true);
+        return;
+      }
+      const previouslyDismissed = localStorage.getItem('appchurch_push_dismissed');
+      setIsDismissed(previouslyDismissed === 'true');
+    };
+
+    updateState();
+
+    window.addEventListener('focus', updateState);
+    window.addEventListener('appchurch:reset-push-banner', updateState);
+
+    return () => {
+      window.removeEventListener('focus', updateState);
+      window.removeEventListener('appchurch:reset-push-banner', updateState);
+    };
+  }, [refreshPermission]);
 
   const handleDismiss = () => {
     setIsDismissed(true);

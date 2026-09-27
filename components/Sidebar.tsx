@@ -21,6 +21,12 @@ import {
   Loader2,
   AlertCircle,
   Compass,
+  Bell,
+  BellRing,
+  BellOff,
+  HelpCircle,
+  ExternalLink,
+  RefreshCw,
 } from 'lucide-react';
 import {
   optimizeImageToWebP,
@@ -32,6 +38,7 @@ import {
 import { ActiveScreen, UserProfile, CellGroup } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService } from '../lib/supabase';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -73,6 +80,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const [avatarSuccess, setAvatarSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Push Notifications state & actions
+  const {
+    isSupported: isPushSupported,
+    permission: pushPermission,
+    isSubscribed: isPushSubscribed,
+    isLoading: isPushLoading,
+    errorMessage: pushErrorMessage,
+    subscribeToPush,
+    refreshPermission: refreshPushPermission,
+  } = usePushNotifications(user?.id);
+
+  const [isPushHelpModalOpen, setIsPushHelpModalOpen] = useState(false);
+  const [pushFeedbackMessage, setPushFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleReactivateNotifications = async () => {
+    if (!user) return;
+    setPushFeedbackMessage(null);
+
+    // 1. Remove qualquer flag de dismiss e denied do localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('appchurch_push_dismissed');
+      localStorage.removeItem('appchurch_push_denied');
+      window.dispatchEvent(new Event('appchurch:reset-push-banner'));
+    }
+
+    refreshPushPermission();
+
+    // 2. Verifica a permissão atual em tempo real
+    if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+      setIsPushHelpModalOpen(true);
+      return;
+    }
+
+    // 3. Se for 'default' ou 'granted', dispara o fluxo de inscrição
+    const success = await subscribeToPush(user.id);
+    if (success) {
+      setPushFeedbackMessage({
+        type: 'success',
+        text: 'Notificações ativadas com sucesso! Você receberá alertas de relatórios pendentes.',
+      });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('appchurch:reset-push-banner'));
+      }
+      setTimeout(() => setPushFeedbackMessage(null), 4000);
+    } else {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        setIsPushHelpModalOpen(true);
+      }
+    }
+  };
 
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -331,6 +389,124 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               );
             })}
+            {/* Bloco de Notificações de Relatório Pendente */}
+            <div className="pt-3 pb-1 px-1 border-t border-slate-100">
+              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center ${
+                        isPushSubscribed
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : pushPermission === 'denied'
+                          ? 'bg-rose-100 text-rose-700'
+                          : 'bg-sky-100 text-sky-700'
+                      }`}
+                    >
+                      {isPushSubscribed ? (
+                        <BellRing size={15} />
+                      ) : pushPermission === 'denied' ? (
+                        <BellOff size={15} />
+                      ) : (
+                        <Bell size={15} />
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-xs font-bold text-[#04213d] leading-tight">
+                        Notificações de Relatório
+                      </div>
+                      <div className="text-[10px] text-slate-500 leading-tight">
+                        {isPushSubscribed
+                          ? 'Lembretes automáticos ativados'
+                          : pushPermission === 'denied'
+                          ? 'Bloqueado no navegador'
+                          : 'Lembretes de relatório pendente'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <span
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                      isPushSubscribed
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : pushPermission === 'denied'
+                        ? 'bg-rose-100 text-rose-800'
+                        : 'bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    {isPushSubscribed ? 'Ativo' : pushPermission === 'denied' ? 'Bloqueado' : 'Inativo'}
+                  </span>
+                </div>
+
+                {pushFeedbackMessage && (
+                  <div
+                    className={`p-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 animate-in fade-in ${
+                      pushFeedbackMessage.type === 'success'
+                        ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                        : 'bg-rose-50 text-rose-900 border border-rose-200'
+                    }`}
+                  >
+                    {pushFeedbackMessage.type === 'success' ? (
+                      <Check size={14} className="text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertCircle size={14} className="text-rose-600 shrink-0" />
+                    )}
+                    <span className="text-[11px] leading-tight">{pushFeedbackMessage.text}</span>
+                  </div>
+                )}
+
+                {pushErrorMessage && !pushFeedbackMessage && (
+                  <div className="p-2 bg-amber-50 text-amber-900 border border-amber-200 rounded-xl text-[11px] leading-snug">
+                    <p className="font-semibold">{pushErrorMessage}</p>
+                    {pushErrorMessage.includes('Brave') && (
+                      <p className="mt-1 text-[10px] text-amber-700">
+                        No Brave: Acesse Configurações → Privacidade e Segurança → ative &quot;Usar serviços do Google para mensagens push&quot;.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    id="btn-sidebar-toggle-push"
+                    onClick={handleReactivateNotifications}
+                    disabled={isPushLoading}
+                    className="flex-1 py-2 px-3 bg-[#04213d] hover:bg-[#073366] active:scale-95 text-white font-bold text-xs rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    title="Ativar ou reativar lembretes push no dispositivo"
+                  >
+                    {isPushLoading ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Verificando...</span>
+                      </>
+                    ) : isPushSubscribed ? (
+                      <>
+                        <Check size={13} className="text-emerald-400" />
+                        <span>Reativar / Sincronizar</span>
+                      </>
+                    ) : (
+                      <>
+                        <Bell size={13} />
+                        <span>Ativar Notificações Push</span>
+                      </>
+                    )}
+                  </button>
+
+                  {pushPermission === 'denied' && (
+                    <button
+                      type="button"
+                      id="btn-sidebar-push-help"
+                      onClick={() => setIsPushHelpModalOpen(true)}
+                      className="px-2.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer shrink-0"
+                      title="Ver como liberar no navegador"
+                    >
+                      Ver como liberar
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
           </nav>
         </div>
 
@@ -559,6 +735,98 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {isSavingAvatar ? 'Salvando...' : 'Salvar Nova Foto'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Como liberar notificações no navegador */}
+      {isPushHelpModalOpen && (
+        <div
+          id="modal-push-help"
+          className="fixed inset-0 z-70 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150 select-none text-slate-800"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col border border-slate-200 animate-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="bg-[#04213d] text-white p-4 sm:p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-300 flex items-center justify-center">
+                  <BellOff size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">Liberar Notificações</h3>
+                  <p className="text-xs text-sky-200">Permissão bloqueada no navegador</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                id="btn-close-push-help-modal"
+                onClick={() => setIsPushHelpModalOpen(false)}
+                className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
+                aria-label="Fechar"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-3.5 max-h-[75vh] overflow-y-auto text-xs text-slate-700">
+              <p className="font-semibold text-slate-900 leading-relaxed">
+                As notificações deste site foram marcadas como <strong>Bloqueadas</strong> nas configurações do seu navegador. O navegador não permite reabrir o pop-up de permissão automaticamente.
+              </p>
+
+              <div className="bg-sky-50 border border-sky-200 rounded-xl p-3.5 space-y-2">
+                <h4 className="font-bold text-sky-950 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  <Check size={14} className="text-sky-600" />
+                  Passo a Passo para Liberar:
+                </h4>
+                <ol className="list-decimal list-inside space-y-1.5 text-sky-900 font-medium pl-1">
+                  <li>
+                    Clique no ícone de <strong>Cadeado / Configurações do site</strong> (ao lado do link na barra de endereço do navegador).
+                  </li>
+                  <li>
+                    Localize a opção <strong>&quot;Notificações&quot;</strong>.
+                  </li>
+                  <li>
+                    Altere de <em>&quot;Bloquear&quot;</em> para <strong>&quot;Permitir&quot;</strong> (ou <em>&quot;Perguntar&quot;</em>).
+                  </li>
+                  <li>
+                    <strong>Recarregue a página</strong> ou clique no botão abaixo para tentar novamente.
+                  </li>
+                </ol>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-900 space-y-1">
+                <p className="font-bold text-[11px] uppercase tracking-wide">Usa o Navegador Brave?</p>
+                <p className="text-[11px] leading-snug">
+                  No Brave, vá em <em>Configurações → Privacidade e Segurança</em> e ative a opção <strong>&quot;Usar serviços do Google para mensagens push&quot;</strong>.
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={() => setIsPushHelpModalOpen(false)}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 rounded-xl hover:bg-slate-200 transition cursor-pointer"
+              >
+                Fechar
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsPushHelpModalOpen(false);
+                  await handleReactivateNotifications();
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw size={14} />
+                <span>Já liberei, tentar ativar agora</span>
+              </button>
             </div>
           </div>
         </div>

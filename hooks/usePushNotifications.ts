@@ -34,19 +34,26 @@ export function usePushNotifications(membroId?: string) {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Verifica se já existe uma assinatura ativa no Service Worker
-  useEffect(() => {
-    if (typeof window !== 'undefined' && isSupported && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.ready
-        .then((registration) => registration.pushManager.getSubscription())
-        .then((sub) => {
-          setIsSubscribed(Boolean(sub));
-        })
-        .catch((err) => {
-          console.warn('[Push] Erro ao consultar assinatura existente:', err);
-        });
+  const refreshPermission = useCallback(() => {
+    if (typeof window !== 'undefined' && typeof Notification !== 'undefined') {
+      setPermission(Notification.permission);
+      if (isSupported && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.ready
+          .then((registration) => registration.pushManager.getSubscription())
+          .then((sub) => {
+            setIsSubscribed(Boolean(sub));
+          })
+          .catch((err) => {
+            console.warn('[Push] Erro ao verificar assinatura:', err);
+          });
+      }
     }
   }, [isSupported]);
+
+  // Verifica se já existe uma assinatura ativa no Service Worker
+  useEffect(() => {
+    refreshPermission();
+  }, [refreshPermission]);
 
   const subscribeToPush = useCallback(
     async (targetMembroId?: string): Promise<boolean> => {
@@ -61,6 +68,11 @@ export function usePushNotifications(membroId?: string) {
         return false;
       }
 
+      // Remove a flag de descarte ao solicitar explicitamente a inscrição
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('appchurch_push_dismissed');
+      }
+
       setIsLoading(true);
       setErrorMessage(null);
 
@@ -72,6 +84,9 @@ export function usePushNotifications(membroId?: string) {
         if (userPermission !== 'granted') {
           if (userPermission === 'denied') {
             localStorage.setItem('appchurch_push_denied', 'true');
+            setErrorMessage(
+              'A permissão de notificações foi bloqueada no navegador. Para ativar, libere as notificações nas configurações do site.'
+            );
           }
           setIsLoading(false);
           return false;
@@ -138,10 +153,23 @@ export function usePushNotifications(membroId?: string) {
 
         setIsSubscribed(true);
         localStorage.removeItem('appchurch_push_denied');
+        localStorage.removeItem('appchurch_push_dismissed');
         return true;
       } catch (err: any) {
         console.error('[Push] Erro ao ativar notificações:', err);
-        setErrorMessage(err.message || 'Não foi possível ativar as notificações.');
+        const isAbort =
+          err?.name === 'AbortError' ||
+          err?.message?.includes('AbortError') ||
+          err?.message?.includes('Registration failed - push service error') ||
+          err?.message?.includes('push service');
+
+        if (isAbort) {
+          setErrorMessage(
+            'O serviço de push foi bloqueado pelo seu navegador (comum no Brave ou configurações restritivas). Para receber notificações, ative a opção "Usar serviços do Google para mensagens push" nas configurações de Privacidade e Segurança do navegador.'
+          );
+        } else {
+          setErrorMessage(err.message || 'Não foi possível ativar as notificações.');
+        }
         return false;
       } finally {
         setIsLoading(false);
@@ -184,5 +212,6 @@ export function usePushNotifications(membroId?: string) {
     errorMessage,
     subscribeToPush,
     unsubscribeFromPush,
+    refreshPermission,
   };
 }

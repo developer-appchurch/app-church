@@ -433,6 +433,24 @@ export default function Home() {
     );
   };
 
+  const handleUpdateCell = async (updatedCell: CellGroup) => {
+    // 1. Atualização no estado local
+    setCells((prev) =>
+      prev.map((c) => (c.id === updatedCell.id ? { ...c, ...updatedCell } : c))
+    );
+
+    // 2. Atualização no cache do React Query
+    if (user?.churchId) {
+      queryClient.setQueryData(['church-cells', user.churchId], (old: CellGroup[] | undefined) => {
+        const list = old || [];
+        return list.map((c) => (c.id === updatedCell.id ? { ...c, ...updatedCell } : c));
+      });
+      queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] });
+      queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] });
+      queryClient.invalidateQueries({ queryKey: ['celulas-gallery'] });
+    }
+  };
+
   const handleSaveLeadershipProgress = async (
     memberId: string,
     progress: LeadershipTrackProgress
@@ -679,6 +697,7 @@ export default function Home() {
               onOpenLeadershipTrack={(member) => setSelectedMemberForTrack(member)}
               onAddMember={handleAddMember}
               onUpdateAttendance={handleUpdateAttendance}
+              onUpdateCell={handleUpdateCell}
             />
           )}
 

@@ -105,16 +105,25 @@ export async function POST(req: NextRequest) {
       cellLevelId = newLvl?.id || newLvlId;
     }
 
-    // 2. Inserir em 'unidades' (tabela principal)
-    const { error: unitErr } = await supabase.from('unidades').insert([
-      {
-        id: unitId,
-        igreja_id: body.churchId,
-        nivel_tipo_id: cellLevelId,
-        nome: cellName,
-        pai_id: body.parentUnitId || null,
-      },
-    ]);
+    // 2. Inserir em 'unidades' com todos os dados consolidados da célula
+    const initialMembersCount = body.leaderMemberId ? 1 : 0;
+    const unitPayload: any = {
+      id: unitId,
+      igreja_id: body.churchId,
+      nivel_tipo_id: cellLevelId,
+      nome: cellName,
+      pai_id: body.parentUnitId || null,
+      bairro: body.neighborhood?.trim() || 'Centro',
+      endereco: formattedAddress,
+      dia_semana: meetingDay,
+      dia_reuniao: meetingDay,
+      horario: meetingTime,
+      horario_reuniao: meetingTime,
+      quantidade_membros: initialMembersCount,
+      ativo: true,
+    };
+
+    const { error: unitErr } = await supabase.from('unidades').insert([unitPayload]);
     if (unitErr) {
       console.error('Falha ao inserir em unidades:', unitErr);
       return NextResponse.json(
@@ -123,19 +132,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Inserir em 'celulas' (extensão 1:1)
-    const { error: celulaErr } = await supabase.from('celulas').insert([
-      {
-        unidade_id: unitId,
-        bairro: body.neighborhood?.trim() || 'Centro',
-        endereco: formattedAddress,
-        dia_semana: meetingDay,
-        horario: meetingTime,
-        quantidade_membros: body.leaderMemberId ? 1 : 0,
-      },
-    ]);
-    if (celulaErr) {
-      console.warn('Aviso ao inserir em celulas:', celulaErr);
+    // 3. Opcional: Atualizar tabela 'celulas' (para compatibilidade legada durante transição)
+    try {
+      await supabase.from('celulas').insert([
+        {
+          unidade_id: unitId,
+          bairro: body.neighborhood?.trim() || 'Centro',
+          endereco: formattedAddress,
+          dia_semana: meetingDay,
+          dia_reuniao: meetingDay,
+          horario: meetingTime,
+          horario_reuniao: meetingTime,
+          quantidade_membros: initialMembersCount,
+        },
+      ]);
+    } catch {
+      // Ignora erro em 'celulas' pois os dados estão 100% gravados em 'unidades'
     }
 
     // 4. Inserir opcionalmente na tabela legada 'cells' (se existir como tabela física e não view)

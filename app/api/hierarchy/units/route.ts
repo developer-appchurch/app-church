@@ -186,6 +186,8 @@ export async function GET(req: NextRequest) {
       const flatUnits = rows.map((u: any) => {
         const unitLeaders = unitLeadersMap.get(u.id) || [];
         const celulaInfo = celulasMap.get(u.id);
+        const calcMemberCount = countMap.get(u.id);
+        const dbMemberCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : 0;
         return {
           id: u.id,
           parentId: u.pai_id || null,
@@ -193,13 +195,14 @@ export async function GET(req: NextRequest) {
           name: u.nome,
           isActive: u.ativo !== false,
           churchId: u.igreja_id,
-          memberCount: countMap.get(u.id) || 0,
+          memberCount: calcMemberCount !== undefined ? calcMemberCount : dbMemberCount,
           leaders: unitLeaders,
           leaderCount: unitLeaders.length,
-          meetingDay: celulaInfo?.dia_semana,
-          meetingTime: celulaInfo?.horario,
-          neighborhood: celulaInfo?.bairro,
-          address: celulaInfo?.endereco,
+          meetingDay: u.dia_semana || u.dia_reuniao || celulaInfo?.dia_semana,
+          meetingTime: u.horario || u.horario_reuniao || celulaInfo?.horario,
+          neighborhood: u.bairro || celulaInfo?.bairro,
+          address: u.endereco || celulaInfo?.endereco,
+          fotoUrl: u.foto_url || celulaInfo?.foto_url,
         };
       });
 
@@ -322,11 +325,12 @@ export async function GET(req: NextRequest) {
         parentName: u.pai_id ? unitNameMap.get(u.pai_id) || 'Unidade Superior' : undefined,
         isActive: u.ativo !== false,
         leaders: unitLeaders,
-        memberCount,
-        meetingDay: celulaInfo?.dia_semana,
-        meetingTime: celulaInfo?.horario,
-        neighborhood: celulaInfo?.bairro,
-        address: celulaInfo?.endereco,
+        memberCount: memberCount !== undefined ? memberCount : (typeof u.quantidade_membros === 'number' ? u.quantidade_membros : 0),
+        meetingDay: u.dia_semana || u.dia_reuniao || celulaInfo?.dia_semana,
+        meetingTime: u.horario || u.horario_reuniao || celulaInfo?.horario,
+        neighborhood: u.bairro || celulaInfo?.bairro,
+        address: u.endereco || celulaInfo?.endereco,
+        fotoUrl: u.foto_url || celulaInfo?.foto_url,
         createdAt: u.criado_em,
       };
     });
@@ -443,14 +447,23 @@ export async function POST(req: NextRequest) {
 
     const unitId = generateUUID();
 
-    // 3. Inserir na tabela unidades
-    const unitPayload = {
+    // 3. Inserir na tabela unidades com todos os dados da célula
+    const unitPayload: any = {
       id: unitId,
       igreja_id: input.churchId,
       nivel_tipo_id: input.levelTypeId,
       pai_id: isRootLevel ? null : (input.parentId && input.parentId.trim() !== '' ? input.parentId.trim() : null),
       nome: input.name.trim(),
       ativo: true,
+      bairro: input.neighborhood?.trim() || (isLeafLevel ? 'Centro' : null),
+      endereco: input.address?.trim() || null,
+      dia_semana: input.meetingDay?.trim() || (isLeafLevel ? 'Quarta-feira' : null),
+      dia_reuniao: input.meetingDay?.trim() || (isLeafLevel ? 'Quarta-feira' : null),
+      horario: input.meetingTime?.trim() || (isLeafLevel ? '19:30' : null),
+      horario_reuniao: input.meetingTime?.trim() || (isLeafLevel ? '19:30' : null),
+      latitude: input.latitude !== undefined ? Number(input.latitude) : null,
+      longitude: input.longitude !== undefined ? Number(input.longitude) : null,
+      quantidade_membros: 0,
     };
 
     const { error: insertUnitErr } = await supabase.from('unidades').insert([unitPayload]);
@@ -459,22 +472,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Falha ao criar unidade: ${insertUnitErr.message}` }, { status: 500 });
     }
 
-    // 4. Se for nível folha (Célula), insere em celulas e em cells (retrocompatibilidade)
+    // 4. Opcional: Atualizar 'celulas' para retrocompatibilidade sem travar caso celulas não exista
     if (isLeafLevel) {
-      const celulaPayload = {
-        unidade_id: unitId,
-        bairro: input.neighborhood?.trim() || 'Centro',
-        endereco: input.address?.trim() || '',
-        dia_semana: input.meetingDay?.trim() || 'Quarta-feira',
-        horario: input.meetingTime?.trim() || '19:30',
-        quantidade_membros: 0,
-      };
+      try {
+        const celulaPayload = {
+          unidade_id: unitId,
+          bairro: input.neighborhood?.trim() || 'Centro',
+          endereco: input.address?.trim() || '',
+          dia_semana: input.meetingDay?.trim() || 'Quarta-feira',
+          dia_reuniao: input.meetingDay?.trim() || 'Quarta-feira',
+          horario: input.meetingTime?.trim() || '19:30',
+          horario_reuniao: input.meetingTime?.trim() || '19:30',
+          quantidade_membros: 0,
+        };
 
-      const { error: celulaErr } = await supabase
-        .from('celulas')
-        .upsert([celulaPayload], { onConflict: 'unidade_id' });
-      if (celulaErr) {
-        console.error('Erro ao salvar em celulas:', celulaErr);
+        await supabase
+          .from('celulas')
+          .upsert([celulaPayload], { onConflict: 'unidade_id' });
+      } catch {
+        // Ignora erro em 'celulas'
       }
 
       // Buscar nome do setor/pai para popular tabela legada cells
