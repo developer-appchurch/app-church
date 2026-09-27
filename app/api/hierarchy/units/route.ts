@@ -447,7 +447,7 @@ export async function POST(req: NextRequest) {
 
     const unitId = generateUUID();
 
-    // 3. Inserir na tabela unidades com todos os dados da célula
+    // 3. Inserir na tabela unidades com atributos consolidados
     const unitPayload: any = {
       id: unitId,
       igreja_id: input.churchId,
@@ -464,6 +464,8 @@ export async function POST(req: NextRequest) {
       latitude: input.latitude !== undefined ? Number(input.latitude) : null,
       longitude: input.longitude !== undefined ? Number(input.longitude) : null,
       quantidade_membros: 0,
+      criado_em: new Date().toISOString(),
+      atualizado_em: new Date().toISOString(),
     };
 
     const { error: insertUnitErr } = await supabase.from('unidades').insert([unitPayload]);
@@ -472,7 +474,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Falha ao criar unidade: ${insertUnitErr.message}` }, { status: 500 });
     }
 
-    // 4. Opcional: Atualizar 'celulas' para retrocompatibilidade sem travar caso celulas não exista
+    // 4. Se for célula (nível folha), salvar detalhes na tabela 'celulas'
     if (isLeafLevel) {
       try {
         const celulaPayload = {
@@ -480,17 +482,17 @@ export async function POST(req: NextRequest) {
           bairro: input.neighborhood?.trim() || 'Centro',
           endereco: input.address?.trim() || '',
           dia_semana: input.meetingDay?.trim() || 'Quarta-feira',
-          dia_reuniao: input.meetingDay?.trim() || 'Quarta-feira',
           horario: input.meetingTime?.trim() || '19:30',
-          horario_reuniao: input.meetingTime?.trim() || '19:30',
           quantidade_membros: 0,
+          criado_em: new Date().toISOString(),
+          atualizado_em: new Date().toISOString(),
         };
 
         await supabase
           .from('celulas')
           .upsert([celulaPayload], { onConflict: 'unidade_id' });
-      } catch {
-        // Ignora erro em 'celulas'
+      } catch (cErr) {
+        console.warn('Aviso ao registrar detalhes em celulas:', cErr);
       }
 
       // Buscar nome do setor/pai para popular tabela legada cells

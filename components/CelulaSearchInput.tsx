@@ -12,14 +12,14 @@ interface CelulaSearchInputProps {
 }
 
 const DIAS_SEMANA = [
-  { id: 'todos', label: 'Todos os Dias' },
-  { id: 'Segunda', label: 'Segunda' },
-  { id: 'Terça', label: 'Terça' },
-  { id: 'Quarta', label: 'Quarta' },
-  { id: 'Quinta', label: 'Quinta' },
-  { id: 'Sexta', label: 'Sexta' },
-  { id: 'Sábado', label: 'Sábado' },
-  { id: 'Domingo', label: 'Domingo' },
+  { id: 'todos', label: 'Todos' },
+  { id: 'Segunda', label: 'Seg' },
+  { id: 'Terça', label: 'Ter' },
+  { id: 'Quarta', label: 'Qua' },
+  { id: 'Quinta', label: 'Qui' },
+  { id: 'Sexta', label: 'Sex' },
+  { id: 'Sábado', label: 'Sáb' },
+  { id: 'Domingo', label: 'Dom' },
 ];
 
 export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({

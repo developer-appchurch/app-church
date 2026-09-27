@@ -77,6 +77,53 @@ function getLoginCandidateVariation(name: string, currentLogin: string, base: st
   return `${base}${seed}`;
 }
 
+/**
+ * Sanitiza e valida o horário da reunião (HH:mm)
+ */
+const sanitizeTimeValue = (raw?: string): string => {
+  if (!raw || raw === 'Horário a definir') return '19:30';
+  const clean = raw.trim();
+  const match = clean.match(/(\d{1,2})[:hH](\d{2})/);
+  if (match) {
+    const hours = parseInt(match[1], 10);
+    const mins = parseInt(match[2], 10);
+    if (hours >= 0 && hours <= 23 && mins >= 0 && mins <= 59) {
+      return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+    }
+  }
+  return '19:30';
+};
+
+/**
+ * Calcula a idade a partir de uma string de data (dd/MM/yyyy ou YYYY-MM-DD)
+ */
+const calculateAge = (dateStr: string): number | null => {
+  if (!dateStr) return null;
+  let d: number, m: number, y: number;
+  if (dateStr.includes('-')) {
+    const parts = dateStr.split('-');
+    y = parseInt(parts[0], 10);
+    m = parseInt(parts[1], 10);
+    d = parseInt(parts[2], 10);
+  } else if (dateStr.includes('/')) {
+    const parts = dateStr.split('/');
+    if (parts.length < 3) return null;
+    d = parseInt(parts[0], 10);
+    m = parseInt(parts[1], 10);
+    y = parseInt(parts[2], 10);
+  } else {
+    return null;
+  }
+  if (!y || !m || !d || isNaN(y) || isNaN(m) || isNaN(d)) return null;
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  const monthDiff = today.getMonth() + 1 - m;
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d)) {
+    age--;
+  }
+  return age >= 0 && age <= 130 ? age : null;
+};
+
 export const MyCellView: React.FC<MyCellViewProps> = ({
   members,
   cell,
@@ -121,6 +168,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<UserRole>('Membro');
   const [newNeighborhood, setNewNeighborhood] = useState('');
+  const [newBirthDate, setNewBirthDate] = useState('');
   const [newBirthday, setNewBirthday] = useState('');
   const [birthdayError, setBirthdayError] = useState('');
   const [newPhone, setNewPhone] = useState('');
@@ -531,7 +579,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const handleOpenEditCellModal = () => {
     setEditName(cell.name || '');
     setEditMeetingDay(cell.meetingDay || 'Quarta-feira');
-    setEditMeetingTime(cell.meetingTime || '19:30');
+    setEditMeetingTime(sanitizeTimeValue(cell.meetingTime));
     setEditNeighborhood(cell.bairro || '');
     setEditAddress(cell.address || '');
     setEditFotoUrl(cell.fotoUrl || '');
@@ -581,6 +629,11 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
     if (!editName.trim()) {
       setEditCellError('Por favor, informe o nome da célula.');
+      return;
+    }
+
+    if (!editMeetingTime || !/^([01]\d|2[0-3]):([0-5]\d)$/.test(editMeetingTime.trim())) {
+      setEditCellError('Por favor, selecione um horário válido de reunião (entre 00:00 e 23:59).');
       return;
     }
 
@@ -684,23 +737,49 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   };
 
   /**
-   * Valida se uma string dd/MM corresponde a uma data real do calendário.
-   * Impede datas inexistentes como 12/33, 31/04, 32/01, etc.
+   * Valida se uma string dd/MM/aaaa ou dd/MM ou YYYY-MM-DD corresponde a uma data real do calendário.
+   * Impede datas inexistentes como 12/33, 31/04, 32/01, 29/02 em anos não bissextos e anos inválidos.
    */
   const validateBirthday = (value: string): { valid: boolean; error?: string } => {
     if (!value || value.trim() === '') {
       return { valid: true };
     }
     const clean = value.trim();
+
+    if (clean.includes('-')) {
+      const parts = clean.split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const d = parseInt(parts[2], 10);
+      const currentYear = new Date().getFullYear();
+      if (isNaN(y) || isNaN(m) || isNaN(d)) return { valid: false, error: 'Data de nascimento inválida.' };
+      if (y < 1900 || y > currentYear) return { valid: false, error: `Ano de nascimento deve ser entre 1900 e ${currentYear}.` };
+      if (m < 1 || m > 12) return { valid: false, error: 'Mês inexistente.' };
+      const maxD = new Date(y, m, 0).getDate();
+      if (d < 1 || d > maxD) return { valid: false, error: `Dia inexistente (${d}). Este mês possui até ${maxD} dias.` };
+      return { valid: true };
+    }
+
     const parts = clean.split('/');
-    if (parts.length !== 2 || parts[0].length === 0 || parts[1].length === 0) {
-      return { valid: false, error: 'Formato incompleto. Use o padrão dd/MM (ex: 25/08).' };
+    if (parts.length !== 2 && parts.length !== 3) {
+      return { valid: false, error: 'Formato incompleto. Selecione a data de nascimento ou use o padrão dd/MM/aaaa.' };
     }
     const day = parseInt(parts[0], 10);
     const month = parseInt(parts[1], 10);
+    const currentYear = new Date().getFullYear();
+    const year = parts.length === 3 ? parseInt(parts[2], 10) : undefined;
 
-    if (isNaN(day) || isNaN(month)) {
-      return { valid: false, error: 'Data deve conter apenas números válidos (dd/MM).' };
+    if (isNaN(day) || isNaN(month) || (year !== undefined && isNaN(year))) {
+      return { valid: false, error: 'Data deve conter apenas números válidos.' };
+    }
+
+    if (year !== undefined) {
+      if (year < 1900 || year > currentYear) {
+        return {
+          valid: false,
+          error: `Ano de nascimento (${year}) deve ser entre 1900 e ${currentYear}.`,
+        };
+      }
     }
 
     if (month < 1 || month > 12) {
@@ -710,22 +789,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       };
     }
 
-    const maxDaysPerMonth: Record<number, number> = {
-      1: 31,
-      2: 29, // Aceita 29 para permitir aniversários em ano bissexto
-      3: 31,
-      4: 30,
-      5: 31,
-      6: 30,
-      7: 31,
-      8: 31,
-      9: 30,
-      10: 31,
-      11: 30,
-      12: 31,
-    };
+    const effectiveYear = year || (month === 2 ? 2024 : 2023);
+    const maxDays = new Date(effectiveYear, month, 0).getDate();
 
-    const maxDays = maxDaysPerMonth[month];
     if (day < 1 || day > maxDays) {
       return {
         valid: false,
@@ -737,32 +803,62 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   };
 
   /**
-   * Formatação automática e validação de data no campo de aniversário (dd/MM)
+   * Manipulador para seleção via Date Picker nativo (com ano de nascimento)
+   */
+  const handleBirthDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const isoVal = e.target.value; // YYYY-MM-DD
+    setNewBirthDate(isoVal);
+    if (isoVal) {
+      const [y, m, d] = isoVal.split('-');
+      const formatted = `${d}/${m}/${y}`;
+      setNewBirthday(formatted);
+      const res = validateBirthday(isoVal);
+      if (!res.valid) {
+        setBirthdayError(res.error || 'Data de nascimento inválida.');
+      } else {
+        setBirthdayError('');
+      }
+    } else {
+      setNewBirthday('');
+      setBirthdayError('');
+    }
+  };
+
+  /**
+   * Formatação automática e validação de data no campo de aniversário (dd/MM/aaaa)
    */
   const handleBirthdayChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const raw = e.target.value;
-    const digits = raw.replace(/\D/g, '').slice(0, 4);
+    const digits = raw.replace(/\D/g, '').slice(0, 8);
 
     let formatted = '';
     if (!digits) {
       formatted = '';
     } else if (digits.length <= 2) {
-      if (raw.endsWith('/') && digits.length === 2) {
-        formatted = `${digits}/`;
-      } else {
-        formatted = digits;
-      }
-    } else {
+      formatted = digits;
+    } else if (digits.length <= 4) {
       formatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}`;
+    } else {
+      formatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
     }
 
     setNewBirthday(formatted);
 
-    // Validação em tempo real se completou 5 caracteres (dd/MM)
-    if (formatted.length === 5) {
+    if (digits.length === 8) {
+      const d = digits.slice(0, 2);
+      const m = digits.slice(2, 4);
+      const y = digits.slice(4, 8);
+      setNewBirthDate(`${y}-${m}-${d}`);
       const result = validateBirthday(formatted);
       if (!result.valid) {
-        setBirthdayError(result.error || 'Data de aniversário inexistente.');
+        setBirthdayError(result.error || 'Data de nascimento inexistente.');
+      } else {
+        setBirthdayError('');
+      }
+    } else if (digits.length === 4) {
+      const result = validateBirthday(formatted);
+      if (!result.valid) {
+        setBirthdayError(result.error || 'Data inexistente.');
       } else {
         setBirthdayError('');
       }
@@ -836,6 +932,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setIsLoginManuallyEdited(false);
     setNewPassword('');
     setNewNeighborhood('');
+    setNewBirthDate('');
     setNewBirthday('');
     setBirthdayError('');
     setNewPhone('');
@@ -957,6 +1054,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       setIsLoginManuallyEdited(false);
       setNewPassword('');
       setNewNeighborhood('');
+      setNewBirthDate('');
       setNewBirthday('');
       setNewPhone('');
       setFormError('');
@@ -1653,34 +1751,30 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Aniversário (dd/MM):
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-sky-700" />
+                      Data de Nascimento (com Ano):
+                    </span>
+                    {newBirthday && calculateAge(newBirthday) !== null && (
+                      <span className="text-[10px] font-bold text-sky-800 bg-sky-100 px-1.5 py-0.5 rounded">
+                        {calculateAge(newBirthday)} anos
+                      </span>
+                    )}
                   </label>
                   <input
-                    type="text"
-                    placeholder="Ex: 25/08"
-                    maxLength={5}
-                    value={newBirthday}
-                    onChange={handleBirthdayChange}
-                    onBlur={() => {
-                      if (newBirthday.trim()) {
-                        const res = validateBirthday(newBirthday);
-                        if (!res.valid) {
-                          setBirthdayError(res.error || 'Data de aniversário inexistente.');
-                        } else {
-                          setBirthdayError('');
-                        }
-                      } else {
-                        setBirthdayError('');
-                      }
-                    }}
+                    type="date"
+                    max={new Date().toISOString().split('T')[0]}
+                    min="1900-01-01"
+                    value={newBirthDate}
+                    onChange={handleBirthDateChange}
                     className={`w-full text-xs sm:text-sm p-2.5 rounded-xl border ${
                       birthdayError
                         ? 'border-rose-400 bg-rose-50/50 text-rose-950 focus:border-rose-500'
                         : 'border-slate-300 focus:border-[#052447]'
-                    } focus:outline-none`}
+                    } focus:outline-none bg-white cursor-pointer font-medium text-slate-800`}
                   />
                   {birthdayError ? (
                     <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
@@ -1689,7 +1783,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     </p>
                   ) : (
                     <p className="mt-1 text-[10px] text-slate-500">
-                      Informe uma data válida (ex: 25/08).
+                      {newBirthday ? `Data selecionada: ${newBirthday}` : 'Selecione dia, mês e ano de nascimento.'}
                     </p>
                   )}
                 </div>
@@ -1826,12 +1920,28 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       <span>Horário da Reunião:</span>
                     </label>
                     <input
-                      type="text"
+                      type="time"
+                      required
                       value={editMeetingTime}
                       onChange={(e) => setEditMeetingTime(e.target.value)}
-                      placeholder="Ex: 19:30 ou 20:00"
-                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium"
+                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium bg-white cursor-pointer"
                     />
+                    <div className="flex items-center gap-1 mt-1.5 overflow-x-auto no-scrollbar">
+                      {['18:00', '19:00', '19:30', '20:00', '20:30'].map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setEditMeetingTime(preset)}
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-md transition cursor-pointer shrink-0 ${
+                            editMeetingTime === preset
+                              ? 'bg-[#052447] text-white font-bold'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
 

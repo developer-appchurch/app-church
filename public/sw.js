@@ -13,7 +13,7 @@ self.addEventListener('push', (event) => {
     title: '🔔 Relatório pendente',
     body: 'O relatório da sua célula referente à semana passada ainda não foi lançado. Clique para lançar agora!',
     icon: '/android-chrome-192x192.png',
-    badge: '/android-chrome-192x192.png',
+    badge: '/badge-icon.png',
     data: {
       url: '/?screen=reports&openModal=true',
     },

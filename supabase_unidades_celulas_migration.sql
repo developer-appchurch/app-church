@@ -1,10 +1,6 @@
 -- =====================================================================================
 -- MIGRATION: CONSOLIDAÇÃO DE CÉLULAS NA TABELA UNIDADES & SINCRONIZAÇÃO DE MEMBROS
 -- =====================================================================================
--- Transfere todos os atributos e relacionamentos de células exclusivamente para a tabela 
--- 'unidades', eliminando dependências da tabela 'celulas' e mantendo a contagem 
--- de membros ('quantidade_membros') 100% atualizada e atualizável automaticamente.
--- =====================================================================================
 
 -- 1. ADICIONA COLUNAS EXCLUSIVAS DE CÉLULAS NA TABELA UNIDADES (SE NÃO EXISTIREM)
 ALTER TABLE public.unidades 
@@ -25,6 +21,7 @@ ALTER TABLE public.unidades
   ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ DEFAULT now();
 
 -- 2. MIGRA OS DADOS EXISTENTES DA TABELA 'celulas' PARA 'unidades'
+-- (corrigido: 'celulas' só tem dia_semana/horario; 'membros' não tem coluna 'ativo')
 DO $$
 BEGIN
   IF EXISTS (
@@ -33,17 +30,14 @@ BEGIN
   ) THEN
     UPDATE public.unidades u
     SET 
-      dia_semana = COALESCE(u.dia_semana, c.dia_semana, c.dia_reuniao, 'Quinta-feira'),
-      dia_reuniao = COALESCE(u.dia_reuniao, c.dia_reuniao, c.dia_semana, 'Quinta-feira'),
-      horario = COALESCE(u.horario, c.horario, c.horario_reuniao, '19:30'),
-      horario_reuniao = COALESCE(u.horario_reuniao, c.horario_reuniao, c.horario, '19:30'),
+      dia_semana = COALESCE(u.dia_semana, c.dia_semana, 'Quinta-feira'),
+      dia_reuniao = COALESCE(u.dia_reuniao, c.dia_semana, 'Quinta-feira'),
+      horario = COALESCE(u.horario, c.horario, '19:30'),
+      horario_reuniao = COALESCE(u.horario_reuniao, c.horario, '19:30'),
       bairro = COALESCE(u.bairro, c.bairro, 'Bairro Central'),
       endereco = COALESCE(u.endereco, c.endereco, 'Endereço da Célula'),
-      foto_url = COALESCE(u.foto_url, c.foto_url),
-      latitude = COALESCE(u.latitude, c.latitude),
-      longitude = COALESCE(u.longitude, c.longitude),
       quantidade_membros = COALESCE(
-        (SELECT COUNT(*) FROM public.membros m WHERE m.unidade_id = u.id AND (m.ativo IS NULL OR m.ativo = true)),
+        (SELECT COUNT(*) FROM public.membros m WHERE m.unidade_id = u.id),
         c.quantidade_membros,
         0
       ),
@@ -59,8 +53,7 @@ SET quantidade_membros = COALESCE(
   (
     SELECT COUNT(*) 
     FROM public.membros m 
-    WHERE m.unidade_id = u.id 
-    AND (m.ativo IS NULL OR m.ativo = true)
+    WHERE m.unidade_id = u.id
   ),
   0
 );
@@ -69,7 +62,6 @@ SET quantidade_membros = COALESCE(
 CREATE OR REPLACE FUNCTION public.sync_unidade_quantidade_membros()
 RETURNS TRIGGER AS $$
 BEGIN
-  -- Se um membro foi desvinculado, excluído ou mudou de unidade, atualiza a unidade antiga
   IF (TG_OP = 'DELETE' OR TG_OP = 'UPDATE') THEN
     IF OLD.unidade_id IS NOT NULL THEN
       UPDATE public.unidades
@@ -77,15 +69,13 @@ BEGIN
         quantidade_membros = (
           SELECT COUNT(*) 
           FROM public.membros 
-          WHERE unidade_id = OLD.unidade_id 
-          AND (ativo IS NULL OR ativo = true)
+          WHERE unidade_id = OLD.unidade_id
         ),
         atualizado_em = now()
       WHERE id = OLD.unidade_id;
     END IF;
   END IF;
 
-  -- Se um membro foi inserido, vinculado ou reativado, atualiza a nova unidade
   IF (TG_OP = 'INSERT' OR TG_OP = 'UPDATE') THEN
     IF NEW.unidade_id IS NOT NULL THEN
       UPDATE public.unidades
@@ -93,8 +83,7 @@ BEGIN
         quantidade_membros = (
           SELECT COUNT(*) 
           FROM public.membros 
-          WHERE unidade_id = NEW.unidade_id 
-          AND (ativo IS NULL OR ativo = true)
+          WHERE unidade_id = NEW.unidade_id
         ),
         atualizado_em = now()
       WHERE id = NEW.unidade_id;
@@ -105,7 +94,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Remove o trigger antigo se existir e cria novamente
 DROP TRIGGER IF EXISTS trg_sync_unidade_membros ON public.membros;
 CREATE TRIGGER trg_sync_unidade_membros
 AFTER INSERT OR UPDATE OR DELETE ON public.membros
@@ -125,7 +113,6 @@ BEGIN
     SELECT FROM information_schema.tables 
     WHERE table_schema = 'public' AND table_name = 'celulas'
   ) THEN
-    -- Desabilita foreign keys antigas para que nada dependa exclusivamente de 'celulas'
     ALTER TABLE public.celulas DROP CONSTRAINT IF EXISTS celulas_unidade_id_fkey;
   END IF;
 END $$;

@@ -122,28 +122,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Monta o payload de atualização na tabela 'unidades'
-    const updatePayload: any = {
+    // 3. Monta o payload de atualização na tabela 'unidades' (tabela primária e consolidada)
+    const meetingDayVal = meetingDay?.trim() || 'Quarta-feira';
+    const meetingTimeVal = meetingTime?.trim() || '19:30';
+    const neighborhoodVal = neighborhood !== undefined ? (neighborhood?.trim() || 'Centro') : undefined;
+    const addressVal = address !== undefined ? (address?.trim() || '') : undefined;
+
+    const unitUpdatePayload: any = {
       atualizado_em: new Date().toISOString(),
     };
 
-    if (name && typeof name === 'string') updatePayload.nome = name.trim();
+    if (name && typeof name === 'string') unitUpdatePayload.nome = name.trim();
     if (meetingDay && typeof meetingDay === 'string') {
-      updatePayload.dia_semana = meetingDay.trim();
-      updatePayload.dia_reuniao = meetingDay.trim();
+      unitUpdatePayload.dia_semana = meetingDayVal;
+      unitUpdatePayload.dia_reuniao = meetingDayVal;
     }
     if (meetingTime && typeof meetingTime === 'string') {
-      updatePayload.horario = meetingTime.trim();
-      updatePayload.horario_reuniao = meetingTime.trim();
+      unitUpdatePayload.horario = meetingTimeVal;
+      unitUpdatePayload.horario_reuniao = meetingTimeVal;
     }
-    if (neighborhood !== undefined) updatePayload.bairro = neighborhood?.trim() || 'Centro';
-    if (address !== undefined) updatePayload.endereco = address?.trim() || '';
-    if (fotoUrl !== undefined) updatePayload.foto_url = fotoUrl || null;
-    if (parentUnitId !== undefined) updatePayload.pai_id = parentUnitId || null;
+    if (neighborhoodVal !== undefined) unitUpdatePayload.bairro = neighborhoodVal;
+    if (addressVal !== undefined) unitUpdatePayload.endereco = addressVal;
+    if (fotoUrl !== undefined) unitUpdatePayload.foto_url = fotoUrl || null;
+    if (parentUnitId !== undefined) unitUpdatePayload.pai_id = parentUnitId || null;
 
     const { data: updatedUnit, error: updateErr } = await supabase
       .from('unidades')
-      .update(updatePayload)
+      .update(unitUpdatePayload)
       .eq('id', cellId)
       .select('*')
       .single();
@@ -151,43 +156,56 @@ export async function POST(req: NextRequest) {
     if (updateErr) {
       console.error('[UpdateCell] Falha ao atualizar unidades:', updateErr);
       return NextResponse.json(
-        { error: `Falha ao salvar dados da célula: ${updateErr.message}` },
+        { error: `Falha ao salvar dados da célula na tabela unidades: ${updateErr.message}` },
         { status: 500 }
       );
     }
 
     // 4. Sincronização secundária opcional com a tabela 'celulas' (para compatibilidade retroativa)
     try {
-      const celulaPayload: any = {};
-      if (updatePayload.bairro !== undefined) celulaPayload.bairro = updatePayload.bairro;
-      if (updatePayload.endereco !== undefined) celulaPayload.endereco = updatePayload.endereco;
-      if (updatePayload.dia_semana !== undefined) {
-        celulaPayload.dia_semana = updatePayload.dia_semana;
-        celulaPayload.dia_reuniao = updatePayload.dia_semana;
-      }
-      if (updatePayload.horario !== undefined) {
-        celulaPayload.horario = updatePayload.horario;
-        celulaPayload.horario_reuniao = updatePayload.horario;
-      }
-      if (updatePayload.foto_url !== undefined) celulaPayload.foto_url = updatePayload.foto_url;
+      const celulaPayload: any = {
+        dia_semana: meetingDayVal,
+        horario: meetingTimeVal,
+        atualizado_em: new Date().toISOString(),
+      };
+      if (neighborhoodVal !== undefined) celulaPayload.bairro = neighborhoodVal;
+      if (addressVal !== undefined) celulaPayload.endereco = addressVal;
 
-      if (Object.keys(celulaPayload).length > 0) {
+      const { data: existingCelula } = await supabase
+        .from('celulas')
+        .select('unidade_id')
+        .eq('unidade_id', cellId)
+        .maybeSingle();
+
+      if (existingCelula) {
         await supabase
           .from('celulas')
           .update(celulaPayload)
           .eq('unidade_id', cellId);
+      } else {
+        await supabase
+          .from('celulas')
+          .insert([
+            {
+              unidade_id: cellId,
+              ...celulaPayload,
+              quantidade_membros: updatedUnit.quantidade_membros || 0,
+              criado_em: new Date().toISOString(),
+            },
+          ]);
       }
-    } catch {
-      // Ignora erro em 'celulas'
+    } catch (cErr) {
+      // Falha em 'celulas' não bloqueia a aplicação pois 'unidades' é a fonte de verdade
+      console.warn('[UpdateCell] Aviso sincronizando celulas legadas:', cErr);
     }
 
-    // 5. Sincronização secundária opcional com a tabela legada 'cells'
+    // 5. Sincronização secundária opcional com a tabela legada 'cells' se existir
     try {
       const cellsPayload: any = {};
-      if (updatePayload.nome !== undefined) cellsPayload.nome = updatePayload.nome;
-      if (updatePayload.endereco !== undefined) cellsPayload.endereco = updatePayload.endereco;
-      if (updatePayload.dia_semana !== undefined) cellsPayload.dia_reuniao = updatePayload.dia_semana;
-      if (updatePayload.horario !== undefined) cellsPayload.horario_reuniao = updatePayload.horario;
+      if (unitUpdatePayload.nome !== undefined) cellsPayload.nome = unitUpdatePayload.nome;
+      if (unitUpdatePayload.endereco !== undefined) cellsPayload.endereco = unitUpdatePayload.endereco;
+      if (unitUpdatePayload.dia_semana !== undefined) cellsPayload.dia_reuniao = unitUpdatePayload.dia_semana;
+      if (unitUpdatePayload.horario !== undefined) cellsPayload.horario_reuniao = unitUpdatePayload.horario;
 
       if (Object.keys(cellsPayload).length > 0) {
         await supabase
@@ -244,11 +262,11 @@ export async function POST(req: NextRequest) {
       leaderNames,
       leaderMemberIds: leaderIds,
       sectorName: parentName,
-      address: updatedUnit.endereco || '',
-      bairro: updatedUnit.bairro || 'Centro',
-      fotoUrl: updatedUnit.foto_url || undefined,
-      meetingDay: updatedUnit.dia_semana || updatedUnit.dia_reuniao || 'Quinta-feira',
-      meetingTime: updatedUnit.horario || updatedUnit.horario_reuniao || '19:30',
+      address: updatedUnit.endereco || addressVal || '',
+      bairro: updatedUnit.bairro || neighborhoodVal || 'Centro',
+      fotoUrl: updatedUnit.foto_url || fotoUrl || undefined,
+      meetingDay: updatedUnit.dia_semana || updatedUnit.dia_reuniao || meetingDayVal,
+      meetingTime: updatedUnit.horario || updatedUnit.horario_reuniao || meetingTimeVal,
       memberCount: updatedUnit.quantidade_membros || 0,
       parentUnitId: updatedUnit.pai_id,
       parentName,

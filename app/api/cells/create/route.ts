@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
       cellLevelId = newLvl?.id || newLvlId;
     }
 
-    // 2. Inserir em 'unidades' com todos os dados consolidados da célula
+    // 2. Inserir em 'unidades' com todos os atributos consolidados
     const initialMembersCount = body.leaderMemberId ? 1 : 0;
     const unitPayload: any = {
       id: unitId,
@@ -121,6 +121,8 @@ export async function POST(req: NextRequest) {
       horario_reuniao: meetingTime,
       quantidade_membros: initialMembersCount,
       ativo: true,
+      criado_em: new Date().toISOString(),
+      atualizado_em: new Date().toISOString(),
     };
 
     const { error: unitErr } = await supabase.from('unidades').insert([unitPayload]);
@@ -132,7 +134,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Opcional: Atualizar tabela 'celulas' (para compatibilidade legada durante transição)
+    // 3. Sincronização secundária em 'celulas' (para compatibilidade retroativa)
     try {
       await supabase.from('celulas').insert([
         {
@@ -140,14 +142,14 @@ export async function POST(req: NextRequest) {
           bairro: body.neighborhood?.trim() || 'Centro',
           endereco: formattedAddress,
           dia_semana: meetingDay,
-          dia_reuniao: meetingDay,
           horario: meetingTime,
-          horario_reuniao: meetingTime,
           quantidade_membros: initialMembersCount,
+          criado_em: new Date().toISOString(),
+          atualizado_em: new Date().toISOString(),
         },
       ]);
-    } catch {
-      // Ignora erro em 'celulas' pois os dados estão 100% gravados em 'unidades'
+    } catch (cErr) {
+      console.warn('Aviso ao registrar em celulas:', cErr);
     }
 
     // 4. Inserir opcionalmente na tabela legada 'cells' (se existir como tabela física e não view)
