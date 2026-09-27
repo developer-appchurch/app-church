@@ -301,7 +301,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   // Sincroniza papel inicial do novo líder com os papéis permitidos
   useEffect(() => {
     if (assignableRoles.length > 0 && !assignableRoles.some((r) => r.name === newLeaderRole)) {
-      setNewLeaderRole(assignableRoles[0].name as UserRole);
+      queueMicrotask(() => {
+        setNewLeaderRole(assignableRoles[0].name as UserRole);
+      });
     }
   }, [assignableRoles, newLeaderRole]);
 

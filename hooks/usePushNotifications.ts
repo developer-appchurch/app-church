@@ -52,7 +52,9 @@ export function usePushNotifications(membroId?: string) {
 
   // Verifica se já existe uma assinatura ativa no Service Worker
   useEffect(() => {
-    refreshPermission();
+    queueMicrotask(() => {
+      refreshPermission();
+    });
   }, [refreshPermission]);
 
   const subscribeToPush = useCallback(

@@ -703,33 +703,55 @@ export const AppChurchService = {
 
   /**
    * Get Churches list from Supabase
+   * Projeção explícita de colunas e limitação de registros via range para otimizar I/O
    */
-  async getChurches(): Promise<Church[]> {
-    if (supabase) {
-      try {
-        let { data, error } = await supabase.from('igrejas').select('*').order('nome');
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          const legRes = await supabase.from('churches').select('*').order('nome');
-          data = legRes.data;
-          error = legRes.error;
+  async getChurches(options?: { limit?: number; offset?: number; force?: boolean }): Promise<Church[]> {
+    const limit = options?.limit ?? 100;
+    const offset = options?.offset ?? 0;
+    const cacheKey = `churches_list_${offset}_${limit}`;
+
+    return getCachedOrExecute(
+      cacheKey,
+      5 * 60 * 1000,
+      async () => {
+        const CHURCH_COLUMNS = 'id, nome, slug, cnpj, cidade, estado, url_logo';
+        if (supabase) {
+          try {
+            let { data, error } = await supabase
+              .from('igrejas')
+              .select(CHURCH_COLUMNS)
+              .order('nome')
+              .range(offset, offset + limit - 1);
+
+            if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.code === '42703')) {
+              const legRes = await supabase
+                .from('churches')
+                .select(CHURCH_COLUMNS)
+                .order('nome')
+                .range(offset, offset + limit - 1);
+              data = legRes.data;
+              error = legRes.error;
+            }
+            if (!error && data && data.length > 0) {
+              return data.map((c: any) => ({
+                id: c.id,
+                name: c.nome,
+                slug: c.slug,
+                cnpj: c.cnpj || undefined,
+                city: c.cidade,
+                state: c.estado,
+                logoUrl: c.url_logo,
+              }));
+            }
+          } catch (e) {
+            console.warn('Erro ao buscar igrejas no Supabase:', e);
+          }
         }
-        if (!error && data && data.length > 0) {
-          return data.map((c: any) => ({
-            id: c.id,
-            name: c.nome,
-            slug: c.slug,
-            cnpj: c.cnpj || undefined,
-            city: c.cidade,
-            state: c.estado,
-            logoUrl: c.url_logo,
-          }));
-        }
-      } catch (e) {
-        console.warn('Erro ao buscar igrejas no Supabase:', e);
-      }
-    }
-    const cached = loadFromStorage<Church[]>(STORAGE_KEYS.CHURCHES, INITIAL_CHURCHES);
-    return cached.length > 0 ? cached : INITIAL_CHURCHES;
+        const cached = loadFromStorage<Church[]>(STORAGE_KEYS.CHURCHES, INITIAL_CHURCHES);
+        return cached.length > 0 ? cached : INITIAL_CHURCHES;
+      },
+      options?.force ?? false
+    );
   },
 
   /**
@@ -1248,124 +1270,154 @@ export const AppChurchService = {
 
   /**
    * Obtém o Pool Geral de Membros da Igreja (membros sem célula e membros vinculados)
+   * Suporta range e limit para evitar varredura massiva de registros
    */
   async getMemberPool(
     churchId: string,
-    filter: 'all' | 'unlinked' | 'linked' = 'all'
+    filter: 'all' | 'unlinked' | 'linked' = 'all',
+    options?: { limit?: number; offset?: number; search?: string; force?: boolean }
   ): Promise<{
     members: (CellMember & { isUnlinked: boolean; cellName?: string })[];
     counts: { total: number; unlinked: number; linked: number };
   }> {
-    // 1. Tentativa via API Server Route
-    if (typeof window !== 'undefined') {
-      try {
-        const res = await fetch(`/api/members/pool?churchId=${churchId}&filter=${filter}`);
-        const data = await res.json();
-        if (res.ok && data?.success) {
-          return {
-            members: data.members || [],
-            counts: data.counts || {
-              total: (data.members || []).length,
-              unlinked: (data.members || []).filter((m: any) => m.isUnlinked).length,
-              linked: (data.members || []).filter((m: any) => !m.isUnlinked).length,
-            },
-          };
-        }
-      } catch (err) {
-        console.warn('Falha ao buscar pool de membros via API, tentando fallback direto:', err);
-      }
-    }
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
+    const search = options?.search?.trim() || '';
+    const cacheKey = `member_pool_${churchId}_${filter}_${offset}_${limit}_${search}`;
 
-    // 2. Fallback direto via Supabase Client
-    if (supabase) {
-      try {
-        let query = supabase
-          .from('membros')
-          .select('id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, observacoes')
-          .eq('igreja_id', churchId)
-          .order('nome', { ascending: true });
+    return getCachedOrExecute(
+      cacheKey,
+      60 * 1000,
+      async () => {
+        // 1. Tentativa via API Server Route (com paginação e busca no servidor)
+        if (typeof window !== 'undefined') {
+          try {
+            let url = `/api/members/pool?churchId=${encodeURIComponent(churchId)}&filter=${filter}&limit=${limit}&offset=${offset}`;
+            if (search) url += `&search=${encodeURIComponent(search)}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (res.ok && data?.success) {
+              return {
+                members: data.members || [],
+                counts: data.counts || {
+                  total: (data.members || []).length,
+                  unlinked: (data.members || []).filter((m: any) => m.isUnlinked).length,
+                  linked: (data.members || []).filter((m: any) => !m.isUnlinked).length,
+                },
+              };
+            }
+          } catch (err) {
+            console.warn('Falha ao buscar pool de membros via API, tentando fallback direto:', err);
+          }
+        }
+
+        // 2. Fallback direto via Supabase Client com range
+        if (supabase) {
+          try {
+            let query = supabase
+              .from('membros')
+              .select('id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, observacoes')
+              .eq('igreja_id', churchId)
+              .order('nome', { ascending: true })
+              .range(offset, offset + limit - 1);
+
+            if (filter === 'unlinked') {
+              query = query.is('unidade_id', null);
+            } else if (filter === 'linked') {
+              query = query.not('unidade_id', 'is', null);
+            }
+            if (search) {
+              query = query.ilike('nome', `%${search}%`);
+            }
+
+            let { data: initialMembers, error: qError } = await query;
+            let dbMembers: any[] | null = initialMembers as any;
+            let error = qError;
+            if (error) {
+              let legQ = supabase
+                .from('members')
+                .select('id, igreja_id, celula_id, funcao_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, observacoes')
+                .eq('igreja_id', churchId)
+                .order('nome')
+                .range(offset, offset + limit - 1);
+              if (filter === 'unlinked') legQ = legQ.is('celula_id', null);
+              if (filter === 'linked') legQ = legQ.not('celula_id', 'is', null);
+              if (search) legQ = legQ.ilike('nome', `%${search}%`);
+              const legRes = await legQ;
+              dbMembers = legRes.data as any;
+              error = legRes.error;
+            }
+
+            if (!error && dbMembers && dbMembers.length > 0) {
+              const mapped = dbMembers.map((m: any) => {
+                const effectiveCell = m.unidade_id || m.celula_id || '';
+                return {
+                  id: m.id,
+                  churchId: m.igreja_id,
+                  cellId: effectiveCell,
+                  isUnlinked: !effectiveCell,
+                  cellName: effectiveCell ? 'Célula Vinculada' : 'Sem Célula (Geral)',
+                  name: m.nome,
+                  login: m.login || '',
+                  role: (m.funcao as UserRole) || 'Membro',
+                  roleId: resolveRoleIdByName(m.funcao, m.papel_id || m.funcao_id),
+                  neighborhood: m.bairro || 'Centro',
+                  birthday: m.aniversario || '01/01',
+                  phone: m.telefone || '',
+                  email: m.email || '',
+                  attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
+                  attendancePercentage: m.percentual_frequencia ?? 100,
+                  avatarUrl: m.url_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+                  notes: m.observacoes || '',
+                };
+              });
+
+              const unlinkedCount = mapped.filter((m) => m.isUnlinked).length;
+              const linkedCount = mapped.filter((m) => !m.isUnlinked).length;
+
+              return {
+                members: mapped,
+                counts: {
+                  total: mapped.length,
+                  unlinked: unlinkedCount,
+                  linked: linkedCount,
+                },
+              };
+            }
+          } catch (directErr) {
+            console.warn('Aviso no fallback direto do Supabase:', directErr);
+          }
+        }
+
+        // 3. Fallback Local Storage
+        const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+        const churchMembers = allMembers.filter((m) => m.churchId === churchId);
+        let resultList = churchMembers.map((m) => ({
+          ...m,
+          isUnlinked: !m.cellId,
+          cellName: m.cellId ? 'Célula Vinculada' : 'Pool Geral (Sem Célula)',
+        }));
 
         if (filter === 'unlinked') {
-          query = query.is('unidade_id', null);
+          resultList = resultList.filter((m) => m.isUnlinked);
         } else if (filter === 'linked') {
-          query = query.not('unidade_id', 'is', null);
+          resultList = resultList.filter((m) => !m.isUnlinked);
         }
 
-        let { data: dbMembers, error } = await query;
-        if (error) {
-          const legQ = supabase.from('members').select('*').eq('igreja_id', churchId).order('nome');
-          const legRes = await legQ;
-          dbMembers = legRes.data;
-          error = legRes.error;
-        }
+        const unlinkedCount = churchMembers.filter((m) => !m.cellId).length;
+        const linkedCount = churchMembers.filter((m) => Boolean(m.cellId)).length;
 
-        if (!error && dbMembers && dbMembers.length > 0) {
-          const mapped = dbMembers.map((m: any) => {
-            const effectiveCell = m.unidade_id || m.celula_id || '';
-            return {
-              id: m.id,
-              churchId: m.igreja_id,
-              cellId: effectiveCell,
-              isUnlinked: !effectiveCell,
-              cellName: effectiveCell ? 'Célula Vinculada' : 'Sem Célula (Geral)',
-              name: m.nome,
-              login: m.login || '',
-              role: (m.funcao as UserRole) || 'Membro',
-              roleId: resolveRoleIdByName(m.funcao, m.papel_id || m.funcao_id),
-              neighborhood: m.bairro || 'Centro',
-              birthday: m.aniversario || '01/01',
-              phone: m.telefone || '',
-              email: m.email || '',
-              attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
-              attendancePercentage: m.percentual_frequencia ?? 100,
-              avatarUrl: m.url_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-              notes: m.observacoes || '',
-            };
-          });
-
-          const unlinkedCount = mapped.filter((m) => m.isUnlinked).length;
-          const linkedCount = mapped.filter((m) => !m.isUnlinked).length;
-
-          return {
-            members: mapped,
-            counts: {
-              total: mapped.length,
-              unlinked: unlinkedCount,
-              linked: linkedCount,
-            },
-          };
-        }
-      } catch (directErr) {
-        console.warn('Aviso no fallback direto do Supabase:', directErr);
-      }
-    }
-
-    // 3. Fallback Local Storage
-    const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
-    const churchMembers = allMembers.filter((m) => m.churchId === churchId);
-    let resultList = churchMembers.map((m) => ({
-      ...m,
-      isUnlinked: !m.cellId,
-      cellName: m.cellId ? 'Célula Vinculada' : 'Pool Geral (Sem Célula)',
-    }));
-
-    if (filter === 'unlinked') {
-      resultList = resultList.filter((m) => m.isUnlinked);
-    } else if (filter === 'linked') {
-      resultList = resultList.filter((m) => !m.isUnlinked);
-    }
-
-    const unlinkedCount = churchMembers.filter((m) => !m.cellId).length;
-    const linkedCount = churchMembers.filter((m) => Boolean(m.cellId)).length;
-
-    return {
-      members: resultList,
-      counts: {
-        total: churchMembers.length,
-        unlinked: unlinkedCount,
-        linked: linkedCount,
+        return {
+          members: resultList.slice(offset, offset + limit),
+          counts: {
+            total: churchMembers.length,
+            unlinked: unlinkedCount,
+            linked: linkedCount,
+          },
+        };
       },
-    };
+      options?.force ?? false
+    );
   },
 
   /**
@@ -1511,11 +1563,13 @@ export const AppChurchService = {
               }
             });
 
-            // 5. Contagem real de membros por unidade
+            // 5. Contagem real de membros por unidade vinculada (evita carregar membros sem unidade)
             const { data: membersCount } = await supabase
               .from('membros')
               .select('unidade_id')
-              .eq('igreja_id', churchId);
+              .eq('igreja_id', churchId)
+              .not('unidade_id', 'is', null)
+              .in('unidade_id', unitIds);
             const countMap = new Map<string, number>();
             (membersCount || []).forEach((m: any) => {
               if (m.unidade_id) {
@@ -1743,10 +1797,30 @@ export const AppChurchService = {
   /**
    * Get Members - STRICTLY filtered by churchId and optionally cellId
    * Usa projeção de colunas explícitas (sem senha_hash) para evitar erro de RLS/Column Security e nunca zera a lista em caso de falha.
-   * Com cache em memória e desduplicação de chamadas concorrentes
+   * Com cache em memória, desduplicação de chamadas e limitação via range para reduzir tráfego e logs de banco.
    */
-  async getMembers(churchId: string, cellId?: string, force: boolean = false): Promise<CellMember[]> {
-    const cacheKey = `members:${churchId || 'all'}:${cellId || 'all'}`;
+  async getMembers(
+    churchId: string,
+    cellId?: string,
+    force: boolean = false,
+    options?: { limit?: number; offset?: number; page?: number; range?: [number, number]; search?: string }
+  ): Promise<CellMember[]> {
+    let from: number | undefined;
+    let to: number | undefined;
+    if (options?.range) {
+      from = options.range[0];
+      to = options.range[1];
+    } else if (options?.limit !== undefined) {
+      from = options.offset ?? (options.page ? (options.page - 1) * options.limit : 0);
+      to = from + options.limit - 1;
+    } else if (!cellId) {
+      // Quando listando membros gerais da igreja inteira sem célula, aplica limite de segurança para evitar dump de milhares de registros
+      from = 0;
+      to = 249; // Primeiros 250 membros
+    }
+
+    const search = options?.search?.trim() || '';
+    const cacheKey = `members:${churchId || 'all'}:${cellId || 'all'}:${from ?? 'all'}:${to ?? 'all'}:${search}`;
     return getCachedOrExecute(cacheKey, 60 * 1000, async () => {
       const EXPLICIT_MEMBER_COLUMNS = 'id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
       const EXPLICIT_LEGACY_COLUMNS = 'id, igreja_id, celula_id, funcao_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
@@ -1763,7 +1837,15 @@ export const AppChurchService = {
           if (cellId) {
             query = query.eq('unidade_id', cellId);
           }
-          const initialRes = await query.order('nome');
+          if (search) {
+            query = query.ilike('nome', `%${search}%`);
+          }
+          query = query.order('nome');
+          if (from !== undefined && to !== undefined) {
+            query = query.range(from, to);
+          }
+
+          const initialRes = await query;
           data = initialRes.data;
           error = initialRes.error;
 
@@ -1783,7 +1865,12 @@ export const AppChurchService = {
               legQuery = legQuery.eq('igreja_id', churchId);
             }
             if (cellId) legQuery = legQuery.eq('celula_id', cellId);
-            const legRes = await legQuery.order('nome');
+            if (search) legQuery = legQuery.ilike('nome', `%${search}%`);
+            legQuery = legQuery.order('nome');
+            if (from !== undefined && to !== undefined) {
+              legQuery = legQuery.range(from, to);
+            }
+            const legRes = await legQuery;
             if (legRes.error) {
               console.error('[AppChurchService.getMembers] Erro real retornado pela tabela legacy members:', legRes.error);
             } else {
@@ -1814,8 +1901,10 @@ export const AppChurchService = {
               notes: m.observacoes || '',
             }));
 
-            // Atualiza cache local apenas quando a consulta tem sucesso
-            saveToStorage(STORAGE_KEYS.MEMBERS, members);
+            // Atualiza cache local apenas quando a consulta tem sucesso e não é um slice parcial
+            if (from === undefined && to === undefined) {
+              saveToStorage(STORAGE_KEYS.MEMBERS, members);
+            }
 
             if (cellId) {
               return members.filter((m) => m.cellId === cellId);
@@ -1833,6 +1922,9 @@ export const AppChurchService = {
               }
               if (cellId) {
                 filtered = filtered.filter((m) => m.cellId === cellId);
+              }
+              if (search) {
+                filtered = filtered.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
               }
               console.warn('[AppChurchService.getMembers] Mantendo dados anteriores do cache devido a erro no banco.');
               return filtered.length > 0 ? filtered : cached;
@@ -1852,8 +1944,115 @@ export const AppChurchService = {
       if (cellId) {
         filtered = filtered.filter((m) => m.cellId === cellId);
       }
+      if (search) {
+        filtered = filtered.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
+      }
+      if (from !== undefined && to !== undefined) {
+        filtered = filtered.slice(from, to + 1);
+      }
       return filtered.length > 0 ? filtered : allMembers;
     }, force);
+  },
+
+  /**
+   * Consulta paginada de membros com metadados de paginação nativos do Supabase (range e count)
+   * Reduz volume de dados trafegados e otimiza o consumo de logs
+   */
+  async getMembersPage(params: {
+    churchId: string;
+    cellId?: string;
+    page?: number;
+    pageSize?: number;
+    offset?: number;
+    search?: string;
+    force?: boolean;
+  }): Promise<{
+    members: CellMember[];
+    totalCount: number;
+    hasMore: boolean;
+    page: number;
+    pageSize: number;
+  }> {
+    const { churchId, cellId, search, force = false } = params;
+    const page = Math.max(1, params.page ?? 1);
+    const pageSize = Math.min(Math.max(1, params.pageSize ?? 25), 100);
+    const from = params.offset ?? (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
+    const cacheKey = `members_page:${churchId}:${cellId || 'all'}:${from}:${to}:${search || ''}`;
+    return getCachedOrExecute(
+      cacheKey,
+      60 * 1000,
+      async () => {
+        const EXPLICIT_COLUMNS = 'id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
+        if (supabase) {
+          try {
+            let q = supabase
+              .from('membros')
+              .select(EXPLICIT_COLUMNS, { count: 'exact' })
+              .order('nome')
+              .range(from, to);
+
+            if (churchId && churchId !== 'church-master' && churchId !== 'all') {
+              q = q.eq('igreja_id', churchId);
+            }
+            if (cellId) {
+              q = q.eq('unidade_id', cellId);
+            }
+            if (search?.trim()) {
+              q = q.ilike('nome', `%${search.trim()}%`);
+            }
+
+            const { data, count, error } = await q;
+            if (!error && data) {
+              const mapped: CellMember[] = data.map((m: any) => ({
+                id: m.id,
+                churchId: m.igreja_id || churchId,
+                cellId: m.unidade_id || '',
+                roleId: resolveRoleIdByName(m.funcao, m.papel_id),
+                role: (m.funcao as UserRole) || 'Membro',
+                name: m.nome,
+                login: m.login || '',
+                neighborhood: m.bairro || '',
+                birthday: m.aniversario || '',
+                phone: m.telefone || '',
+                email: m.email || '',
+                attendanceStatus: (m.status_frequencia as AttendanceStatus) || 'green',
+                attendancePercentage: m.percentual_frequencia ?? 100,
+                avatarUrl: m.url_avatar || '',
+                authUserId: m.auth_user_id || undefined,
+                auth_user_id: m.auth_user_id || undefined,
+                notes: m.observacoes || '',
+              }));
+
+              const total = count ?? mapped.length;
+              return {
+                members: mapped,
+                totalCount: total,
+                hasMore: to + 1 < total,
+                page,
+                pageSize,
+              };
+            }
+          } catch (err) {
+            console.warn('[getMembersPage] Erro no Supabase:', err);
+          }
+        }
+
+        // Fallback
+        const all = await this.getMembers(churchId, cellId, force);
+        const filtered = search ? all.filter((m) => m.name.toLowerCase().includes(search.toLowerCase())) : all;
+        const slice = filtered.slice(from, to + 1);
+        return {
+          members: slice,
+          totalCount: filtered.length,
+          hasMore: to + 1 < filtered.length,
+          page,
+          pageSize,
+        };
+      },
+      force
+    );
   },
 
   /**
@@ -2755,53 +2954,71 @@ export const AppChurchService = {
 
   /**
    * Get Announcements - filtered by churchId
+   * Utiliza range pagination, projeção explícita de colunas e cache em memória para otimizar queries
    */
-  async getAnnouncements(churchId: string): Promise<ChurchAnnouncement[]> {
-    if (supabase) {
-      try {
-        let { data, error } = await supabase
-          .from('avisos')
-          .select('*')
-          .eq('igreja_id', churchId)
-          .order('criado_em', { ascending: false });
+  async getAnnouncements(
+    churchId: string,
+    options?: { limit?: number; offset?: number; force?: boolean }
+  ): Promise<ChurchAnnouncement[]> {
+    const limit = options?.limit ?? 25;
+    const offset = options?.offset ?? 0;
+    const cacheKey = `announcements:${churchId || 'all'}:${offset}:${limit}`;
 
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          const legRes = await supabase
-            .from('announcements')
-            .select('*')
-            .eq('igreja_id', churchId)
-            .order('criado_em', { ascending: false });
-          data = legRes.data;
-          error = legRes.error;
+    return getCachedOrExecute(
+      cacheKey,
+      2 * 60 * 1000,
+      async () => {
+        const ANNOUNCEMENT_COLUMNS = 'id, igreja_id, titulo, conteudo, url_imagem, nome_autor, funcao_autor, avatar_autor, data_evento, horario_evento, localizacao, categoria, importante, quantidade_confirmados, criado_em';
+        if (supabase) {
+          try {
+            let { data, error } = await supabase
+              .from('avisos')
+              .select(ANNOUNCEMENT_COLUMNS)
+              .eq('igreja_id', churchId)
+              .order('criado_em', { ascending: false })
+              .range(offset, offset + limit - 1);
+
+            if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.code === '42703')) {
+              const legRes = await supabase
+                .from('announcements')
+                .select(ANNOUNCEMENT_COLUMNS)
+                .eq('igreja_id', churchId)
+                .order('criado_em', { ascending: false })
+                .range(offset, offset + limit - 1);
+              data = legRes.data;
+              error = legRes.error;
+            }
+
+            if (!error && data) {
+              return data.map((a: any) => ({
+                id: a.id,
+                churchId: a.igreja_id,
+                title: a.titulo,
+                content: a.conteudo,
+                imageUrl: a.url_imagem,
+                authorName: a.nome_autor,
+                authorRole: a.funcao_autor,
+                authorAvatar: a.avatar_autor,
+                eventDate: a.data_evento,
+                eventTime: a.horario_evento,
+                location: a.localizacao,
+                category: a.categoria || 'Geral',
+                isImportant: a.importante ?? false,
+                confirmedAttendeesCount: a.quantidade_confirmados || 0,
+                isConfirmedByCurrentUser: false,
+                createdAt: 'Recente',
+              }));
+            }
+          } catch (e) {
+            console.warn('Erro ao buscar avisos no Supabase:', e);
+          }
         }
 
-        if (!error && data) {
-          return data.map((a: any) => ({
-            id: a.id,
-            churchId: a.igreja_id,
-            title: a.titulo,
-            content: a.conteudo,
-            imageUrl: a.url_imagem,
-            authorName: a.nome_autor,
-            authorRole: a.funcao_autor,
-            authorAvatar: a.avatar_autor,
-            eventDate: a.data_evento,
-            eventTime: a.horario_evento,
-            location: a.localizacao,
-            category: a.categoria || 'Geral',
-            isImportant: a.importante ?? false,
-            confirmedAttendeesCount: a.quantidade_confirmados || 0,
-            isConfirmedByCurrentUser: false,
-            createdAt: 'Recente',
-          }));
-        }
-      } catch (e) {
-        console.warn('Erro ao buscar avisos no Supabase:', e);
-      }
-    }
-
-    const allAnnouncements = loadFromStorage(STORAGE_KEYS.ANNOUNCEMENTS, INITIAL_ANNOUNCEMENTS);
-    return allAnnouncements.filter((a) => a.churchId === churchId);
+        const allAnnouncements = loadFromStorage(STORAGE_KEYS.ANNOUNCEMENTS, INITIAL_ANNOUNCEMENTS);
+        return allAnnouncements.filter((a) => a.churchId === churchId).slice(offset, offset + limit);
+      },
+      options?.force ?? false
+    );
   },
 
   /**

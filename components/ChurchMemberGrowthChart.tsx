@@ -72,7 +72,9 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
   const [isLoadingApi, setIsLoadingApi] = useState<boolean>(false);
 
   useEffect(() => {
-    setIsMounted(true);
+    queueMicrotask(() => {
+      setIsMounted(true);
+    });
   }, []);
 
   // Busca dados agregados reais direto da coluna criado_em no banco de dados
@@ -186,7 +188,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
         growthRatePct: Number(growthRate.toFixed(1)),
       };
     });
-  }, [apiSeries, period, totalMembers, linkedCount, unlinkedCount, members]);
+  }, [apiSeries, period, totalMembers, linkedCount, members]);
 
   // Indicadores calculados no período selecionado
   const stats = useMemo(() => {
@@ -491,7 +493,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
                 />
               )}
 
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={CustomTooltip} />
 
               <Legend
                 verticalAlign="top"
