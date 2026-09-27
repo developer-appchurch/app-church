@@ -6,7 +6,6 @@ import { getCelulasByIgreja } from '@/lib/celulasService';
 import { CelulaCard } from './CelulaCard';
 import { CelulaSearchInput } from './CelulaSearchInput';
 import {
-  Compass,
   AlertCircle,
   RotateCcw,
   Users,
@@ -16,7 +15,6 @@ import {
   Loader2,
   Building,
   Info,
-  Layers,
 } from 'lucide-react';
 
 interface NossasCelulasViewProps {
@@ -151,46 +149,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
 
   return (
     <div id="screen-nossas-celulas" className="bg-[#e9eff6] min-h-screen pb-20 font-sans w-full overflow-x-hidden">
-      {/* Top Banner & Header */}
       <div className="max-w-7xl mx-auto px-3 sm:px-6 pt-4 sm:pt-6 pb-2 w-full">
-        {/* Banner de Boas-Vindas */}
-        <div className="bg-gradient-to-br from-[#052447] via-[#073366] to-[#041a33] text-white p-5 sm:p-7 rounded-2xl sm:rounded-3xl shadow-md relative overflow-hidden mb-4">
-          {/* Elementos decorativos */}
-          <div className="absolute top-0 right-0 w-80 h-80 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 right-10 w-48 h-48 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
-
-          <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-sky-200 text-xs font-semibold mb-2 border border-white/10">
-                <Compass size={14} className="text-sky-300" />
-                <span>Comunhão & Discipulado</span>
-              </div>
-              <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-tight">
-                Nossas Células
-              </h1>
-              <p className="text-slate-300 text-xs sm:text-sm mt-1 max-w-xl">
-                Explore e conheça todas as células ativas da congregação{' '}
-                <strong className="text-white font-semibold">{displayChurchName}</strong>.
-              </p>
-            </div>
-
-            {/* Quick stats badge */}
-            <div className="flex items-center gap-3 self-start md:self-auto shrink-0 bg-white/10 backdrop-blur-md p-3 rounded-xl border border-white/10">
-              <div className="p-2 bg-sky-500/20 text-sky-300 rounded-lg">
-                <Layers size={22} />
-              </div>
-              <div>
-                <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider block">
-                  Total Cadastrado
-                </span>
-                <span className="text-xl sm:text-2xl font-black text-white">
-                  {totalCount} <span className="text-xs font-normal text-slate-300">células</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Input de Busca com Debounce & Filtro de Dia */}
         <div className="mb-5">
           <CelulaSearchInput
@@ -229,21 +188,21 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
 
         {/* 2. ESTADO DE CARREGAMENTO INICIAL (SKELETON CARDS) */}
         {isLoading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 animate-pulse">
+          <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6 animate-pulse">
             {Array.from({ length: 8 }).map((_, i) => (
               <div
                 key={`skeleton-${i}`}
-                className="bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-2xs"
+                className="bg-white rounded-xl sm:rounded-2xl border border-slate-200 overflow-hidden flex flex-col shadow-2xs"
               >
                 <div className="w-full aspect-[16/10] bg-slate-200" />
-                <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
-                  <div className="space-y-2">
-                    <div className="h-5 bg-slate-200 rounded-md w-3/4" />
-                    <div className="h-3.5 bg-slate-100 rounded-md w-1/2" />
+                <div className="p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 flex-1 flex flex-col justify-between">
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <div className="h-4 sm:h-5 bg-slate-200 rounded-md w-3/4" />
+                    <div className="h-3 sm:h-3.5 bg-slate-100 rounded-md w-1/2" />
                   </div>
-                  <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
-                    <div className="w-6 h-6 bg-slate-200 rounded-md" />
-                    <div className="h-3 bg-slate-200 rounded-md w-2/3" />
+                  <div className="pt-2 sm:pt-3 border-t border-slate-100 flex items-center gap-1.5 sm:gap-2">
+                    <div className="w-5 h-5 sm:w-6 sm:h-6 bg-slate-200 rounded-md shrink-0" />
+                    <div className="h-2.5 sm:h-3 bg-slate-200 rounded-md w-2/3" />
                   </div>
                 </div>
               </div>
@@ -300,7 +259,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
         {/* 5. GALERIA DE CARDS (RESULTADOS ENCONTRADOS) */}
         {!isLoading && !error && celulas.length > 0 && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 md:gap-6">
               {celulas.map((c) => (
                 <CelulaCard
                   key={c.id}

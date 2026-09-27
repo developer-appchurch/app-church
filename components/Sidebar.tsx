@@ -156,12 +156,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Users,
     },
     {
-      id: 'our_cells' as ActiveScreen,
-      label: 'Nossas Células',
-      sublabel: 'Galeria & busca de todas as células',
-      icon: Compass,
-    },
-    {
       id: 'reports' as ActiveScreen,
       label: 'Relatório Semanal',
       sublabel: 'Lançar relatório de presença',
@@ -172,6 +166,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Trilho de Liderança',
       sublabel: 'Visão Geral do Discipulado',
       icon: Award,
+    },
+    {
+      id: 'our_cells' as ActiveScreen,
+      label: 'Nossas Células',
+      sublabel: 'Galeria & busca de todas as células',
+      icon: Compass,
     },
     {
       id: 'member_pool' as ActiveScreen,
