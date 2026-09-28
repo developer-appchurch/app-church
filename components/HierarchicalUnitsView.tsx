@@ -362,11 +362,45 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return levels[activeLevelIndex - 1];
   }, [levels, activeLevelIndex]);
 
-  // Unidades do nível pai já cadastradas
+  // Unidades do nível pai já cadastradas (prioriza e restringe para pais sob cobertura do líder logado)
   const parentUnitsAvailable = useMemo(() => {
     if (!parentLevel) return [];
-    return units.filter((u) => u.levelTypeId === parentLevel.id);
-  }, [units, parentLevel]);
+    const allParents = units.filter((u) => u.levelTypeId === parentLevel.id);
+
+    // Administradores e Pastores Gerais possuem acesso amplo a todos os pais
+    if (
+      user.isSystemAdmin ||
+      user.role === 'Administrador' ||
+      user.login === 'admin' ||
+      userHierarchyLevel >= 6
+    ) {
+      return allParents;
+    }
+
+    // Se o usuário lidera setores/áreas/distritos específicos, filtra apenas as unidades pai sob sua cobertura
+    const uSectorNorm = (user.sector || '').toLowerCase().trim();
+    const uId = user.id || '';
+    const uNameNorm = (user.name || '').toLowerCase().trim();
+    const uLogin = (user.login || '').toLowerCase().trim();
+
+    const directlyMatchedParents = allParents.filter((p) => {
+      const pNameNorm = (p.name || '').toLowerCase().trim();
+      if (uSectorNorm && (pNameNorm === uSectorNorm || pNameNorm.includes(uSectorNorm) || uSectorNorm.includes(pNameNorm))) {
+        return true;
+      }
+      return p.leaders?.some((l) => {
+        const lId = (l.id || '').toLowerCase().trim();
+        const lName = (l.name || '').toLowerCase().trim();
+        return (uId && lId === uId.toLowerCase()) || (uLogin && lId === uLogin) || (uNameNorm && lName === uNameNorm);
+      });
+    });
+
+    if (directlyMatchedParents.length > 0) {
+      return directlyMatchedParents;
+    }
+
+    return allParents;
+  }, [units, parentLevel, user, userHierarchyLevel]);
 
   // Unidades cadastradas no nível ativo atual
   const currentLevelUnits = useMemo(() => {
@@ -408,53 +442,52 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return isLevelAllowedForUser(activeLevel, activeLevelIndex);
   }, [activeLevel, activeLevelIndex, isLevelAllowedForUser]);
 
-  // Regra de Permissão por Unidade (especialmente para Líder de Célula):
-  // O líder de célula só pode alterar líderes da sua própria célula ou de células que ela criou/multiplicou
-  const canUserManageUnit = React.useCallback(
-    (unit: OrganizationalUnit): boolean => {
-      if (!unit) return false;
-      if (!isCurrentActiveLevelAllowed) return false;
+  // 1. Identifica todas as unidades que o usuário logado lidera diretamente (Célula, Setor, Área, Distrito, etc.)
+  const userDirectLedUnits = useMemo(() => {
+    if (!user) return [];
+    const uId = (user.id || '').toLowerCase().trim();
+    const uLogin = (user.login || '').toLowerCase().trim();
+    const uName = (user.name || '').toLowerCase().trim();
+    const uSector = (user.sector || '').toLowerCase().trim();
+    const uCellId = (user.cellId || user.currentCellId || '').toLowerCase().trim();
+    const uCellName = (user.cellName || '').toLowerCase().trim();
 
-      // Níveis superiores (Setor, Área, Distrito, Pastor, Admin) possuem permissão ampla de gerenciamento
-      if (
-        userHierarchyLevel > 2 ||
-        user.isSystemAdmin ||
-        user.role === 'Administrador' ||
-        user.login === 'admin'
-      ) {
+    return units.filter((unit) => {
+      // (a) Usuário é líder direto registrado na lista de líderes da unidade
+      const inLeaders = unit.leaders?.some((ldr) => {
+        const ldrId = (ldr.id || '').toLowerCase().trim();
+        const ldrName = (ldr.name || '').toLowerCase().trim();
+        return (
+          (uId && ldrId === uId) ||
+          (uLogin && ldrId === uLogin) ||
+          (uName && ldrName === uName)
+        );
+      });
+      if (inLeaders) return true;
+
+      const unitNameNorm = (unit.name || '').toLowerCase().trim();
+      const levelNameNorm = (unit.levelTypeName || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+      // (b) Vinculação pelo campo de Setor do perfil do usuário (ex: SETOR MULTIVIEW)
+      if (uSector) {
+        const isSector = levelNameNorm.includes('setor') || unit.levelOrder === 30;
+        if (isSector && (unitNameNorm === uSector || unitNameNorm.includes(uSector) || uSector.includes(unitNameNorm))) {
+          return true;
+        }
+      }
+
+      // (c) Vinculação pelo campo de Célula do perfil do usuário
+      if (uCellId && (unit.id.toLowerCase() === uCellId)) {
+        return true;
+      }
+      if (uCellName && unitNameNorm === uCellName) {
         return true;
       }
 
-      const userEffectiveCellId = user?.cellId || user?.currentCellId || '';
-      const userEffectiveCellName = user?.cellName || '';
-
-      // Regra estrita para Líder de Célula (nível <= 2):
-      // 1. O usuário é líder direto vinculado nesta unidade
-      const isDirectLeader = unit.leaders?.some(
-        (l) =>
-          (user.id && l.id === user.id) ||
-          (user.name && l.name?.toLowerCase().trim() === user.name?.toLowerCase().trim())
-      );
-      if (isDirectLeader) return true;
-
-      // 2. Corresponde à célula vinculada no perfil do usuário
-      if (
-        userEffectiveCellId &&
-        (unit.id === userEffectiveCellId || unit.id.toLowerCase() === userEffectiveCellId.toLowerCase())
-      ) {
-        return true;
-      }
-      if (
-        userEffectiveCellName &&
-        unit.name?.toLowerCase().trim() === userEffectiveCellName.toLowerCase().trim()
-      ) {
-        return true;
-      }
-
-      // 3. A célula foi criada diretamente por esta líder
+      // (d) Célula criada diretamente por este usuário
       if (
         unit.createdByMemberId &&
-        (unit.createdByMemberId === user.id || unit.createdByMemberId === user.login)
+        (unit.createdByMemberId.toLowerCase() === uId || unit.createdByMemberId.toLowerCase() === uLogin)
       ) {
         return true;
       }
@@ -462,22 +495,102 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         return true;
       }
 
-      // 4. A célula nasceu / foi gerada / multiplicada a partir da célula desta líder (unidade_criadora_id / unidade_mae_id)
-      const motherId = unit.unidade_criadora_id || unit.unidade_mae_id || unit.motherCellId || userCellLineageMap[unit.id];
+      return false;
+    });
+  }, [units, user, userCreatedCellIds]);
+
+  // 2. Calcula o conjunto de IDs de TODAS as unidades sob a cobertura / guarda-chuva de liderança do usuário
+  // - Administrador / Pastor Titular / Nível >= 6: Cobertura ampla sobre toda a igreja
+  // - Líder de Distrito (Nível 5): Cobre o Distrito e todas as Áreas, Setores e Células subordinados a ele
+  // - Líder de Área (Nível 4): Cobre a Área e todos os Setores e Células subordinados a ela
+  // - Líder de Setor (Nível 3): Cobre o Setor e todas as Células subordinadas a este setor (ex: SETOR MULTIVIEW)
+  // - Líder de Célula (Nível 2): Cobre sua própria Célula e células geradas/multiplicadas por ela
+  const userCoveredUnitIds = useMemo(() => {
+    if (!user) return new Set<string>();
+
+    const isGeneralAdmin =
+      user.isSystemAdmin ||
+      user.role === 'Administrador' ||
+      user.login === 'admin' ||
+      userHierarchyLevel >= 6;
+
+    if (isGeneralAdmin) {
+      return new Set<string>(units.map((u) => u.id));
+    }
+
+    const covered = new Set<string>();
+
+    // Adiciona as unidades lideradas diretamente
+    userDirectLedUnits.forEach((u) => covered.add(u.id));
+
+    // Propagação descendente hierárquica na árvore (filhos, netos, bisnetos...)
+    let changed = true;
+    let iterations = 0;
+    while (changed && iterations < 25) {
+      changed = false;
+      iterations++;
+      for (const u of units) {
+        if (!covered.has(u.id)) {
+          // Se o pai da unidade está sob cobertura, a unidade filha também está
+          if (u.parentId && covered.has(u.parentId)) {
+            covered.add(u.id);
+            changed = true;
+          }
+          // Para células multiplicadas/geradas a partir de uma célula sob cobertura
+          const motherId = u.unidade_criadora_id || u.unidade_mae_id || u.motherCellId || userCellLineageMap[u.id];
+          if (motherId && covered.has(motherId)) {
+            covered.add(u.id);
+            changed = true;
+          }
+        }
+      }
+    }
+
+    return covered;
+  }, [user, userHierarchyLevel, units, userDirectLedUnits, userCellLineageMap]);
+
+  // Regra de Permissão por Unidade:
+  // Um líder de setor só pode fazer alteração de líderes das unidades sob a cobertura do setor que ele lidera.
+  // Essa regra vale para líderes superiores (Área, Distrito) e líderes de célula.
+  const canUserManageUnit = React.useCallback(
+    (unit: OrganizationalUnit): boolean => {
+      if (!unit) return false;
+      if (!isCurrentActiveLevelAllowed) return false;
+
+      // 1. Administrador ou Pastor Geral possui cobertura irrestrita
       if (
-        userEffectiveCellId &&
-        motherId &&
-        (motherId === userEffectiveCellId || motherId.toLowerCase() === userEffectiveCellId.toLowerCase())
+        userHierarchyLevel >= 6 ||
+        user.isSystemAdmin ||
+        user.role === 'Administrador' ||
+        user.login === 'admin'
       ) {
         return true;
       }
 
-      if (
-        userEffectiveCellName &&
-        unit.motherCellName &&
-        unit.motherCellName.toLowerCase().trim() === userEffectiveCellName.toLowerCase().trim()
-      ) {
+      // 2. Unidade está dentro do guarda-chuva / cobertura de liderança do usuário
+      if (userCoveredUnitIds.has(unit.id)) {
         return true;
+      }
+
+      // 3. Fallback de liderança direta na unidade
+      const uId = (user.id || '').toLowerCase().trim();
+      const uLogin = (user.login || '').toLowerCase().trim();
+      const uName = (user.name || '').toLowerCase().trim();
+      const isDirectLeader = unit.leaders?.some((l) => {
+        const lId = (l.id || '').toLowerCase().trim();
+        const lName = (l.name || '').toLowerCase().trim();
+        return (uId && lId === uId) || (uLogin && lId === uLogin) || (uName && lName === uName);
+      });
+      if (isDirectLeader) return true;
+
+      // 4. Fallback por nome do setor para Líder de Setor
+      if (user.sector) {
+        const userSectorNorm = user.sector.toLowerCase().trim();
+        const unitNameNorm = (unit.name || '').toLowerCase().trim();
+        const parentNameNorm = (unit.parentName || '').toLowerCase().trim();
+        if (unitNameNorm === userSectorNorm || parentNameNorm === userSectorNorm) {
+          return true;
+        }
       }
 
       return false;
@@ -486,44 +599,66 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       isCurrentActiveLevelAllowed,
       userHierarchyLevel,
       user,
-      userCreatedCellIds,
-      userCellLineageMap,
+      userCoveredUnitIds,
     ]
   );
 
-  // Distintivo de origem / vinculação para clareza visual da líder de célula
+  // Distintivo de origem / vinculação e cobertura visual
   const getUnitOriginBadge = (unit: OrganizationalUnit) => {
-    if (userHierarchyLevel > 2) return null;
+    const isGeneralAdmin =
+      user.isSystemAdmin ||
+      user.role === 'Administrador' ||
+      user.login === 'admin' ||
+      userHierarchyLevel >= 6;
 
-    const userEffectiveCellId = user?.cellId || user?.currentCellId || '';
-    const userEffectiveCellName = user?.cellName || '';
+    if (isGeneralAdmin) return null;
+
+    const uId = (user.id || '').toLowerCase().trim();
+    const uLogin = (user.login || '').toLowerCase().trim();
+    const uName = (user.name || '').toLowerCase().trim();
+    const uSector = (user.sector || '').toLowerCase().trim();
+    const uCellId = (user.cellId || user.currentCellId || '').toLowerCase().trim();
+    const uCellName = (user.cellName || '').toLowerCase().trim();
+    const unitNameNorm = (unit.name || '').toLowerCase().trim();
 
     const isDirectLeader =
-      unit.leaders?.some(
-        (l) =>
-          (user.id && l.id === user.id) ||
-          (user.name && l.name?.toLowerCase().trim() === user.name?.toLowerCase().trim())
-      ) ||
-      (userEffectiveCellId && unit.id === userEffectiveCellId) ||
-      (userEffectiveCellName && unit.name?.toLowerCase().trim() === userEffectiveCellName.toLowerCase().trim());
+      unit.leaders?.some((l) => {
+        const lId = (l.id || '').toLowerCase().trim();
+        const lName = (l.name || '').toLowerCase().trim();
+        return (uId && lId === uId) || (uLogin && lId === uLogin) || (uName && lName === uName);
+      }) ||
+      (uCellId && unit.id.toLowerCase() === uCellId) ||
+      (uCellName && unitNameNorm === uCellName) ||
+      (uSector && unitNameNorm === uSector);
 
     if (isDirectLeader) {
+      const label =
+        userHierarchyLevel === 2
+          ? 'Sua Célula'
+          : userHierarchyLevel === 3
+          ? 'Seu Setor'
+          : userHierarchyLevel === 4
+          ? 'Sua Área'
+          : userHierarchyLevel === 5
+          ? 'Seu Distrito'
+          : 'Sua Unidade';
+
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">
           <UserCheck size={11} />
-          <span>Sua Célula</span>
+          <span>{label}</span>
         </span>
       );
     }
 
     const isCreatedByMe =
-      (unit.createdByMemberId && (unit.createdByMemberId === user.id || unit.createdByMemberId === user.login)) ||
+      (unit.createdByMemberId && (unit.createdByMemberId.toLowerCase() === uId || unit.createdByMemberId.toLowerCase() === uLogin)) ||
       userCreatedCellIds.includes(unit.id);
 
     const motherId = unit.unidade_criadora_id || unit.unidade_mae_id || unit.motherCellId || userCellLineageMap[unit.id];
     const isMotherFromMe =
-      (userEffectiveCellId && motherId && (motherId === userEffectiveCellId || motherId.toLowerCase() === userEffectiveCellId.toLowerCase())) ||
-      (userEffectiveCellName && unit.motherCellName && unit.motherCellName.toLowerCase().trim() === userEffectiveCellName.toLowerCase().trim());
+      (uCellId && motherId && (motherId.toLowerCase() === uCellId)) ||
+      (uCellName && unit.motherCellName && unit.motherCellName.toLowerCase().trim() === uCellName);
 
     if (isMotherFromMe) {
       return (
@@ -539,6 +674,25 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 text-[10px] font-bold border border-sky-200">
           <Sparkles size={11} />
           <span>Criada por você</span>
+        </span>
+      );
+    }
+
+    // Distintivo de cobertura hierárquica (Setor, Área, Distrito)
+    if (userCoveredUnitIds.has(unit.id)) {
+      const coverageLabel =
+        userHierarchyLevel === 3
+          ? 'Cobertura do Seu Setor'
+          : userHierarchyLevel === 4
+          ? 'Cobertura da Sua Área'
+          : userHierarchyLevel === 5
+          ? 'Cobertura do Seu Distrito'
+          : 'Sob Sua Cobertura';
+
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 text-[10px] font-bold border border-indigo-200">
+          <ShieldCheck size={11} />
+          <span>{coverageLabel}</span>
         </span>
       );
     }
@@ -626,8 +780,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       return;
     }
     if (!canUserManageUnit(unit)) {
+      const scopeRef = userDirectLedUnits.map((u) => u.name).join(', ') || user.sector || user.cellName || 'sua liderança';
       setErrorMessage(
-        `Ação não permitida: Você só pode alterar líderes da sua própria célula (${user.cellName || 'vinculada'}) ou de células geradas/criadas por você.`
+        `Ação não permitida: Você só pode alterar líderes de unidades sob a cobertura da sua liderança (${scopeRef}). Esta unidade pertence a outra cobertura hierárquica.`
       );
       return;
     }
@@ -653,8 +808,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       return;
     }
     if (!canUserManageUnit(unitToBindLeaders)) {
+      const scopeRef = userDirectLedUnits.map((u) => u.name).join(', ') || user.sector || user.cellName || 'sua liderança';
       setBindLeaderError(
-        `Ação não permitida: Você só pode alterar líderes da sua própria célula (${user.cellName || 'vinculada'}) ou de células geradas por ela.`
+        `Ação não permitida: Você só pode alterar líderes de unidades sob a cobertura da sua liderança (${scopeRef}).`
       );
       return;
     }
@@ -1493,7 +1649,15 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                                 <UserCheck size={12} />
                                 <span>Alterar Líderes</span>
                               </button>
-                            ) : null}
+                            ) : (
+                              <span
+                                title={`Ação restrita à liderança responsável por este(a) ${activeLevel.name.toLowerCase()}.`}
+                                className="text-[10px] text-slate-400 font-medium italic flex items-center gap-1 shrink-0 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60"
+                              >
+                                <Lock size={10} />
+                                <span>Outra Cobertura</span>
+                              </span>
+                            )}
                           </div>
                         </div>
                       ) : (
@@ -1520,8 +1684,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                                 <span>Vincular Líder</span>
                               </button>
                             ) : (
-                              <span className="text-[11px] text-slate-400 italic">
-                                Gerenciamento restrito à liderança desta célula
+                              <span className="text-[11px] text-slate-400 italic flex items-center gap-1">
+                                <Lock size={11} />
+                                <span>Restrito à cobertura deste(a) {activeLevel.name.toLowerCase()}</span>
                               </span>
                             )}
                           </div>
