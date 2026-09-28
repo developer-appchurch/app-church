@@ -25,6 +25,9 @@ export interface CreateCellPayload {
   meetingDay?: string;
   meetingTime?: string;
   parentUnitId?: string | null;
+  unidade_criadora_id?: string | null;
+  unidade_mae_id?: string | null;
+  motherCellId?: string | null;
 }
 
 export async function POST(req: NextRequest) {
@@ -107,12 +110,15 @@ export async function POST(req: NextRequest) {
 
     // 2. Inserir em 'unidades' com todos os atributos consolidados
     const initialMembersCount = body.leaderMemberId ? 1 : 0;
+    const motherCellId = body.unidade_criadora_id || body.unidade_mae_id || body.motherCellId || null;
+
     const unitPayload: any = {
       id: unitId,
       igreja_id: body.churchId,
       nivel_tipo_id: cellLevelId,
       nome: cellName,
       pai_id: body.parentUnitId || null,
+      unidade_criadora_id: motherCellId && motherCellId.trim() !== '' ? motherCellId.trim() : null,
       bairro: body.neighborhood?.trim() || 'Centro',
       endereco: formattedAddress,
       dia_semana: meetingDay,
@@ -125,7 +131,19 @@ export async function POST(req: NextRequest) {
       atualizado_em: new Date().toISOString(),
     };
 
-    const { error: unitErr } = await supabase.from('unidades').insert([unitPayload]);
+    let { error: unitErr } = await supabase.from('unidades').insert([unitPayload]);
+    if (unitErr && (unitErr.code === '42703' || unitErr.message?.includes('unidade_criadora_id'))) {
+      delete unitPayload.unidade_criadora_id;
+      unitPayload.unidade_mae_id = motherCellId && motherCellId.trim() !== '' ? motherCellId.trim() : null;
+      let retry = await supabase.from('unidades').insert([unitPayload]);
+      unitErr = retry.error;
+
+      if (unitErr && (unitErr.code === '42703' || unitErr.message?.includes('unidade_mae_id'))) {
+        delete unitPayload.unidade_mae_id;
+        retry = await supabase.from('unidades').insert([unitPayload]);
+        unitErr = retry.error;
+      }
+    }
     if (unitErr) {
       console.error('Falha ao inserir em unidades:', unitErr);
       return NextResponse.json(

@@ -193,26 +193,29 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
     return 1;
   }, [currentUser]);
 
-  // 5. Verificação de Permissão de Edição da Célula
+  // 5. Verificação de Permissão de Edição da Célula (Regra Estrita de Cobertura Hierárquica)
   const canEditCell = useCallback(
     (targetCell: CelulaCardItem | null): boolean => {
       if (!targetCell || !currentUser) return false;
 
-      // Usuário nível 1 (Membro/Apoio nível 1) NUNCA edita células
+      // Usuário nível 1 (Membro/Apoio) NUNCA edita células
       if (userHierarchyLevel <= 1) return false;
 
-      // Pastores e administradores possuem cobertura integral
+      // Pastores e administradores possuem cobertura integral de todas as células da congregação
       const isPastorOrAdmin =
         currentUser.isSystemAdmin ||
         currentUser.role === 'Administrador' ||
         currentUser.role === 'Pastor Titular' ||
-        currentUser.role === 'Pastor de Área' ||
-        currentUser.role === 'Supervisor de Área';
+        currentUser.role === 'Pastor' ||
+        currentUser.role === 'Pastor(a)' ||
+        userHierarchyLevel >= 7;
 
       if (isPastorOrAdmin) return true;
 
-      // 1. Líder vinculado diretamente à célula
-      const isDirectLeader =
+      const targetCellUnitId = targetCell.unidadeId || targetCell.id;
+
+      // 1. Líder direto da célula: só pode editar a célula à qual está vinculado como líder
+      const isDirectCellLeader =
         (targetCell.leaderMemberIds && targetCell.leaderMemberIds.includes(currentUser.id)) ||
         (targetCell.leaderNames &&
           targetCell.leaderNames.some(
@@ -221,65 +224,35 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
         currentUser.currentCellId === targetCell.id ||
         currentUser.currentCellId === targetCell.unidadeId;
 
-      if (isDirectLeader) return true;
+      if (userHierarchyLevel === 2) {
+        // Líder de célula só edita se for o líder direto desta célula específica
+        return isDirectCellLeader;
+      }
 
-      // 2. Cobertura hierárquica na árvore de unidades (Líder do Setor pai, Líder da Área pai, etc.)
+      // Se for líder direto de nível superior, permite
+      if (isDirectCellLeader) return true;
+
+      // 2. Líderes Superiores (Setor, Área, Rede, Distrito):
+      // Podem editar se a célula estiver dentro da sua subárvore de unidades
       if (units && units.length > 0) {
-        const cellUnitId = targetCell.unidadeId || targetCell.id;
-        const currentUnit = units.find((u) => u.id === cellUnitId);
+        const currentUnit = units.find((u) => u.id === targetCellUnitId);
         if (currentUnit) {
-          if (
-            currentUnit.leaders?.some(
-              (l) => l.id === currentUser.id || l.name?.toLowerCase() === currentUser.name?.toLowerCase()
-            )
-          ) {
-            return true;
-          }
-
+          // Verifica ancestrais na árvore
           let currentParentId: string | null | undefined = currentUnit.parentId;
           while (currentParentId) {
             const parentUnit = units.find((u) => u.id === currentParentId);
             if (!parentUnit) break;
 
-            if (
-              parentUnit.leaders?.some(
-                (l) => l.id === currentUser.id || l.name?.toLowerCase() === currentUser.name?.toLowerCase()
-              )
-            ) {
+            // Se o usuário é líder desta unidade ancestral (ex: líder do setor pai)
+            const isLeaderOfParent = parentUnit.leaders?.some(
+              (l) => l.id === currentUser.id || l.name?.toLowerCase() === currentUser.name?.toLowerCase()
+            );
+            if (isLeaderOfParent) {
               return true;
-            }
-
-            if (currentUser.sector) {
-              const userSectorNorm = currentUser.sector.trim().toLowerCase();
-              const parentNameNorm = parentUnit.name.trim().toLowerCase();
-              if (
-                userSectorNorm === parentNameNorm ||
-                parentNameNorm.includes(userSectorNorm) ||
-                userSectorNorm.includes(parentNameNorm)
-              ) {
-                return true;
-              }
             }
 
             currentParentId = parentUnit.parentId;
           }
-        }
-      }
-
-      // 3. Fallback de cobertura por setor / área associada à célula
-      if (currentUser.sector && targetCell.sectorName) {
-        const userSec = currentUser.sector.trim().toLowerCase();
-        const cellSec = targetCell.sectorName.trim().toLowerCase();
-        if (userSec === cellSec || userSec.includes(cellSec) || cellSec.includes(userSec)) {
-          return true;
-        }
-      }
-
-      if (currentUser.sector && targetCell.areaName) {
-        const userSec = currentUser.sector.trim().toLowerCase();
-        const cellArea = targetCell.areaName.trim().toLowerCase();
-        if (userSec === cellArea || userSec.includes(cellArea) || cellArea.includes(userSec)) {
-          return true;
         }
       }
 

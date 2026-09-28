@@ -100,6 +100,8 @@ export interface UserProfile {
   permissions?: string[];
   sector: string;
   currentCellId: string;
+  cellId?: string;
+  cellName?: string;
   email: string;
   phone?: string;
   avatarUrl?: string;
@@ -125,6 +127,10 @@ export interface CellGroup {
   areaName?: string;
   areaUnitId?: string | null;
   leaderMemberIds?: string[];
+  unidade_criadora_id?: string | null;
+  unidade_mae_id?: string | null;
+  motherCellId?: string;
+  motherCellName?: string;
 }
 
 export interface CellMember {
@@ -316,6 +322,11 @@ export interface OrganizationalUnit {
   longitude?: number;
   memberCount: number;
   createdAt?: string;
+  createdByMemberId?: string;
+  unidade_criadora_id?: string | null;
+  unidade_mae_id?: string | null;
+  motherCellId?: string;
+  motherCellName?: string;
 }
 
 export interface CreateUnitInput {
@@ -332,6 +343,11 @@ export interface CreateUnitInput {
   meetingTime?: string;
   latitude?: number;
   longitude?: number;
+  createdByMemberId?: string;
+  unidade_criadora_id?: string | null;
+  unidade_mae_id?: string | null;
+  motherCellId?: string;
+  motherCellName?: string;
 }
 
 export interface UpdateUnitLeadersInput {

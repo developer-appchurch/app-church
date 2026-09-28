@@ -158,11 +158,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    // 1. Modo Plano Ultrarrápido (Passo 1): Retorna lista plana de unidades (id, pai_id, nivel_tipo_id, nome, ativo)
+    // 1. Modo Plano Ultrarrápido (Passo 1): Retorna lista plana de unidades (id, pai_id, nivel_tipo_id, nome, ativo, unidade_criadora_id)
     if (mode === 'flat') {
       let flatQuery = supabase
         .from('unidades')
-        .select('id, pai_id, nivel_tipo_id, nome, ativo, igreja_id')
+        .select('id, pai_id, nivel_tipo_id, nome, ativo, igreja_id, unidade_criadora_id')
         .eq('igreja_id', churchId)
         .eq('ativo', true)
         .order('nome', { ascending: true });
@@ -172,7 +172,9 @@ export async function GET(req: NextRequest) {
       }
 
       // Executa consulta das unidades e contagem de membros por unidade da igreja
-      const [unitsRes, memberCountsRes] = await Promise.all([
+      let unitsRes: any;
+      let memberCountsRes: any;
+      const [uRes, mRes] = await Promise.all([
         flatQuery,
         supabase
           .from('membros')
@@ -180,6 +182,31 @@ export async function GET(req: NextRequest) {
           .eq('igreja_id', churchId)
           .not('unidade_id', 'is', null),
       ]);
+      unitsRes = uRes;
+      memberCountsRes = mRes;
+
+      // Se unidade_criadora_id não existir na tabela ainda, tenta com unidade_mae_id ou consulta básica
+      if (unitsRes.error && (unitsRes.error.code === '42703' || unitsRes.error.message?.includes('unidade_criadora_id'))) {
+        let fallbackQuery = supabase
+          .from('unidades')
+          .select('id, pai_id, nivel_tipo_id, nome, ativo, igreja_id, unidade_mae_id')
+          .eq('igreja_id', churchId)
+          .eq('ativo', true)
+          .order('nome', { ascending: true });
+        if (levelTypeId) fallbackQuery = fallbackQuery.eq('nivel_tipo_id', levelTypeId);
+        unitsRes = await fallbackQuery;
+
+        if (unitsRes.error && (unitsRes.error.code === '42703' || unitsRes.error.message?.includes('unidade_mae_id'))) {
+          let legacyFlatQuery = supabase
+            .from('unidades')
+            .select('id, pai_id, nivel_tipo_id, nome, ativo, igreja_id')
+            .eq('igreja_id', churchId)
+            .eq('ativo', true)
+            .order('nome', { ascending: true });
+          if (levelTypeId) legacyFlatQuery = legacyFlatQuery.eq('nivel_tipo_id', levelTypeId);
+          unitsRes = await legacyFlatQuery;
+        }
+      }
 
       if (unitsRes.error) {
         return NextResponse.json({ error: unitsRes.error.message }, { status: 500 });
@@ -219,6 +246,10 @@ export async function GET(req: NextRequest) {
           countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
         }
       });
+
+      // Mapeamento de nomes de unidades para resolução rápida da célula mãe
+      const unitNameMap = new Map<string, string>();
+      rows.forEach((r: any) => unitNameMap.set(r.id, r.nome));
 
       // Líderes em lote: buscar detalhes dos líderes vinculados a qualquer unidade
       const activeLeaderRows = leadersBatchRes.data || [];
@@ -267,9 +298,13 @@ export async function GET(req: NextRequest) {
         const celulaInfo = celulasMap.get(u.id);
         const calcMemberCount = countMap.get(u.id);
         const dbMemberCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : 0;
+        const motherId = u.unidade_criadora_id || u.unidade_mae_id || null;
+        const motherCellName = motherId ? unitNameMap.get(motherId) : undefined;
+
         return {
           id: u.id,
           parentId: u.pai_id || null,
+          parentName: u.pai_id ? unitNameMap.get(u.pai_id) : undefined,
           levelTypeId: u.nivel_tipo_id,
           name: u.nome,
           isActive: u.ativo !== false,
@@ -282,6 +317,10 @@ export async function GET(req: NextRequest) {
           neighborhood: u.bairro || celulaInfo?.bairro,
           address: u.endereco || celulaInfo?.endereco,
           fotoUrl: u.foto_url || celulaInfo?.foto_url,
+          unidade_criadora_id: motherId,
+          unidade_mae_id: motherId,
+          motherCellId: motherId,
+          motherCellName: motherCellName,
         };
       });
 
@@ -308,7 +347,7 @@ export async function GET(req: NextRequest) {
 
     let unitsQuery = supabase
       .from('unidades')
-      .select('id, igreja_id, nivel_tipo_id, pai_id, nome, ativo, criado_em')
+      .select('id, igreja_id, nivel_tipo_id, pai_id, unidade_criadora_id, nome, ativo, criado_em')
       .eq('igreja_id', churchId)
       .eq('ativo', true)
       .order('nome', { ascending: true });
@@ -317,7 +356,39 @@ export async function GET(req: NextRequest) {
       unitsQuery = unitsQuery.eq('nivel_tipo_id', levelTypeId);
     }
 
-    const { data: unitsData, error: unitsError } = await unitsQuery;
+    let unitsData: any[] | null = null;
+    let unitsError: any = null;
+
+    const initialRes = await unitsQuery;
+    unitsData = initialRes.data;
+    unitsError = initialRes.error;
+
+    if (unitsError && (unitsError.code === '42703' || unitsError.message?.includes('unidade_criadora_id'))) {
+      let fallbackUnitsQuery = supabase
+        .from('unidades')
+        .select('id, igreja_id, nivel_tipo_id, pai_id, unidade_mae_id, nome, ativo, criado_em')
+        .eq('igreja_id', churchId)
+        .eq('ativo', true)
+        .order('nome', { ascending: true });
+      if (levelTypeId) fallbackUnitsQuery = fallbackUnitsQuery.eq('nivel_tipo_id', levelTypeId);
+      const fbRes = await fallbackUnitsQuery;
+      unitsData = fbRes.data;
+      unitsError = fbRes.error;
+
+      if (unitsError && (unitsError.code === '42703' || unitsError.message?.includes('unidade_mae_id'))) {
+        let legacyUnitsQuery = supabase
+          .from('unidades')
+          .select('id, igreja_id, nivel_tipo_id, pai_id, nome, ativo, criado_em')
+          .eq('igreja_id', churchId)
+          .eq('ativo', true)
+          .order('nome', { ascending: true });
+        if (levelTypeId) legacyUnitsQuery = legacyUnitsQuery.eq('nivel_tipo_id', levelTypeId);
+        const legRes = await legacyUnitsQuery;
+        unitsData = legRes.data;
+        unitsError = legRes.error;
+      }
+    }
+
     if (unitsError) {
       console.error('Erro ao buscar unidades:', unitsError);
       return NextResponse.json({ error: unitsError.message }, { status: 500 });
@@ -327,7 +398,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, units: [] });
     }
 
-    // Mapeamento de nomes de todas as unidades para obter nome do pai
+    // Mapeamento de nomes de todas as unidades para obter nome do pai e da célula mãe
     const unitNameMap = new Map<string, string>();
     unitsData.forEach((u: any) => unitNameMap.set(u.id, u.nome));
 
@@ -394,6 +465,8 @@ export async function GET(req: NextRequest) {
       const unitLeaders = leadersMap.get(u.id) || [];
       const memberCount = countMap.get(u.id) || 0;
       const celulaInfo = celulasMap.get(u.id);
+      const motherId = u.unidade_criadora_id || u.unidade_mae_id || null;
+      const motherCellName = motherId ? unitNameMap.get(motherId) : undefined;
 
       return {
         id: u.id,
@@ -413,6 +486,10 @@ export async function GET(req: NextRequest) {
         address: u.endereco || celulaInfo?.endereco,
         fotoUrl: u.foto_url || celulaInfo?.foto_url,
         createdAt: u.criado_em,
+        unidade_criadora_id: motherId,
+        unidade_mae_id: motherId,
+        motherCellId: motherId,
+        motherCellName: motherCellName,
       };
     });
 
@@ -529,6 +606,7 @@ export async function POST(req: NextRequest) {
     }
 
     const unitId = generateUUID();
+    const motherCellId = input.unidade_criadora_id || input.unidade_mae_id || input.motherCellId || null;
 
     // 3. Inserir na tabela unidades com atributos consolidados
     const unitPayload: any = {
@@ -536,6 +614,7 @@ export async function POST(req: NextRequest) {
       igreja_id: input.churchId,
       nivel_tipo_id: input.levelTypeId,
       pai_id: isRootLevel ? null : (input.parentId && input.parentId.trim() !== '' ? input.parentId.trim() : null),
+      unidade_criadora_id: isLeafLevel ? (motherCellId && motherCellId.trim() !== '' ? motherCellId.trim() : null) : null,
       nome: input.name.trim(),
       ativo: true,
       bairro: input.neighborhood?.trim() || (isLeafLevel ? 'Centro' : null),
@@ -551,7 +630,19 @@ export async function POST(req: NextRequest) {
       atualizado_em: new Date().toISOString(),
     };
 
-    const { error: insertUnitErr } = await supabase.from('unidades').insert([unitPayload]);
+    let { error: insertUnitErr } = await supabase.from('unidades').insert([unitPayload]);
+    if (insertUnitErr && (insertUnitErr.code === '42703' || insertUnitErr.message?.includes('unidade_criadora_id'))) {
+      delete unitPayload.unidade_criadora_id;
+      unitPayload.unidade_mae_id = isLeafLevel ? (motherCellId && motherCellId.trim() !== '' ? motherCellId.trim() : null) : null;
+      let retry = await supabase.from('unidades').insert([unitPayload]);
+      insertUnitErr = retry.error;
+
+      if (insertUnitErr && (insertUnitErr.code === '42703' || insertUnitErr.message?.includes('unidade_mae_id'))) {
+        delete unitPayload.unidade_mae_id;
+        retry = await supabase.from('unidades').insert([unitPayload]);
+        insertUnitErr = retry.error;
+      }
+    }
     if (insertUnitErr) {
       console.error('Erro ao inserir unidade:', insertUnitErr);
       return NextResponse.json({ error: `Falha ao criar unidade: ${insertUnitErr.message}` }, { status: 500 });
@@ -739,6 +830,11 @@ export async function POST(req: NextRequest) {
       longitude: input.longitude,
       memberCount: isLeafLevel ? leadersAssigned.length : 0,
       createdAt: new Date().toISOString(),
+      createdByMemberId: input.createdByMemberId,
+      unidade_criadora_id: motherCellId,
+      unidade_mae_id: motherCellId,
+      motherCellId: input.motherCellId || motherCellId || undefined,
+      motherCellName: input.motherCellName,
     };
 
     invalidateServerHierarchyUnitsCache(input.churchId);

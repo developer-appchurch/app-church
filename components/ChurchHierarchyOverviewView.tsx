@@ -159,6 +159,36 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
   const rootLevel = levels[0];
   const leafLevel = levels[levels.length - 1];
 
+  // Nível de hierarquia do usuário logado
+  const userHierarchyLevel = useMemo(() => {
+    if (!user) return 1;
+    if (user.isSystemAdmin || user.role === 'Administrador' || user.login === 'admin') {
+      return 999;
+    }
+    const roleLower = (user.role || '').toLowerCase();
+    if (roleLower.includes('pastor')) return 6;
+    if (roleLower.includes('distrito')) return 5;
+    if (roleLower.includes('rede')) return 5;
+    if (roleLower.includes('área') || roleLower.includes('area')) return 4;
+    if (roleLower.includes('setor')) return 3;
+    if (roleLower.includes('célula') || roleLower.includes('celula') || roleLower.includes('lider')) return 2;
+    return 1;
+  }, [user]);
+
+  const isLevelAllowedForUser = (lvl: ChurchHierarchicalLevel, index: number): boolean => {
+    if (!user) return false;
+    if (user.isSystemAdmin || user.role === 'Administrador' || user.login === 'admin') return true;
+    const lvlNorm = (lvl.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let req = 2;
+    if (lvlNorm.includes('distrito')) req = 5;
+    else if (lvlNorm.includes('area') || lvlNorm.includes('área')) req = 4;
+    else if (lvlNorm.includes('rede')) req = 5;
+    else if (lvlNorm.includes('setor')) req = 3;
+    else if (lvlNorm.includes('celula') || lvl.isLeaf || index === levels.length - 1) req = 2;
+    else req = Math.max(2, 2 + (levels.length - 1 - index));
+    return userHierarchyLevel >= req;
+  };
+
   // Métricas por nível
   const unitCountsByLevel = useMemo(() => {
     const map = new Map<string, number>();
@@ -443,7 +473,7 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
 
             {/* Ações contextuais */}
             <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-              {nextLevel && onNavigateAddUnit && (
+              {nextLevel && onNavigateAddUnit && isLevelAllowedForUser(nextLevel, currentLevelIdx + 1) && (
                 <button
                   type="button"
                   onClick={() => onNavigateAddUnit(currentLevelIdx + 1, node.unit.id)}
@@ -633,7 +663,7 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
               Comece cadastrando as unidades raiz (ex: {rootLevel?.name || 'Distrito'}) e seus níveis
               subordinados até as células.
             </p>
-            {onNavigateAddUnit && (
+            {onNavigateAddUnit && rootLevel && isLevelAllowedForUser(rootLevel, 0) && (
               <button
                 type="button"
                 onClick={() => onNavigateAddUnit(0)}

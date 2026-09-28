@@ -201,6 +201,79 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
     return 1;
   }, [user, availableRoles]);
 
+  // Todas as unidades da igreja
+  const unitsList = useMemo(() => helperData?.units || [], [helperData]);
+
+  // Verifica se uma unidade/célula está sob a cobertura direta ou indireta do usuário logado
+  const isUnitInUserCoverage = useCallback(
+    (unitId: string | null | undefined): boolean => {
+      if (!unitId || !user) return false;
+
+      // Pastores e administradores cobrem toda a congregação
+      if (userHierarchyLevel >= 7 || user.isSystemAdmin || user.role === 'Administrador') {
+        return true;
+      }
+
+      // 1. Se o usuário é o próprio líder direto desta unidade ou é sua célula direta
+      if (user.currentCellId === unitId) return true;
+
+      const targetUnit = unitsList.find((u) => u.id === unitId);
+      if (!targetUnit) return false;
+
+      const isDirectLeader = targetUnit.leaders?.some(
+        (l) => l.id === user.id || l.name?.toLowerCase() === user.name?.toLowerCase()
+      );
+      if (isDirectLeader) return true;
+
+      // Se o usuário é líder de célula (nível 2), ele SÓ cobre a sua própria célula
+      if (userHierarchyLevel <= 2) {
+        return false;
+      }
+
+      // 2. Para líderes superiores (Setor, Área, Rede, Distrito):
+      // Percorre os ancestrais da unidade para ver se o usuário lidera algum nível superior
+      let currentParentId: string | null | undefined = targetUnit.parentId;
+      while (currentParentId) {
+        const parentUnit = unitsList.find((u) => u.id === currentParentId);
+        if (!parentUnit) break;
+
+        const isLeaderOfParent = parentUnit.leaders?.some(
+          (l) => l.id === user.id || l.name?.toLowerCase() === user.name?.toLowerCase()
+        );
+        if (isLeaderOfParent) {
+          return true;
+        }
+
+        currentParentId = parentUnit.parentId;
+      }
+
+      return false;
+    },
+    [user, userHierarchyLevel, unitsList]
+  );
+
+  // Verifica se um membro está sob a cobertura do usuário logado
+  const isMemberInUserCoverage = useCallback(
+    (member: MemberListItem): boolean => {
+      if (!user) return false;
+
+      // Pastores e administradores cobrem todos os membros da igreja
+      if (userHierarchyLevel >= 7 || user.isSystemAdmin || user.role === 'Administrador') {
+        return true;
+      }
+
+      // Membro sem célula (Pool Geral):
+      // Qualquer líder (nível >= 2) pode vincular/gerenciar membros do pool para as células em sua cobertura
+      if (member.isUnlinked || !member.cellId) {
+        return userHierarchyLevel >= 2;
+      }
+
+      // Membro vinculado a uma célula: só quem tem cobertura sobre aquela célula pode desvincular ou excluir
+      return isUnitInUserCoverage(member.cellId);
+    },
+    [user, userHierarchyLevel, isUnitInUserCoverage]
+  );
+
   // Funções que o usuário logado tem permissão de atribuir (até o seu próprio nível)
   const assignableRoles = useMemo(() => {
     if (availableRoles.length === 0) return [];
@@ -217,19 +290,28 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
     }
   }, [assignableRoles, newMemberRole]);
 
+  // Células/Unidades folha disponíveis para vinculação RESTRITAS à cobertura do usuário
   const availableCells = useMemo(() => {
     const map = new Map<string, { id: string; name: string; sector?: string }>();
     const cellsList = helperData?.cells || [];
-    const unitsList = helperData?.units || [];
-    cellsList.forEach((c) => map.set(c.id, { id: c.id, name: c.name, sector: c.sectorName }));
+
+    cellsList.forEach((c) => {
+      if (isUnitInUserCoverage(c.id)) {
+        map.set(c.id, { id: c.id, name: c.name, sector: c.sectorName });
+      }
+    });
+
     unitsList.forEach((u) => {
       const hasChildren = unitsList.some((child) => child.parentId === u.id);
       if (!hasChildren && !map.has(u.id)) {
-        map.set(u.id, { id: u.id, name: u.name, sector: u.parentName });
+        if (isUnitInUserCoverage(u.id)) {
+          map.set(u.id, { id: u.id, name: u.name, sector: u.parentName });
+        }
       }
     });
+
     return Array.from(map.values());
-  }, [helperData]);
+  }, [helperData, unitsList, isUnitInUserCoverage]);
 
   // Define seleção inicial nos modals quando as células carregarem
   useEffect(() => {
@@ -791,43 +873,51 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Ações */}
-                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                      {member.isUnlinked ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedMemberToAssign(member);
-                            if (availableCells.length > 0 && !targetCellId) {
-                              setTargetCellId(availableCells[0].id);
+                    {/* Ações (Visíveis apenas se o membro estiver sob a cobertura hierárquica do usuário) */}
+                    {isMemberInUserCoverage(member) && (
+                      <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                        {member.isUnlinked ? (
+                          <button
+                            type="button"
+                            disabled={availableCells.length === 0}
+                            onClick={() => {
+                              setSelectedMemberToAssign(member);
+                              if (availableCells.length > 0 && !targetCellId) {
+                                setTargetCellId(availableCells[0].id);
+                              }
+                            }}
+                            className="px-3.5 py-1.5 bg-[#052447] hover:bg-[#073366] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                            title={
+                              availableCells.length === 0
+                                ? 'Nenhuma célula em sua cobertura disponível para vinculação'
+                                : 'Vincular à célula em sua cobertura'
                             }
-                          }}
-                          className="px-3.5 py-1.5 bg-[#052447] hover:bg-[#073366] text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                        >
-                          <LinkIcon size={13} />
-                          <span>Vincular à Célula</span>
-                        </button>
-                      ) : (
+                          >
+                            <LinkIcon size={13} />
+                            <span>Vincular à Célula</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setMemberToUnassign(member)}
+                            className="px-3 py-1.5 bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 hover:border-amber-200"
+                            title="Desvincular e mover para membros gerais"
+                          >
+                            <Unlink size={13} />
+                            <span>Desvincular</span>
+                          </button>
+                        )}
+
                         <button
                           type="button"
-                          onClick={() => setMemberToUnassign(member)}
-                          className="px-3 py-1.5 bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 hover:border-amber-200"
-                          title="Desvincular e mover para membros gerais"
+                          onClick={() => setMemberToDelete(member)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200 cursor-pointer"
+                          title="Excluir membro e remover login"
                         >
-                          <Unlink size={13} />
-                          <span>Desvincular</span>
+                          <Trash2 size={15} />
                         </button>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => setMemberToDelete(member)}
-                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200 cursor-pointer"
-                        title="Excluir membro e remover login"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

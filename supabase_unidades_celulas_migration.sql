@@ -2,8 +2,10 @@
 -- MIGRATION: CONSOLIDAÇÃO DE CÉLULAS NA TABELA UNIDADES & SINCRONIZAÇÃO DE MEMBROS
 -- =====================================================================================
 
--- 1. ADICIONA COLUNAS EXCLUSIVAS DE CÉLULAS NA TABELA UNIDADES (SE NÃO EXISTIREM)
+-- 1. ADICIONA COLUNAS EXCLUSIVAS DE CÉLULAS E LINHAGEM (UNIDADE CRIADORA / MÃE) NA TABELA UNIDADES
 ALTER TABLE public.unidades 
+  ADD COLUMN IF NOT EXISTS unidade_criadora_id UUID,
+  ADD COLUMN IF NOT EXISTS unidade_mae_id UUID,
   ADD COLUMN IF NOT EXISTS dia_semana TEXT,
   ADD COLUMN IF NOT EXISTS dia_reuniao TEXT,
   ADD COLUMN IF NOT EXISTS horario TEXT,
@@ -19,6 +21,30 @@ ALTER TABLE public.unidades
   ADD COLUMN IF NOT EXISTS quantidade_membros INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT now(),
   ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ DEFAULT now();
+
+-- 2. CRIA A RESTRIÇÃO GARANTINDO QUE A UNIDADE MÃE/CRIADORA PERTENÇA À MESMA IGREJA
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'fk_unidades_unidade_mae_igreja'
+      AND conrelid = 'public.unidades'::regclass
+  ) THEN
+    ALTER TABLE public.unidades
+      ADD CONSTRAINT fk_unidades_unidade_mae_igreja
+      FOREIGN KEY (unidade_criadora_id, igreja_id)
+      REFERENCES public.unidades(id, igreja_id)
+      ON DELETE SET NULL;
+  END IF;
+END $$;
+
+-- 3. ÍNDICE PARA CONSULTAR RAPIDAMENTE AS CÉLULAS ORIGINADAS DE UMA UNIDADE
+CREATE INDEX IF NOT EXISTS idx_unidades_unidade_criadora_id
+ON public.unidades(unidade_criadora_id);
+
+CREATE INDEX IF NOT EXISTS idx_unidades_unidade_mae_id
+ON public.unidades(unidade_mae_id);
 
 -- 2. MIGRA OS DADOS EXISTENTES DA TABELA 'celulas' PARA 'unidades'
 -- (corrigido: 'celulas' só tem dia_semana/horario; 'membros' não tem coluna 'ativo')
