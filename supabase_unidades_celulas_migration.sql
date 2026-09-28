@@ -2,10 +2,9 @@
 -- MIGRATION: CONSOLIDAÇÃO DE CÉLULAS NA TABELA UNIDADES & SINCRONIZAÇÃO DE MEMBROS
 -- =====================================================================================
 
--- 1. ADICIONA COLUNAS EXCLUSIVAS DE CÉLULAS E LINHAGEM (UNIDADE CRIADORA / MÃE) NA TABELA UNIDADES
+-- 1. ADICIONA COLUNAS EXCLUSIVAS DE CÉLULAS E LINHAGEM (UNIDADE CRIADORA) NA TABELA UNIDADES
 ALTER TABLE public.unidades 
   ADD COLUMN IF NOT EXISTS unidade_criadora_id UUID,
-  ADD COLUMN IF NOT EXISTS unidade_mae_id UUID,
   ADD COLUMN IF NOT EXISTS dia_semana TEXT,
   ADD COLUMN IF NOT EXISTS dia_reuniao TEXT,
   ADD COLUMN IF NOT EXISTS horario TEXT,
@@ -22,17 +21,25 @@ ALTER TABLE public.unidades
   ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT now(),
   ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ DEFAULT now();
 
--- 2. CRIA A RESTRIÇÃO GARANTINDO QUE A UNIDADE MÃE/CRIADORA PERTENÇA À MESMA IGREJA
+-- Garante constraint de valor não-negativo
+ALTER TABLE public.unidades
+  DROP CONSTRAINT IF EXISTS unidades_quantidade_membros_check;
+
+ALTER TABLE public.unidades
+  ADD CONSTRAINT unidades_quantidade_membros_check
+  CHECK (quantidade_membros >= 0);
+
+-- 2. CRIA A RESTRIÇÃO GARANTINDO QUE A UNIDADE CRIADORA PERTENÇA À MESMA IGREJA
 DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1
     FROM pg_constraint
-    WHERE conname = 'fk_unidades_unidade_mae_igreja'
+    WHERE conname = 'fk_unidades_unidade_criadora_igreja'
       AND conrelid = 'public.unidades'::regclass
   ) THEN
     ALTER TABLE public.unidades
-      ADD CONSTRAINT fk_unidades_unidade_mae_igreja
+      ADD CONSTRAINT fk_unidades_unidade_criadora_igreja
       FOREIGN KEY (unidade_criadora_id, igreja_id)
       REFERENCES public.unidades(id, igreja_id)
       ON DELETE SET NULL;
@@ -42,9 +49,6 @@ END $$;
 -- 3. ÍNDICE PARA CONSULTAR RAPIDAMENTE AS CÉLULAS ORIGINADAS DE UMA UNIDADE
 CREATE INDEX IF NOT EXISTS idx_unidades_unidade_criadora_id
 ON public.unidades(unidade_criadora_id);
-
-CREATE INDEX IF NOT EXISTS idx_unidades_unidade_mae_id
-ON public.unidades(unidade_mae_id);
 
 -- 2. MIGRA OS DADOS EXISTENTES DA TABELA 'celulas' PARA 'unidades'
 -- (corrigido: 'celulas' só tem dia_semana/horario; 'membros' não tem coluna 'ativo')
@@ -85,45 +89,66 @@ SET quantidade_membros = COALESCE(
 );
 
 -- 4. CRIAÇÃO DE FUNÇÃO E TRIGGER PARA SINCRONIZAÇÃO AUTOMÁTICA DE MEMBROS NA TABELA UNIDADES
-CREATE OR REPLACE FUNCTION public.sync_unidade_quantidade_membros()
-RETURNS TRIGGER AS $$
+CREATE OR REPLACE FUNCTION public.atualizar_quantidade_membros_unidade()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
 BEGIN
-  IF (TG_OP = 'DELETE' OR TG_OP = 'UPDATE') THEN
-    IF OLD.unidade_id IS NOT NULL THEN
-      UPDATE public.unidades
-      SET 
-        quantidade_membros = (
-          SELECT COUNT(*) 
-          FROM public.membros 
-          WHERE unidade_id = OLD.unidade_id
-        ),
-        atualizado_em = now()
-      WHERE id = OLD.unidade_id;
+    -- INSERT
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.unidade_id IS NOT NULL THEN
+            UPDATE public.unidades
+            SET quantidade_membros = quantidade_membros + 1,
+                atualizado_em = NOW()
+            WHERE id = NEW.unidade_id;
+        END IF;
+        RETURN NEW;
     END IF;
-  END IF;
 
-  IF (TG_OP = 'INSERT' OR TG_OP = 'UPDATE') THEN
-    IF NEW.unidade_id IS NOT NULL THEN
-      UPDATE public.unidades
-      SET 
-        quantidade_membros = (
-          SELECT COUNT(*) 
-          FROM public.membros 
-          WHERE unidade_id = NEW.unidade_id
-        ),
-        atualizado_em = now()
-      WHERE id = NEW.unidade_id;
+    -- DELETE
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.unidade_id IS NOT NULL THEN
+            UPDATE public.unidades
+            SET quantidade_membros = GREATEST(quantidade_membros - 1, 0),
+                atualizado_em = NOW()
+            WHERE id = OLD.unidade_id;
+        END IF;
+        RETURN OLD;
     END IF;
-  END IF;
 
-  RETURN NULL;
+    -- UPDATE
+    IF TG_OP = 'UPDATE' THEN
+        IF OLD.unidade_id IS DISTINCT FROM NEW.unidade_id THEN
+            IF OLD.unidade_id IS NOT NULL THEN
+                UPDATE public.unidades
+                SET quantidade_membros = GREATEST(quantidade_membros - 1, 0),
+                    atualizado_em = NOW()
+                WHERE id = OLD.unidade_id;
+            END IF;
+
+            IF NEW.unidade_id IS NOT NULL THEN
+                UPDATE public.unidades
+                SET quantidade_membros = quantidade_membros + 1,
+                    atualizado_em = NOW()
+                WHERE id = NEW.unidade_id;
+            END IF;
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    RETURN NULL;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$;
 
+DROP TRIGGER IF EXISTS trg_atualizar_quantidade_membros_unidade ON public.membros;
 DROP TRIGGER IF EXISTS trg_sync_unidade_membros ON public.membros;
-CREATE TRIGGER trg_sync_unidade_membros
-AFTER INSERT OR UPDATE OR DELETE ON public.membros
-FOR EACH ROW EXECUTE FUNCTION public.sync_unidade_quantidade_membros();
+
+CREATE TRIGGER trg_atualizar_quantidade_membros_unidade
+AFTER INSERT OR DELETE OR UPDATE OF unidade_id
+ON public.membros
+FOR EACH ROW
+EXECUTE FUNCTION public.atualizar_quantidade_membros_unidade();
 
 -- 5. CRIAÇÃO DE ÍNDICES DE ALTA PERFORMANCE
 CREATE INDEX IF NOT EXISTS idx_unidades_igreja_ativo ON public.unidades(igreja_id, ativo);

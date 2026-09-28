@@ -1017,21 +1017,26 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       });
   }, [allCellMembers, searchQuery, selectedRole, selectedStatus]);
 
-  // Estatísticas estritamente calculadas sobre todos os membros desta célula
+  // Estatísticas estritamente calculadas sobre a célula (utiliza quantidade_membros pré-calculada)
   const stats = useMemo(() => {
     const greenCount = allCellMembers.filter((m) => m.attendanceStatus === 'green').length;
     const yellowCount = allCellMembers.filter((m) => m.attendanceStatus === 'yellow').length;
     const redCount = allCellMembers.filter((m) => m.attendanceStatus === 'red').length;
     const blackCount = allCellMembers.filter((m) => m.attendanceStatus === 'black').length;
 
+    // Utiliza quantidade_membros pré-calculada da tabela unidades
+    const totalMembers = typeof cell.quantidade_membros === 'number'
+      ? cell.quantidade_membros
+      : (typeof cell.memberCount === 'number' ? cell.memberCount : allCellMembers.length);
+
     return {
-      total: allCellMembers.length,
+      total: totalMembers,
       greenCount,
       yellowCount,
       redCount,
       blackCount,
     };
-  }, [allCellMembers]);
+  }, [allCellMembers, cell.quantidade_membros, cell.memberCount]);
 
   const handleCreateMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1431,16 +1436,6 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               <span className="bg-[#052447] text-white text-[11px] px-1.5 sm:px-2 py-0.5 rounded-full font-bold">
                 {stats.total}
               </span>
-              <button
-                type="button"
-                onClick={() => refetchDirectCellMembers()}
-                disabled={isRefetchingCellMembers}
-                title="Atualizar lista de membros da célula"
-                className="ml-1 text-slate-400 hover:text-sky-700 transition cursor-pointer p-0.5"
-                aria-label="Atualizar membros da célula"
-              >
-                <RefreshCw size={12} className={isRefetchingCellMembers ? 'animate-spin text-sky-600' : ''} />
-              </button>
             </div>
           </div>
         </div>

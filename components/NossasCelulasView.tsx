@@ -59,6 +59,7 @@ const DIAS_OPTIONS = [
 const PRESET_HORARIOS = ['19:00', '19:30', '20:00'];
 
 function mapCellGroupToCardItem(c: CellGroup): CelulaCardItem {
+  const count = typeof c.quantidade_membros === 'number' ? c.quantidade_membros : (c.memberCount || 0);
   return {
     id: c.id,
     unidadeId: c.id,
@@ -69,7 +70,8 @@ function mapCellGroupToCardItem(c: CellGroup): CelulaCardItem {
     diaSemana: c.meetingDay || 'Quarta-feira',
     horario: c.meetingTime || '19:30',
     fotoUrl: c.fotoUrl,
-    memberCount: c.memberCount || 0,
+    memberCount: count,
+    quantidade_membros: count,
     leaderNames: c.leaderNames || (c.leaderName ? [c.leaderName] : []),
     leaderMemberIds: c.leaderMemberIds || [],
     sectorName: c.sectorName,

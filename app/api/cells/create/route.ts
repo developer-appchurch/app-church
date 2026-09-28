@@ -26,7 +26,6 @@ export interface CreateCellPayload {
   meetingTime?: string;
   parentUnitId?: string | null;
   unidade_criadora_id?: string | null;
-  unidade_mae_id?: string | null;
   motherCellId?: string | null;
 }
 
@@ -63,7 +62,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const cellId = generateUUID();
     const unitId = generateUUID();
 
     const formattedAddress =
@@ -109,8 +107,9 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Inserir em 'unidades' com todos os atributos consolidados
+    // quantidade_membros inicia em 0 e é mantido pelo trigger caso um líder seja associado
     const initialMembersCount = body.leaderMemberId ? 1 : 0;
-    const motherCellId = body.unidade_criadora_id || body.unidade_mae_id || body.motherCellId || null;
+    const motherCellId = body.unidade_criadora_id || body.motherCellId || null;
 
     const unitPayload: any = {
       id: unitId,
@@ -125,25 +124,13 @@ export async function POST(req: NextRequest) {
       dia_reuniao: meetingDay,
       horario: meetingTime,
       horario_reuniao: meetingTime,
-      quantidade_membros: initialMembersCount,
+      quantidade_membros: 0,
       ativo: true,
       criado_em: new Date().toISOString(),
       atualizado_em: new Date().toISOString(),
     };
 
-    let { error: unitErr } = await supabase.from('unidades').insert([unitPayload]);
-    if (unitErr && (unitErr.code === '42703' || unitErr.message?.includes('unidade_criadora_id'))) {
-      delete unitPayload.unidade_criadora_id;
-      unitPayload.unidade_mae_id = motherCellId && motherCellId.trim() !== '' ? motherCellId.trim() : null;
-      let retry = await supabase.from('unidades').insert([unitPayload]);
-      unitErr = retry.error;
-
-      if (unitErr && (unitErr.code === '42703' || unitErr.message?.includes('unidade_mae_id'))) {
-        delete unitPayload.unidade_mae_id;
-        retry = await supabase.from('unidades').insert([unitPayload]);
-        unitErr = retry.error;
-      }
-    }
+    const { error: unitErr } = await supabase.from('unidades').insert([unitPayload]);
     if (unitErr) {
       console.error('Falha ao inserir em unidades:', unitErr);
       return NextResponse.json(
@@ -154,65 +141,41 @@ export async function POST(req: NextRequest) {
 
     // 3. Sincronização secundária em 'celulas' (para compatibilidade retroativa)
     try {
-      await supabase.from('celulas').insert([
-        {
-          unidade_id: unitId,
-          bairro: body.neighborhood?.trim() || 'Centro',
-          endereco: formattedAddress,
-          dia_semana: meetingDay,
-          horario: meetingTime,
-          quantidade_membros: initialMembersCount,
-          criado_em: new Date().toISOString(),
-          atualizado_em: new Date().toISOString(),
-        },
-      ]);
+      await supabase.from('celulas').upsert(
+        [
+          {
+            unidade_id: unitId,
+            bairro: body.neighborhood?.trim() || 'Centro',
+            endereco: formattedAddress,
+            dia_semana: meetingDay,
+            horario: meetingTime,
+            quantidade_membros: initialMembersCount,
+            criado_em: new Date().toISOString(),
+            atualizado_em: new Date().toISOString(),
+          },
+        ],
+        { onConflict: 'unidade_id' }
+      );
     } catch (cErr) {
       console.warn('Aviso ao registrar em celulas:', cErr);
     }
 
-    // 4. Inserir opcionalmente na tabela legada 'cells' (se existir como tabela física e não view)
-    try {
-      const cellRow = {
-        id: unitId,
-        igreja_id: body.churchId,
-        nome: cellName,
-        nome_lider: leaderName,
-        nome_setor: sectorName,
-        endereco: formattedAddress,
-        dia_reuniao: meetingDay,
-        horario_reuniao: meetingTime,
-        quantidade_membros: body.leaderMemberId ? 1 : 0,
-      };
-      await supabase.from('cells').insert([cellRow]);
-    } catch {
-      // Ignora caso 'cells' seja uma VIEW somente leitura ou tenha sido dropada
-    }
-
-    // 5. Se houver líder especificado (ex: Pastor Titular da igreja), vincula à célula
+    // 4. Se houver líder especificado, vincula à célula em unidade_lideres e atualiza membro
     if (body.leaderMemberId) {
-      const { error: updateMemberErr } = await supabase
-        .from('membros')
-        .update({ unidade_id: unitId })
-        .eq('id', body.leaderMemberId);
-
-      if (updateMemberErr) {
-        await supabase
-          .from('members')
-          .update({ celula_id: unitId })
-          .eq('id', body.leaderMemberId);
-      }
-
-      const { error: liderErr } = await supabase.from('unidade_lideres').insert([
-        {
-          unidade_id: unitId,
-          pessoa_id: body.leaderMemberId,
-          papel: 'Líder de Célula',
-          ativo: true,
-        },
+      await Promise.all([
+        supabase
+          .from('membros')
+          .update({ unidade_id: unitId })
+          .eq('id', body.leaderMemberId),
+        supabase.from('unidade_lideres').insert([
+          {
+            unidade_id: unitId,
+            pessoa_id: body.leaderMemberId,
+            papel: 'Líder de Célula',
+            ativo: true,
+          },
+        ]),
       ]);
-      if (liderErr) {
-        console.warn('Aviso ao vincular unidade_lideres:', liderErr);
-      }
     }
 
     const createdCell: CellGroup = {
@@ -224,7 +187,9 @@ export async function POST(req: NextRequest) {
       address: formattedAddress,
       meetingDay,
       meetingTime,
-      memberCount: body.leaderMemberId ? 1 : 0,
+      memberCount: initialMembersCount,
+      unidade_criadora_id: motherCellId,
+      motherCellId: motherCellId || undefined,
     };
 
     return NextResponse.json({

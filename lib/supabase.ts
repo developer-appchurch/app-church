@@ -1584,38 +1584,7 @@ export const AppChurchService = {
               }
             });
 
-            // 5. Contagem real de membros por unidade via RPC agregada (sem limite de 1000 linhas)
-            const countMap = new Map<string, number>();
-            try {
-              const { data: rpcCounts, error: rpcErr } = await supabase.rpc('contagem_membros_por_unidade', {
-                p_igreja_id: churchId,
-              });
-              if (!rpcErr && rpcCounts && rpcCounts.length > 0) {
-                rpcCounts.forEach((r: any) => {
-                  if (r.unidade_id) {
-                    countMap.set(r.unidade_id, Number(r.total_membros || 0));
-                  }
-                });
-              }
-            } catch {
-              // Fallback para contagem direta
-            }
-
-            if (countMap.size === 0) {
-              const { data: membersCount } = await supabase
-                .from('membros')
-                .select('unidade_id')
-                .eq('igreja_id', churchId)
-                .not('unidade_id', 'is', null)
-                .in('unidade_id', unitIds);
-              (membersCount || []).forEach((m: any) => {
-                if (m.unidade_id) {
-                  countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
-                }
-              });
-            }
-
-            // Unidades que são células (possuem entrada em 'celulas' ou são unidades folha)
+            // 5. Unidades que são células (possuem entrada em 'celulas' ou são unidades folha)
             const parentIdsSet = new Set(units.map((u: any) => u.pai_id).filter(Boolean));
             let targetUnits = units.filter((u: any) => celulaMap.has(u.id) || !parentIdsSet.has(u.id));
             if (targetUnits.length === 0) targetUnits = units;
@@ -1635,9 +1604,10 @@ export const AppChurchService = {
                 formattedLeader = `${leaderNames.slice(0, -1).join(', ')} e ${leaderNames[leaderNames.length - 1]}`;
               }
 
-              const calcCount = countMap.get(u.id);
-              const dbCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : (cInfo?.quantidade_membros || 0);
-              const finalCount = calcCount !== undefined ? calcCount : dbCount;
+              // Quantidade de membros lida diretamente da coluna pré-calculada de unidades
+              const finalCount = typeof u.quantidade_membros === 'number' 
+                ? u.quantidade_membros 
+                : (typeof cInfo?.quantidade_membros === 'number' ? cInfo.quantidade_membros : 0);
 
               return {
                 id: u.id,
@@ -1652,6 +1622,7 @@ export const AppChurchService = {
                 meetingDay: u.dia_semana || u.dia_reuniao || cInfo?.dia_semana || cInfo?.dia_reuniao || 'Quinta-feira',
                 meetingTime: u.horario || u.horario_reuniao || cInfo?.horario || cInfo?.horario_reuniao || '19:30',
                 memberCount: finalCount,
+                quantidade_membros: finalCount,
                 parentUnitId: u.pai_id || null,
                 parentName: parentName || undefined,
                 areaName: areaName || undefined,

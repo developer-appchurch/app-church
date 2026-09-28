@@ -300,22 +300,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Falha ao cadastrar membro: ${insertErr.message}` }, { status: 500 });
     }
 
-    // Se vinculado à célula, atualizar contagem de membros em unidades (e celulas como fallback)
-    if (validCellId) {
-      try {
-        const { count: countPt } = await supabase
-          .from('membros')
-          .select('*', { count: 'exact', head: true })
-          .eq('unidade_id', validCellId);
-        
-        const currentCount = countPt || 1;
-        await supabase.from('unidades').update({ quantidade_membros: currentCount }).eq('id', validCellId);
-        try {
-          await supabase.from('celulas').update({ quantidade_membros: currentCount }).eq('unidade_id', validCellId);
-        } catch {}
-      } catch {}
-    }
-
+    // O trigger PostgreSQL atualizar_quantidade_membros_unidade() sincroniza automaticamente quantidade_membros em unidades
     return NextResponse.json({
       success: true,
       member: {
@@ -430,38 +415,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 
-    // Atualiza contadores da unidade anterior (se houver)
-    if (previousUnitId && previousUnitId !== validCellId) {
-      try {
-        const { count } = await supabase
-          .from('membros')
-          .select('*', { count: 'exact', head: true })
-          .eq('unidade_id', previousUnitId);
-        
-        const countVal = count || 0;
-        await supabase.from('unidades').update({ quantidade_membros: countVal }).eq('id', previousUnitId);
-        try {
-          await supabase.from('celulas').update({ quantidade_membros: countVal }).eq('unidade_id', previousUnitId);
-        } catch {}
-      } catch {}
-    }
-
-    // Atualiza contadores na nova unidade vinculada
-    if (validCellId) {
-      try {
-        const { count } = await supabase
-          .from('membros')
-          .select('*', { count: 'exact', head: true })
-          .eq('unidade_id', validCellId);
-        
-        const countVal = count || 1;
-        await supabase.from('unidades').update({ quantidade_membros: countVal }).eq('id', validCellId);
-        try {
-          await supabase.from('celulas').update({ quantidade_membros: countVal }).eq('unidade_id', validCellId);
-        } catch {}
-      } catch {}
-    }
-
+    // O trigger PostgreSQL atualizar_quantidade_membros_unidade() sincroniza automaticamente quantidade_membros ao mudar unidade_id
     return NextResponse.json({
       success: true,
       memberId,
@@ -521,22 +475,7 @@ export async function DELETE(req: NextRequest) {
       await deleteAuthUserForMember(authUserId);
     }
 
-    // Recalcula contadores de célula em unidades
-    if (oldUnitId) {
-      try {
-        const { count } = await supabase
-          .from('membros')
-          .select('*', { count: 'exact', head: true })
-          .eq('unidade_id', oldUnitId);
-        
-        const countVal = count || 0;
-        await supabase.from('unidades').update({ quantidade_membros: countVal }).eq('id', oldUnitId);
-        try {
-          await supabase.from('celulas').update({ quantidade_membros: countVal }).eq('unidade_id', oldUnitId);
-        } catch {}
-      } catch {}
-    }
-
+    // O trigger PostgreSQL atualizar_quantidade_membros_unidade() decrementa automaticamente quantidade_membros ao excluir
     return NextResponse.json({ success: true, deletedMemberId: memberId, authDeleted: Boolean(authUserId) });
   } catch (err: any) {
     console.error('Erro na rota /api/members/pool DELETE:', err);

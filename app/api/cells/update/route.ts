@@ -40,10 +40,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    // 1. Busca a unidade atual
+    // 1. Busca a unidade atual (somente as colunas necessárias)
     const { data: currentUnit, error: unitErr } = await supabase
       .from('unidades')
-      .select('*')
+      .select('id, pai_id, nome, igreja_id, quantidade_membros, unidade_criadora_id')
       .eq('id', cellId)
       .eq('igreja_id', churchId)
       .maybeSingle();
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Célula não encontrada.' }, { status: 404 });
     }
 
-    // 2. Validação de permissão de liderança em linha direta se userMemberId for fornecido
+    // 2. Validação Otimizada de Permissão em Linha Direta (sem carregar a igreja toda)
     if (userMemberId) {
       const { data: member } = await supabase
         .from('membros')
@@ -73,46 +73,72 @@ export async function POST(req: NextRequest) {
           funcaoNorm.includes('admin');
 
         if (!isGlobalAdmin) {
-          // Busca todos os líderes de unidades da igreja
-          const { data: allUnitLeaders } = await supabase
-            .from('unidade_lideres')
-            .select('unidade_id, pessoa_id')
-            .eq('ativo', true);
+          // Checa se o usuário é líder direto da célula
+          let isAuthorized = member.unidade_id === cellId;
 
-          const { data: allUnits } = await supabase
-            .from('unidades')
-            .select('id, pai_id, nome')
-            .eq('igreja_id', churchId);
+          if (!isAuthorized) {
+            const { data: directLeader } = await supabase
+              .from('unidade_lideres')
+              .select('id')
+              .eq('unidade_id', cellId)
+              .eq('pessoa_id', userMemberId)
+              .eq('ativo', true)
+              .maybeSingle();
 
-          const unitMap = new Map<string, any>();
-          (allUnits || []).forEach((u: any) => unitMap.set(u.id, u));
-
-          const leadersByUnit = new Map<string, Set<string>>();
-          (allUnitLeaders || []).forEach((ul: any) => {
-            if (!leadersByUnit.has(ul.unidade_id)) {
-              leadersByUnit.set(ul.unidade_id, new Set());
+            if (directLeader) {
+              isAuthorized = true;
             }
-            leadersByUnit.get(ul.unidade_id)!.add(ul.pessoa_id);
-          });
-
-          // Checa se o usuário é líder da própria célula
-          const isDirectLeader =
-            leadersByUnit.get(cellId)?.has(userMemberId) ||
-            member.unidade_id === cellId;
-
-          // Checa se é líder de algum ancestral em linha direta ascendente
-          let isAncestorLeader = false;
-          let currentParent = currentUnit.pai_id;
-          while (currentParent) {
-            if (leadersByUnit.get(currentParent)?.has(userMemberId)) {
-              isAncestorLeader = true;
-              break;
-            }
-            const pUnit = unitMap.get(currentParent);
-            currentParent = pUnit?.pai_id;
           }
 
-          if (!isDirectLeader && !isAncestorLeader) {
+          // Checa se é líder da unidade criadora (multiplicação)
+          if (!isAuthorized && currentUnit.unidade_criadora_id) {
+            const { data: creatorLeader } = await supabase
+              .from('unidade_lideres')
+              .select('id')
+              .eq('unidade_id', currentUnit.unidade_criadora_id)
+              .eq('pessoa_id', userMemberId)
+              .eq('ativo', true)
+              .maybeSingle();
+
+            if (creatorLeader || member.unidade_id === currentUnit.unidade_criadora_id) {
+              isAuthorized = true;
+            }
+          }
+
+          // Checa se é líder de algum ancestral direto na hierarquia (ex: Setor pai, Área pai)
+          if (!isAuthorized && currentUnit.pai_id) {
+            const ancestorIds: string[] = [];
+            let currParent = currentUnit.pai_id;
+
+            // Percorre a cadeia de pais para coletar no máximo 5 níveis de ancestrais
+            while (currParent && ancestorIds.length < 5) {
+              ancestorIds.push(currParent);
+              const { data: pUnit } = await supabase
+                .from('unidades')
+                .select('pai_id')
+                .eq('id', currParent)
+                .maybeSingle();
+
+              currParent = pUnit?.pai_id || null;
+            }
+
+            if (ancestorIds.length > 0) {
+              const { data: ancestorLeader } = await supabase
+                .from('unidade_lideres')
+                .select('id')
+                .in('unidade_id', ancestorIds)
+                .eq('pessoa_id', userMemberId)
+                .eq('ativo', true)
+                .limit(1)
+                .maybeSingle();
+
+              if (ancestorLeader) {
+                isAuthorized = true;
+              }
+            }
+          }
+
+          if (!isAuthorized) {
             return NextResponse.json(
               { error: 'Você não tem permissão para editar as informações desta célula. Apenas líderes em linha direta ou pastores podem alterar.' },
               { status: 403 }
@@ -161,7 +187,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Sincronização secundária opcional com a tabela 'celulas' (para compatibilidade retroativa)
+    // 4. Sincronização secundária em 'celulas' (para compatibilidade retroativa)
     try {
       const celulaPayload: any = {
         dia_semana: meetingDayVal,
@@ -171,53 +197,21 @@ export async function POST(req: NextRequest) {
       if (neighborhoodVal !== undefined) celulaPayload.bairro = neighborhoodVal;
       if (addressVal !== undefined) celulaPayload.endereco = addressVal;
 
-      const { data: existingCelula } = await supabase
+      await supabase
         .from('celulas')
-        .select('unidade_id')
-        .eq('unidade_id', cellId)
-        .maybeSingle();
-
-      if (existingCelula) {
-        await supabase
-          .from('celulas')
-          .update(celulaPayload)
-          .eq('unidade_id', cellId);
-      } else {
-        await supabase
-          .from('celulas')
-          .insert([
-            {
-              unidade_id: cellId,
-              ...celulaPayload,
-              quantidade_membros: updatedUnit.quantidade_membros || 0,
-              criado_em: new Date().toISOString(),
-            },
-          ]);
-      }
+        .upsert(
+          {
+            unidade_id: cellId,
+            ...celulaPayload,
+            quantidade_membros: updatedUnit.quantidade_membros || 0,
+          },
+          { onConflict: 'unidade_id' }
+        );
     } catch (cErr) {
-      // Falha em 'celulas' não bloqueia a aplicação pois 'unidades' é a fonte de verdade
-      console.warn('[UpdateCell] Aviso sincronizando celulas legadas:', cErr);
+      console.warn('[UpdateCell] Aviso sincronizando celulas:', cErr);
     }
 
-    // 5. Sincronização secundária opcional com a tabela legada 'cells' se existir
-    try {
-      const cellsPayload: any = {};
-      if (unitUpdatePayload.nome !== undefined) cellsPayload.nome = unitUpdatePayload.nome;
-      if (unitUpdatePayload.endereco !== undefined) cellsPayload.endereco = unitUpdatePayload.endereco;
-      if (unitUpdatePayload.dia_semana !== undefined) cellsPayload.dia_reuniao = unitUpdatePayload.dia_semana;
-      if (unitUpdatePayload.horario !== undefined) cellsPayload.horario_reuniao = unitUpdatePayload.horario;
-
-      if (Object.keys(cellsPayload).length > 0) {
-        await supabase
-          .from('cells')
-          .update(cellsPayload)
-          .eq('id', cellId);
-      }
-    } catch {
-      // Ignora erro em 'cells'
-    }
-
-    // 6. Busca líderes e setor para montar o objeto CellGroup de retorno
+    // 5. Busca líderes e nome do setor/pai para retorno rápido
     let parentName = 'Setor Geral';
     if (updatedUnit.pai_id) {
       const { data: pData } = await supabase
@@ -228,59 +222,73 @@ export async function POST(req: NextRequest) {
       if (pData?.nome) parentName = pData.nome;
     }
 
+    // Consulta de líderes da unidade em 1 query com join seguro
+    let leaderNames: string[] = [];
     const { data: leadersData } = await supabase
       .from('unidade_lideres')
-      .select('pessoa_id')
+      .select(`
+        pessoa_id,
+        membro:membros!unidade_lideres_pessoa_id_fkey (nome)
+      `)
       .eq('unidade_id', cellId)
       .eq('ativo', true);
 
-    const leaderIds = (leadersData || []).map((l: any) => l.pessoa_id);
-    let leaderNames: string[] = [];
+    if (leadersData && leadersData.length > 0) {
+      leaderNames = leadersData
+        .map((l: any) => {
+          const m = Array.isArray(l.membro) ? l.membro[0] : l.membro;
+          return m?.nome;
+        })
+        .filter(Boolean);
+    }
 
-    if (leaderIds.length > 0) {
-      const { data: leaderMembers } = await supabase
-        .from('membros')
-        .select('nome')
-        .in('id', leaderIds);
-      leaderNames = (leaderMembers || []).map((m: any) => m.nome).filter(Boolean);
+    // Fallback se join não retornou nomes
+    if (leaderNames.length === 0 && leadersData && leadersData.length > 0) {
+      const leaderIds = leadersData.map((l: any) => l.pessoa_id).filter(Boolean);
+      if (leaderIds.length > 0) {
+        const { data: leaderMembers } = await supabase
+          .from('membros')
+          .select('nome')
+          .in('id', leaderIds);
+        leaderNames = (leaderMembers || []).map((m: any) => m.nome).filter(Boolean);
+      }
     }
 
     const formattedLeader =
       leaderNames.length === 1
         ? leaderNames[0]
-        : leaderNames.length === 2
-        ? `${leaderNames[0]} e ${leaderNames[1]}`
-        : leaderNames.length > 2
-        ? `${leaderNames.slice(0, -1).join(', ')} e ${leaderNames[leaderNames.length - 1]}`
-        : 'Líder Responsável';
+        : leaderNames.length > 1
+        ? leaderNames.join(' & ')
+        : 'Sem Líder Definido';
 
-    const finalCell: CellGroup = {
+    const cellResult: CellGroup = {
       id: updatedUnit.id,
       churchId: updatedUnit.igreja_id,
       name: updatedUnit.nome,
       leaderName: formattedLeader,
-      leaderNames,
-      leaderMemberIds: leaderIds,
+      leaderNames: leaderNames,
       sectorName: parentName,
-      address: updatedUnit.endereco || addressVal || '',
-      bairro: updatedUnit.bairro || neighborhoodVal || 'Centro',
-      fotoUrl: updatedUnit.foto_url || fotoUrl || undefined,
-      meetingDay: updatedUnit.dia_semana || updatedUnit.dia_reuniao || meetingDayVal,
-      meetingTime: updatedUnit.horario || updatedUnit.horario_reuniao || meetingTimeVal,
-      memberCount: updatedUnit.quantidade_membros || 0,
       parentUnitId: updatedUnit.pai_id,
-      parentName,
+      parentName: parentName,
+      address: updatedUnit.endereco || '',
+      bairro: updatedUnit.bairro || 'Centro',
+      fotoUrl: updatedUnit.foto_url || undefined,
+      meetingDay: updatedUnit.dia_semana || 'Quarta-feira',
+      meetingTime: updatedUnit.horario || '19:30',
+      memberCount: updatedUnit.quantidade_membros || 0,
+      unidade_criadora_id: updatedUnit.unidade_criadora_id || null,
+      motherCellId: updatedUnit.unidade_criadora_id || undefined,
     };
 
     return NextResponse.json({
       success: true,
-      message: 'Informações da célula atualizadas com sucesso.',
-      cell: finalCell,
+      cell: cellResult,
+      message: 'Célula atualizada com sucesso.',
     });
-  } catch (err: any) {
-    console.error('Erro na rota /api/cells/update:', err);
+  } catch (error: any) {
+    console.error('Erro na rota /api/cells/update:', error);
     return NextResponse.json(
-      { error: err?.message || 'Erro interno ao atualizar célula.' },
+      { error: error?.message || 'Erro interno ao atualizar dados da célula.' },
       { status: 500 }
     );
   }

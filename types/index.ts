@@ -122,6 +122,7 @@ export interface CellGroup {
   meetingDay: string;
   meetingTime: string;
   memberCount: number;
+  quantidade_membros?: number;
   parentUnitId?: string | null;
   parentName?: string;
   areaName?: string;
@@ -257,6 +258,7 @@ export interface CelulaCardItem {
   horario: string;
   fotoUrl?: string;
   memberCount: number;
+  quantidade_membros?: number;
   leaderNames: string[];
   leaderMemberIds?: string[];
   sectorName?: string;
@@ -313,6 +315,7 @@ export interface OrganizationalUnit {
   parentName?: string;
   isActive: boolean;
   leaders: UnitLeader[];
+  leaderCount?: number;
   meetingDay?: string;
   meetingTime?: string;
   neighborhood?: string;
@@ -321,6 +324,7 @@ export interface OrganizationalUnit {
   latitude?: number;
   longitude?: number;
   memberCount: number;
+  quantidade_membros?: number;
   createdAt?: string;
   createdByMemberId?: string;
   unidade_criadora_id?: string | null;

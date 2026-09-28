@@ -537,7 +537,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
             changed = true;
           }
           // Para células multiplicadas/geradas a partir de uma célula sob cobertura
-          const motherId = u.unidade_criadora_id || u.unidade_mae_id || u.motherCellId || userCellLineageMap[u.id];
+          const motherId = u.unidade_criadora_id || u.motherCellId || userCellLineageMap[u.id];
           if (motherId && covered.has(motherId)) {
             covered.add(u.id);
             changed = true;
@@ -655,7 +655,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       (unit.createdByMemberId && (unit.createdByMemberId.toLowerCase() === uId || unit.createdByMemberId.toLowerCase() === uLogin)) ||
       userCreatedCellIds.includes(unit.id);
 
-    const motherId = unit.unidade_criadora_id || unit.unidade_mae_id || unit.motherCellId || userCellLineageMap[unit.id];
+    const motherId = unit.unidade_criadora_id || unit.motherCellId || userCellLineageMap[unit.id];
     const isMotherFromMe =
       (uCellId && motherId && (motherId.toLowerCase() === uCellId)) ||
       (uCellName && unit.motherCellName && unit.motherCellName.toLowerCase().trim() === uCellName);
@@ -984,7 +984,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         meetingTime: isLeafLevel ? meetingTime : undefined,
         createdByMemberId: user.id || user.login,
         unidade_criadora_id: motherCellIdToUse,
-        unidade_mae_id: motherCellIdToUse,
         motherCellId: motherCellIdToUse,
         motherCellName: motherCellNameToUse,
       });

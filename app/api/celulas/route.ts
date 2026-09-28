@@ -114,27 +114,12 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    // 5. Contagem em tempo real de membros por unidade vinculada (evita carregar membros sem unidade)
-    const { data: membersCountData } = await supabase
-      .from('membros')
-      .select('unidade_id')
-      .eq('igreja_id', churchId)
-      .not('unidade_id', 'is', null)
-      .in('unidade_id', unitIds);
-
-    const countMap = new Map<string, number>();
-    (membersCountData || []).forEach((m: any) => {
-      if (m.unidade_id) {
-        countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
-      }
-    });
-
-    // 6. Identifica unidades que são de fato células (possuem entrada em celulas ou não são nós pais)
+    // 5. Identifica unidades que são de fato células (possuem entrada em celulas ou não são nós pais)
     const parentIdsSet = new Set(rawUnits.map((u: any) => u.pai_id).filter(Boolean));
     let cellUnits = rawUnits.filter((u: any) => celulaDetailMap.has(u.id) || !parentIdsSet.has(u.id));
     if (cellUnits.length === 0) cellUnits = rawUnits;
 
-    // 7. Monta a lista completa de células com todos os dados exclusivos lidos de 'unidades'
+    // 6. Monta a lista completa de células com quantidade_membros diretamente da coluna pré-calculada
     const allCelulas: CelulaCardItem[] = cellUnits.map((u: any) => {
       const detail = celulaDetailMap.get(u.id);
       const parentName = u.pai_id ? parentNameMap.get(u.pai_id) : 'Setor Geral';
@@ -162,10 +147,10 @@ export async function GET(req: NextRequest) {
       const realEndereco = u?.endereco || detail?.endereco || 'Endereço da Célula';
       const realFotoUrl = u?.foto_url || detail?.foto_url || undefined;
       
-      // Contagem atualizada e atualizável
-      const calculatedCount = countMap.get(u.id);
-      const dbMemberCount = typeof u?.quantidade_membros === 'number' ? u.quantidade_membros : (detail?.quantidade_membros ?? 0);
-      const finalMemberCount = calculatedCount !== undefined ? calculatedCount : dbMemberCount;
+      // Quantidade de membros lida diretamente da coluna pré-calculada de unidades
+      const finalMemberCount = typeof u?.quantidade_membros === 'number' 
+        ? u.quantidade_membros 
+        : (detail?.quantidade_membros ?? 0);
 
       return {
         id: u.id,
@@ -178,6 +163,7 @@ export async function GET(req: NextRequest) {
         horario: realHorario || 'Horário a definir',
         fotoUrl: realFotoUrl,
         memberCount: finalMemberCount,
+        quantidade_membros: finalMemberCount,
         leaderNames,
         leaderMemberIds: leaderIds,
         sectorName: parentName,
@@ -185,7 +171,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // 8. Aplicação de filtros combinados: nome, bairro e dia_semana (case-insensitive & sem acento)
+    // 7. Aplicação de filtros combinados: nome, bairro e dia_semana (case-insensitive & sem acento)
     const normalizeText = (t: string) =>
       t
         .toLowerCase()

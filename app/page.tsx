@@ -550,7 +550,8 @@ export default function Home() {
       address: effectiveCells.length === 0 ? 'Pendente de cadastro' : 'Rua Sumaré, 245 - Junco',
       meetingDay: 'Quinta-feira',
       meetingTime: '19:30',
-      memberCount: effectiveMembers.length,
+      memberCount: 0,
+      quantidade_membros: 0,
     };
 
   // 0. Splash / Skeleton durante a validação da sessão para evitar piscar a tela de login

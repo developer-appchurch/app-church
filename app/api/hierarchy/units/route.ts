@@ -158,11 +158,27 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    // 1. Modo Plano Ultrarrápido (Passo 1): Retorna lista plana de unidades (id, pai_id, nivel_tipo_id, nome, ativo, unidade_criadora_id)
+    // 1. Modo Plano Otimizado (Passo 1): Retorna lista plana de unidades com quantidade_membros do banco
     if (mode === 'flat') {
       let flatQuery = supabase
         .from('unidades')
-        .select('id, pai_id, nivel_tipo_id, nome, ativo, igreja_id, unidade_criadora_id')
+        .select(`
+          id,
+          pai_id,
+          nivel_tipo_id,
+          nome,
+          ativo,
+          igreja_id,
+          unidade_criadora_id,
+          quantidade_membros,
+          dia_semana,
+          dia_reuniao,
+          horario,
+          horario_reuniao,
+          bairro,
+          endereco,
+          foto_url
+        `)
         .eq('igreja_id', churchId)
         .eq('ativo', true)
         .order('nome', { ascending: true });
@@ -171,135 +187,96 @@ export async function GET(req: NextRequest) {
         flatQuery = flatQuery.eq('nivel_tipo_id', levelTypeId);
       }
 
-      // Executa consulta das unidades e contagem de membros por unidade da igreja
-      let unitsRes: any;
-      let memberCountsRes: any;
-      const [uRes, mRes] = await Promise.all([
-        flatQuery,
-        supabase
-          .from('membros')
-          .select('unidade_id')
-          .eq('igreja_id', churchId)
-          .not('unidade_id', 'is', null),
-      ]);
-      unitsRes = uRes;
-      memberCountsRes = mRes;
-
-      // Se unidade_criadora_id não existir na tabela ainda, tenta com unidade_mae_id ou consulta básica
-      if (unitsRes.error && (unitsRes.error.code === '42703' || unitsRes.error.message?.includes('unidade_criadora_id'))) {
-        let fallbackQuery = supabase
-          .from('unidades')
-          .select('id, pai_id, nivel_tipo_id, nome, ativo, igreja_id, unidade_mae_id')
-          .eq('igreja_id', churchId)
-          .eq('ativo', true)
-          .order('nome', { ascending: true });
-        if (levelTypeId) fallbackQuery = fallbackQuery.eq('nivel_tipo_id', levelTypeId);
-        unitsRes = await fallbackQuery;
-
-        if (unitsRes.error && (unitsRes.error.code === '42703' || unitsRes.error.message?.includes('unidade_mae_id'))) {
-          let legacyFlatQuery = supabase
-            .from('unidades')
-            .select('id, pai_id, nivel_tipo_id, nome, ativo, igreja_id')
-            .eq('igreja_id', churchId)
-            .eq('ativo', true)
-            .order('nome', { ascending: true });
-          if (levelTypeId) legacyFlatQuery = legacyFlatQuery.eq('nivel_tipo_id', levelTypeId);
-          unitsRes = await legacyFlatQuery;
-        }
-      }
+      const unitsRes = await flatQuery;
 
       if (unitsRes.error) {
+        console.error('Erro ao consultar unidades (flat):', unitsRes.error);
         return NextResponse.json({ error: unitsRes.error.message }, { status: 500 });
       }
 
       const rows = unitsRes.data || [];
       const unitIds = rows.map((u: any) => u.id);
 
-      // Consulta líderes e detalhes de célula EXCLUSIVAMENTE para os unitIds desta igreja (evita full table scan)
-      let leadersBatchRes: any = { data: [] };
-      let celulasBatchRes: any = { data: [] };
-
+      // Consulta de líderes em lote único com join em membros (sem N+1 e sem varrer tabela toda)
+      const unitLeadersMap = new Map<string, any[]>();
       if (unitIds.length > 0) {
-        const [leadersRes, celulasRes] = await Promise.all([
-          supabase
+        const { data: leadersData, error: lErr } = await supabase
+          .from('unidade_lideres')
+          .select(`
+            unidade_id,
+            pessoa_id,
+            papel,
+            membro:membros!unidade_lideres_pessoa_id_fkey (
+              id,
+              nome,
+              funcao,
+              url_avatar,
+              telefone
+            )
+          `)
+          .in('unidade_id', unitIds)
+          .eq('ativo', true);
+
+        if (!lErr && leadersData) {
+          leadersData.forEach((l: any) => {
+            const mem = Array.isArray(l.membro) ? l.membro[0] : l.membro;
+            const leaderObj = {
+              id: l.pessoa_id,
+              name: mem?.nome || 'Líder',
+              role: l.papel || mem?.funcao || 'Líder',
+              avatarUrl: mem?.url_avatar,
+              phone: mem?.telefone,
+            };
+            const list = unitLeadersMap.get(l.unidade_id) || [];
+            list.push(leaderObj);
+            unitLeadersMap.set(l.unidade_id, list);
+          });
+        } else {
+          // Fallback caso o foreign key nomeado difira no schema do usuário
+          const { data: fallbackLeaders } = await supabase
             .from('unidade_lideres')
             .select('unidade_id, pessoa_id, papel')
             .in('unidade_id', unitIds)
-            .eq('ativo', true),
-          supabase
-            .from('celulas')
-            .select('unidade_id, bairro, endereco, dia_semana, horario')
-            .in('unidade_id', unitIds),
-        ]);
-        leadersBatchRes = leadersRes;
-        celulasBatchRes = celulasRes;
+            .eq('ativo', true);
+
+          const rawLeaderRows = fallbackLeaders || [];
+          const leaderPessoaIds = Array.from(new Set<string>(rawLeaderRows.map((l: any) => l.pessoa_id).filter(Boolean)));
+
+          const leaderMemberMap = new Map<string, any>();
+          if (leaderPessoaIds.length > 0) {
+            const { data: ptMembers } = await supabase
+              .from('membros')
+              .select('id, nome, funcao, url_avatar, telefone')
+              .in('id', leaderPessoaIds);
+
+            (ptMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m));
+          }
+
+          rawLeaderRows.forEach((l: any) => {
+            const mem = leaderMemberMap.get(l.pessoa_id);
+            const leaderObj = {
+              id: l.pessoa_id,
+              name: mem?.nome || 'Líder',
+              role: l.papel || mem?.funcao || 'Líder',
+              avatarUrl: mem?.url_avatar,
+              phone: mem?.telefone,
+            };
+            const list = unitLeadersMap.get(l.unidade_id) || [];
+            list.push(leaderObj);
+            unitLeadersMap.set(l.unidade_id, list);
+          });
+        }
       }
 
-      // Mapeamento de dados específicos da célula
-      const celulasMap = new Map<string, any>();
-      (celulasBatchRes.data || []).forEach((c: any) => celulasMap.set(c.unidade_id, c));
-
-      // Contagem em lote de membros
-      const countMap = new Map<string, number>();
-      (memberCountsRes.data || []).forEach((m: any) => {
-        if (m.unidade_id) {
-          countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
-        }
-      });
-
-      // Mapeamento de nomes de unidades para resolução rápida da célula mãe
+      // Mapeamento de nomes de unidades para resolução rápida de pai e origem/criação
       const unitNameMap = new Map<string, string>();
       rows.forEach((r: any) => unitNameMap.set(r.id, r.nome));
 
-      // Líderes em lote: buscar detalhes dos líderes vinculados a qualquer unidade
-      const activeLeaderRows = leadersBatchRes.data || [];
-      const leaderPessoaIds: string[] = Array.from(
-        new Set<string>(activeLeaderRows.map((l: any) => l.pessoa_id).filter(Boolean))
-      );
-
-      const leaderMemberMap = new Map<string, any>();
-      if (leaderPessoaIds.length > 0) {
-        const ptMembersRes = await supabase
-          .from('membros')
-          .select('id, nome, funcao, url_avatar, telefone')
-          .in('id', leaderPessoaIds);
-
-        if (ptMembersRes.data && ptMembersRes.data.length > 0) {
-          ptMembersRes.data.forEach((m: any) => leaderMemberMap.set(m.id, m));
-        }
-
-        const missingIds = leaderPessoaIds.filter((id) => !leaderMemberMap.has(id));
-        if (missingIds.length > 0) {
-          const legMembersRes = await supabase
-            .from('members')
-            .select('id, nome, funcao, url_avatar, telefone')
-            .in('id', missingIds);
-          (legMembersRes.data || []).forEach((m: any) => leaderMemberMap.set(m.id, m));
-        }
-      }
-
-      const unitLeadersMap = new Map<string, any[]>();
-      activeLeaderRows.forEach((l: any) => {
-        const mem = leaderMemberMap.get(l.pessoa_id);
-        const leaderObj = {
-          id: l.pessoa_id,
-          name: mem?.nome || 'Líder',
-          role: l.papel || mem?.funcao || 'Líder',
-          avatarUrl: mem?.url_avatar,
-          phone: mem?.telefone,
-        };
-        const list = unitLeadersMap.get(l.unidade_id) || [];
-        list.push(leaderObj);
-        unitLeadersMap.set(l.unidade_id, list);
-      });
-
       const flatUnits = rows.map((u: any) => {
         const unitLeaders = unitLeadersMap.get(u.id) || [];
-        const celulaInfo = celulasMap.get(u.id);
-        const calcMemberCount = countMap.get(u.id);
-        const dbMemberCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : 0;
-        const motherId = u.unidade_criadora_id || u.unidade_mae_id || null;
+        const motherId = u.unidade_criadora_id || null;
         const motherCellName = motherId ? unitNameMap.get(motherId) : undefined;
+        const memberCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : 0;
 
         return {
           id: u.id,
@@ -309,16 +286,16 @@ export async function GET(req: NextRequest) {
           name: u.nome,
           isActive: u.ativo !== false,
           churchId: u.igreja_id,
-          memberCount: calcMemberCount !== undefined ? calcMemberCount : dbMemberCount,
+          memberCount: memberCount,
+          quantidade_membros: memberCount,
           leaders: unitLeaders,
           leaderCount: unitLeaders.length,
-          meetingDay: u.dia_semana || u.dia_reuniao || celulaInfo?.dia_semana,
-          meetingTime: u.horario || u.horario_reuniao || celulaInfo?.horario,
-          neighborhood: u.bairro || celulaInfo?.bairro,
-          address: u.endereco || celulaInfo?.endereco,
-          fotoUrl: u.foto_url || celulaInfo?.foto_url,
+          meetingDay: u.dia_semana || u.dia_reuniao || 'Quarta-feira',
+          meetingTime: u.horario || u.horario_reuniao || '19:30',
+          neighborhood: u.bairro || 'Centro',
+          address: u.endereco || '',
+          fotoUrl: u.foto_url || undefined,
           unidade_criadora_id: motherId,
-          unidade_mae_id: motherId,
           motherCellId: motherId,
           motherCellName: motherCellName,
         };
@@ -347,7 +324,24 @@ export async function GET(req: NextRequest) {
 
     let unitsQuery = supabase
       .from('unidades')
-      .select('id, igreja_id, nivel_tipo_id, pai_id, unidade_criadora_id, nome, ativo, criado_em')
+      .select(`
+        id,
+        igreja_id,
+        nivel_tipo_id,
+        pai_id,
+        unidade_criadora_id,
+        nome,
+        ativo,
+        quantidade_membros,
+        dia_semana,
+        dia_reuniao,
+        horario,
+        horario_reuniao,
+        bairro,
+        endereco,
+        foto_url,
+        criado_em
+      `)
       .eq('igreja_id', churchId)
       .eq('ativo', true)
       .order('nome', { ascending: true });
@@ -356,38 +350,7 @@ export async function GET(req: NextRequest) {
       unitsQuery = unitsQuery.eq('nivel_tipo_id', levelTypeId);
     }
 
-    let unitsData: any[] | null = null;
-    let unitsError: any = null;
-
-    const initialRes = await unitsQuery;
-    unitsData = initialRes.data;
-    unitsError = initialRes.error;
-
-    if (unitsError && (unitsError.code === '42703' || unitsError.message?.includes('unidade_criadora_id'))) {
-      let fallbackUnitsQuery = supabase
-        .from('unidades')
-        .select('id, igreja_id, nivel_tipo_id, pai_id, unidade_mae_id, nome, ativo, criado_em')
-        .eq('igreja_id', churchId)
-        .eq('ativo', true)
-        .order('nome', { ascending: true });
-      if (levelTypeId) fallbackUnitsQuery = fallbackUnitsQuery.eq('nivel_tipo_id', levelTypeId);
-      const fbRes = await fallbackUnitsQuery;
-      unitsData = fbRes.data;
-      unitsError = fbRes.error;
-
-      if (unitsError && (unitsError.code === '42703' || unitsError.message?.includes('unidade_mae_id'))) {
-        let legacyUnitsQuery = supabase
-          .from('unidades')
-          .select('id, igreja_id, nivel_tipo_id, pai_id, nome, ativo, criado_em')
-          .eq('igreja_id', churchId)
-          .eq('ativo', true)
-          .order('nome', { ascending: true });
-        if (levelTypeId) legacyUnitsQuery = legacyUnitsQuery.eq('nivel_tipo_id', levelTypeId);
-        const legRes = await legacyUnitsQuery;
-        unitsData = legRes.data;
-        unitsError = legRes.error;
-      }
-    }
+    const { data: unitsData, error: unitsError } = await unitsQuery;
 
     if (unitsError) {
       console.error('Erro ao buscar unidades:', unitsError);
@@ -398,75 +361,86 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, units: [] });
     }
 
-    // Mapeamento de nomes de todas as unidades para obter nome do pai e da célula mãe
+    // Mapeamento de nomes de todas as unidades
     const unitNameMap = new Map<string, string>();
     unitsData.forEach((u: any) => unitNameMap.set(u.id, u.nome));
 
-    // Buscar líderes vinculados em unidade_lideres
+    // Buscar líderes em lote único com join seguro
     const unitIds = unitsData.map((u: any) => u.id);
-    const { data: lideresData } = await supabase
-      .from('unidade_lideres')
-      .select('unidade_id, pessoa_id, papel')
-      .in('unidade_id', unitIds)
-      .eq('ativo', true);
+    const leadersMap = new Map<string, any[]>();
 
-    const leaderPessoaIds = (lideresData || []).map((l: any) => l.pessoa_id);
-    let leaderMemberMap = new Map<string, any>();
-    if (leaderPessoaIds.length > 0) {
-      let ptMembersRes = await supabase
-        .from('membros')
-        .select('id, nome, funcao, url_avatar, telefone')
-        .in('id', leaderPessoaIds);
+    if (unitIds.length > 0) {
+      const { data: lideresData, error: lErr } = await supabase
+        .from('unidade_lideres')
+        .select(`
+          unidade_id,
+          pessoa_id,
+          papel,
+          membro:membros!unidade_lideres_pessoa_id_fkey (
+            id,
+            nome,
+            funcao,
+            url_avatar,
+            telefone
+          )
+        `)
+        .in('unidade_id', unitIds)
+        .eq('ativo', true);
 
-      if (ptMembersRes.data) {
-        ptMembersRes.data.forEach((m: any) => leaderMemberMap.set(m.id, m));
+      if (!lErr && lideresData) {
+        lideresData.forEach((l: any) => {
+          const mem = Array.isArray(l.membro) ? l.membro[0] : l.membro;
+          const existing = leadersMap.get(l.unidade_id) || [];
+          existing.push({
+            id: l.pessoa_id,
+            name: mem?.nome || 'Líder',
+            role: l.papel || mem?.funcao || 'Líder',
+            avatarUrl: mem?.url_avatar,
+            phone: mem?.telefone,
+          });
+          leadersMap.set(l.unidade_id, existing);
+        });
+      } else {
+        // Fallback por lote de IDs
+        const { data: rawLideres } = await supabase
+          .from('unidade_lideres')
+          .select('unidade_id, pessoa_id, papel')
+          .in('unidade_id', unitIds)
+          .eq('ativo', true);
+
+        const leaderPessoaIds = (rawLideres || []).map((l: any) => l.pessoa_id).filter(Boolean);
+        const leaderMemberMap = new Map<string, any>();
+
+        if (leaderPessoaIds.length > 0) {
+          const { data: ptMembers } = await supabase
+            .from('membros')
+            .select('id, nome, funcao, url_avatar, telefone')
+            .in('id', leaderPessoaIds);
+
+          (ptMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m));
+        }
+
+        (rawLideres || []).forEach((l: any) => {
+          const existing = leadersMap.get(l.unidade_id) || [];
+          const member = leaderMemberMap.get(l.pessoa_id);
+          existing.push({
+            id: l.pessoa_id,
+            name: member?.nome || 'Líder',
+            role: l.papel || member?.funcao || 'Líder',
+            avatarUrl: member?.url_avatar,
+            phone: member?.telefone,
+          });
+          leadersMap.set(l.unidade_id, existing);
+        });
       }
     }
-
-    const leadersMap = new Map<string, any[]>();
-    (lideresData || []).forEach((l: any) => {
-      const existing = leadersMap.get(l.unidade_id) || [];
-      const member = leaderMemberMap.get(l.pessoa_id);
-      existing.push({
-        id: l.pessoa_id,
-        name: member?.nome || 'Líder',
-        role: l.papel || member?.funcao || 'Líder',
-        avatarUrl: member?.url_avatar,
-        phone: member?.telefone,
-      });
-      leadersMap.set(l.unidade_id, existing);
-    });
-
-    // Contagem de membros por unidade/célula
-    let countMap = new Map<string, number>();
-    let { data: memberCounts } = await supabase
-      .from('membros')
-      .select('unidade_id')
-      .eq('igreja_id', churchId)
-      .not('unidade_id', 'is', null);
-
-    (memberCounts || []).forEach((m: any) => {
-      if (m.unidade_id) {
-        countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
-      }
-    });
-
-    // Buscar dados específicos de células
-    const { data: celulasData } = await supabase
-      .from('celulas')
-      .select('unidade_id, bairro, endereco, dia_semana, horario')
-      .in('unidade_id', unitIds);
-
-    const celulasMap = new Map<string, any>();
-    (celulasData || []).forEach((c: any) => celulasMap.set(c.unidade_id, c));
 
     const formattedUnits: OrganizationalUnit[] = unitsData.map((u: any) => {
       const lvl = levelsMap.get(u.nivel_tipo_id) || { nome: 'Unidade', ordem: 99 };
       const unitLeaders = leadersMap.get(u.id) || [];
-      const memberCount = countMap.get(u.id) || 0;
-      const celulaInfo = celulasMap.get(u.id);
-      const motherId = u.unidade_criadora_id || u.unidade_mae_id || null;
+      const motherId = u.unidade_criadora_id || null;
       const motherCellName = motherId ? unitNameMap.get(motherId) : undefined;
+      const memberCount = typeof u.quantidade_membros === 'number' ? u.quantidade_membros : 0;
 
       return {
         id: u.id,
@@ -479,15 +453,16 @@ export async function GET(req: NextRequest) {
         parentName: u.pai_id ? unitNameMap.get(u.pai_id) || 'Unidade Superior' : undefined,
         isActive: u.ativo !== false,
         leaders: unitLeaders,
-        memberCount: memberCount !== undefined ? memberCount : (typeof u.quantidade_membros === 'number' ? u.quantidade_membros : 0),
-        meetingDay: u.dia_semana || u.dia_reuniao || celulaInfo?.dia_semana,
-        meetingTime: u.horario || u.horario_reuniao || celulaInfo?.horario,
-        neighborhood: u.bairro || celulaInfo?.bairro,
-        address: u.endereco || celulaInfo?.endereco,
-        fotoUrl: u.foto_url || celulaInfo?.foto_url,
+        leaderCount: unitLeaders.length,
+        memberCount: memberCount,
+        quantidade_membros: memberCount,
+        meetingDay: u.dia_semana || u.dia_reuniao || 'Quarta-feira',
+        meetingTime: u.horario || u.horario_reuniao || '19:30',
+        neighborhood: u.bairro || 'Centro',
+        address: u.endereco || '',
+        fotoUrl: u.foto_url || undefined,
         createdAt: u.criado_em,
         unidade_criadora_id: motherId,
-        unidade_mae_id: motherId,
         motherCellId: motherId,
         motherCellName: motherCellName,
       };
@@ -525,14 +500,13 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Obter níveis da igreja ordenados para validar hierarquia
-    let { data: levels, error: levelsErr } = await supabase
+    let { data: levels } = await supabase
       .from('nivel_tipo')
       .select('id, nome, ordem')
       .eq('igreja_id', input.churchId)
       .order('ordem', { ascending: true });
 
     if (!levels || levels.length === 0) {
-      // Auto-provisionar níveis para esta igreja se não existirem
       const defaultLevels = [
         { id: generateUUID(), igreja_id: input.churchId, nome: 'Distrito', ordem: 10 },
         { id: generateUUID(), igreja_id: input.churchId, nome: 'Área', ordem: 20 },
@@ -606,7 +580,7 @@ export async function POST(req: NextRequest) {
     }
 
     const unitId = generateUUID();
-    const motherCellId = input.unidade_criadora_id || input.unidade_mae_id || input.motherCellId || null;
+    const motherCellId = input.unidade_criadora_id || input.motherCellId || null;
 
     // 3. Inserir na tabela unidades com atributos consolidados
     const unitPayload: any = {
@@ -630,25 +604,13 @@ export async function POST(req: NextRequest) {
       atualizado_em: new Date().toISOString(),
     };
 
-    let { error: insertUnitErr } = await supabase.from('unidades').insert([unitPayload]);
-    if (insertUnitErr && (insertUnitErr.code === '42703' || insertUnitErr.message?.includes('unidade_criadora_id'))) {
-      delete unitPayload.unidade_criadora_id;
-      unitPayload.unidade_mae_id = isLeafLevel ? (motherCellId && motherCellId.trim() !== '' ? motherCellId.trim() : null) : null;
-      let retry = await supabase.from('unidades').insert([unitPayload]);
-      insertUnitErr = retry.error;
-
-      if (insertUnitErr && (insertUnitErr.code === '42703' || insertUnitErr.message?.includes('unidade_mae_id'))) {
-        delete unitPayload.unidade_mae_id;
-        retry = await supabase.from('unidades').insert([unitPayload]);
-        insertUnitErr = retry.error;
-      }
-    }
+    const { error: insertUnitErr } = await supabase.from('unidades').insert([unitPayload]);
     if (insertUnitErr) {
       console.error('Erro ao inserir unidade:', insertUnitErr);
       return NextResponse.json({ error: `Falha ao criar unidade: ${insertUnitErr.message}` }, { status: 500 });
     }
 
-    // 4. Se for célula (nível folha), salvar detalhes na tabela 'celulas'
+    // 4. Se for célula (nível folha), manter sincronizado na tabela 'celulas' para retrocompatibilidade
     if (isLeafLevel) {
       try {
         const celulaPayload = {
@@ -668,53 +630,11 @@ export async function POST(req: NextRequest) {
       } catch (cErr) {
         console.warn('Aviso ao registrar detalhes em celulas:', cErr);
       }
-
-      // Buscar nome do setor/pai para popular tabela legada cells
-      let parentName = 'Geral';
-      if (input.parentId) {
-        const { data: pUnit } = await supabase
-          .from('unidades')
-          .select('nome')
-          .eq('id', input.parentId)
-          .maybeSingle();
-        if (pUnit?.nome) parentName = pUnit.nome;
-      }
-
-      // Buscar nome do primeiro líder se houver
-      let firstLeaderName = 'Líder Responsável';
-      if (input.leaderNames && input.leaderNames.length > 0) {
-        firstLeaderName = input.leaderNames.join(' & ');
-      } else if (input.leaderMemberIds && input.leaderMemberIds.length > 0) {
-        const { data: lMember } = await supabase
-          .from('members')
-          .select('nome')
-          .eq('id', input.leaderMemberIds[0])
-          .maybeSingle();
-        if (lMember?.nome) firstLeaderName = lMember.nome;
-      }
-
-      // Inserir opcionalmente na tabela legada cells caso exista
-      try {
-        const legacyCellPayload = {
-          id: unitId,
-          igreja_id: input.churchId,
-          nome: input.name.trim(),
-          nome_lider: firstLeaderName,
-          nome_setor: parentName,
-          endereco: input.address?.trim() || `${input.neighborhood?.trim() || 'Centro'}`,
-          dia_reuniao: input.meetingDay?.trim() || 'Quarta-feira',
-          horario_reuniao: input.meetingTime?.trim() || '19:30',
-        };
-        await supabase.from('cells').insert([legacyCellPayload]);
-      } catch {
-        // Ignora caso a view 'cells' tenha sido dropada
-      }
     }
 
     // 5. Inserir múltiplos líderes na tabela unidade_lideres e atualizar papel_id/funcao se necessário
     const leadersAssigned: any[] = [];
     if (input.leaderMemberIds && input.leaderMemberIds.length > 0) {
-      // Buscar catálogo de papéis da igreja
       const { data: roles } = await supabase
         .from('papeis')
         .select('id, nome, slug, nivel_hierarquia')
@@ -753,7 +673,6 @@ export async function POST(req: NextRequest) {
           const finalRoleId = shouldUpgradeRole ? assumedRoleId : currentRoleInfo.roleId;
           const finalRoleName = shouldUpgradeRole ? assumedRoleName : currentRoleInfo.roleName;
 
-          // Atualiza se for promover, se for vincular célula folha, ou se o papel_id/funcao estava ausente/desatualizado
           const needsRoleSync = !m.papel_id || !m.funcao || m.papel_id !== finalRoleId || m.funcao !== finalRoleName;
 
           if (shouldUpgradeRole || shouldUpdateCellId || needsRoleSync) {
@@ -767,38 +686,15 @@ export async function POST(req: NextRequest) {
             }
 
             await supabase.from('membros').update(updatePayload).eq('id', m.id);
-
-            try {
-              const legPayload: any = {
-                papel_id: finalRoleId,
-                funcao: finalRoleName,
-              };
-              if (shouldUpdateCellId) {
-                legPayload.celula_id = unitId;
-              }
-              await supabase.from('members').update(legPayload).eq('id', m.id);
-            } catch {
-              // Ignora view/tabela legada se não suportar
-            }
           }
         }
       }
 
-      // Buscar dados para retorno
-      let membersInfo: any[] | null = null;
-      const ptMemInfo = await supabase
+      // Buscar dados para retorno dos líderes atribuídos
+      const { data: membersInfo } = await supabase
         .from('membros')
         .select('id, nome, funcao, url_avatar, telefone')
         .in('id', input.leaderMemberIds);
-      if (!ptMemInfo.error && ptMemInfo.data && ptMemInfo.data.length > 0) {
-        membersInfo = ptMemInfo.data;
-      } else {
-        const legMemInfo = await supabase
-          .from('members')
-          .select('id, nome, funcao, url_avatar, telefone')
-          .in('id', input.leaderMemberIds);
-        membersInfo = legMemInfo.data;
-      }
 
       (membersInfo || []).forEach((m: any) => {
         leadersAssigned.push({
@@ -822,6 +718,7 @@ export async function POST(req: NextRequest) {
       parentId: isRootLevel ? null : input.parentId,
       isActive: true,
       leaders: leadersAssigned,
+      leaderCount: leadersAssigned.length,
       meetingDay: input.meetingDay,
       meetingTime: input.meetingTime,
       neighborhood: input.neighborhood,
@@ -829,10 +726,10 @@ export async function POST(req: NextRequest) {
       latitude: input.latitude,
       longitude: input.longitude,
       memberCount: isLeafLevel ? leadersAssigned.length : 0,
+      quantidade_membros: isLeafLevel ? leadersAssigned.length : 0,
       createdAt: new Date().toISOString(),
       createdByMemberId: input.createdByMemberId,
       unidade_criadora_id: motherCellId,
-      unidade_mae_id: motherCellId,
       motherCellId: input.motherCellId || motherCellId || undefined,
       motherCellName: input.motherCellName,
     };
@@ -937,13 +834,6 @@ export async function PATCH(req: NextRequest) {
         .select('id, nome, papel_id, funcao, unidade_id')
         .in('id', safeLeaderIds);
 
-      const rolesMap = new Map<string, number>();
-      (roles || []).forEach((r: any) => {
-        if (r.id) rolesMap.set(r.id, r.nivel_hierarquia);
-        if (r.nome) rolesMap.set(r.nome.toLowerCase(), r.nivel_hierarquia);
-        if (r.slug) rolesMap.set(r.slug.toLowerCase(), r.nivel_hierarquia);
-      });
-
       if (currentMembers && currentMembers.length > 0) {
         for (const m of currentMembers) {
           const currentRoleInfo = resolveMemberCurrentRole(m, roles || []);
@@ -953,7 +843,6 @@ export async function PATCH(req: NextRequest) {
           const finalRoleId = shouldUpgradeRole ? assumedRoleId : currentRoleInfo.roleId;
           const finalRoleName = shouldUpgradeRole ? assumedRoleName : currentRoleInfo.roleName;
 
-          // Se for promover, se for vincular célula folha, ou se o papel_id/funcao estava ausente/desatualizado no banco
           const needsRoleSync = !m.papel_id || !m.funcao || m.papel_id !== finalRoleId || m.funcao !== finalRoleName;
 
           if (shouldUpgradeRole || shouldUpdateCellId || needsRoleSync) {
@@ -982,20 +871,6 @@ export async function PATCH(req: NextRequest) {
               papel_id: finalRoleId,
               funcao: finalRoleName,
             });
-
-            // Sincroniza também na view/tabela legada members se existir
-            try {
-              const legPayload: any = {
-                papel_id: finalRoleId,
-                funcao: finalRoleName,
-              };
-              if (shouldUpdateCellId) {
-                legPayload.celula_id = unitId;
-              }
-              await supabase.from('members').update(legPayload).eq('id', m.id);
-            } catch {
-              // Ignora caso não suporte
-            }
           } else {
             updatedMembersList.push({
               id: m.id,
@@ -1010,24 +885,11 @@ export async function PATCH(req: NextRequest) {
 
     // 5. Buscar informações dos novos líderes selecionados
     let leadersAssigned: any[] = [];
-    let leaderNamesText = 'Sem Líder';
-
     if (safeLeaderIds.length > 0) {
-      let membersInfo: any[] | null = null;
-      const ptMemInfo = await supabase
+      const { data: membersInfo } = await supabase
         .from('membros')
         .select('id, nome, funcao, url_avatar, telefone')
         .in('id', safeLeaderIds);
-
-      if (!ptMemInfo.error && ptMemInfo.data && ptMemInfo.data.length > 0) {
-        membersInfo = ptMemInfo.data;
-      } else {
-        const legMemInfo = await supabase
-          .from('members')
-          .select('id, nome, funcao, url_avatar, telefone')
-          .in('id', safeLeaderIds);
-        membersInfo = legMemInfo.data;
-      }
 
       if (membersInfo && membersInfo.length > 0) {
         leadersAssigned = membersInfo.map((m: any) => {
@@ -1040,23 +902,10 @@ export async function PATCH(req: NextRequest) {
             phone: m.telefone,
           };
         });
-        leaderNamesText = leadersAssigned.map((l) => l.name).join(' & ');
       }
     }
 
-    // 6. Atualizar opcionalmente nome_lider na tabela legada cells se existir
-    if (isLeafLevel) {
-      try {
-        await supabase
-          .from('cells')
-          .update({ nome_lider: leaderNamesText })
-          .eq('id', unitId);
-      } catch {
-        // Ignora caso 'cells' tenha sido dropada
-      }
-    }
-
-    invalidateServerHierarchyUnitsCache();
+    invalidateServerHierarchyUnitsCache(churchId);
 
     return NextResponse.json({
       success: true,

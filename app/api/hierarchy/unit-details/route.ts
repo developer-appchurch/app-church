@@ -158,7 +158,7 @@ export async function GET(req: NextRequest) {
     const finalMemberCount =
       typeof unit.quantidade_membros === 'number'
         ? unit.quantidade_membros
-        : membersList.length;
+        : (Number(unit.quantidade_membros) || 0);
 
     const response: UnitDetailResponse = {
       id: unit.id,
