@@ -200,6 +200,21 @@ export default function Home() {
   const effectiveCells = (queriedCells && queriedCells.length > 0) ? queriedCells : cells;
   const effectiveMembers = (queriedMembers && queriedMembers.length > 0) ? queriedMembers : members;
 
+  // Garante que selectedCellId seja sincronizado com a célula do usuário logado assim que as células estiverem prontas
+  useEffect(() => {
+    if (effectiveCells.length > 0) {
+      if (!selectedCellId || !effectiveCells.some((c) => c.id === selectedCellId)) {
+        const preferredCellId =
+          user?.currentCellId && effectiveCells.some((c) => c.id === user.currentCellId)
+            ? user.currentCellId
+            : effectiveCells[0].id;
+        queueMicrotask(() => {
+          setSelectedCellId(preferredCellId);
+        });
+      }
+    }
+  }, [effectiveCells, selectedCellId, user?.currentCellId]);
+
   // Load church data isolated by churchId
   const loadChurchData = useCallback(
     async (churchId: string, initialCellId?: string, currentUserId?: string) => {
@@ -398,6 +413,7 @@ export default function Home() {
     if (user?.churchId) {
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['cell-members'] }),
         queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
         queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
         queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
@@ -411,6 +427,7 @@ export default function Home() {
     newPercentage: number
   ) => {
     await AppChurchService.updateMemberAttendance(memberId, newStatus, newPercentage);
+    queryClient.invalidateQueries({ queryKey: ['cell-members'] });
     setMembers((prev) =>
       prev.map((m) =>
         m.id === memberId

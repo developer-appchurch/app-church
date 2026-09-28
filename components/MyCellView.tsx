@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Image from 'next/image';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile, Role, OrganizationalUnit } from '../types';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 import { AppChurchService } from '../lib/supabase';
@@ -136,6 +137,24 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   onUpdateAttendance,
   onUpdateCell,
 }) => {
+  const queryClient = useQueryClient();
+
+  // 1. Consulta direcionada e resiliente dos membros desta célula para garantir que 100% dos membros sejam carregados
+  const {
+    data: directCellMembers,
+    isLoading: isLoadingCellMembers,
+    isRefetching: isRefetchingCellMembers,
+    refetch: refetchDirectCellMembers,
+  } = useQuery({
+    queryKey: ['cell-members', cell?.id],
+    queryFn: async () => {
+      if (!cell?.id || cell.id === 'cell-pending') return [];
+      return AppChurchService.getMembers(currentUser?.churchId || cell.churchId, cell.id);
+    },
+    enabled: Boolean(cell?.id && cell.id !== 'cell-pending'),
+    staleTime: 1000 * 60 * 2, // 2 minutos
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('todos');
   const [selectedStatus, setSelectedStatus] = useState<string>('todos');
@@ -695,7 +714,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   // Sincroniza a célula ativa caso esteja fora da cobertura permitida para o usuário
   useEffect(() => {
     if (accessibleCells.length > 0 && !accessibleCells.some((c) => c.id === cell.id)) {
-      onSelectCell?.(accessibleCells[0].id);
+      queueMicrotask(() => {
+        onSelectCell?.(accessibleCells[0].id);
+      });
     }
   }, [accessibleCells, cell.id, onSelectCell]);
 
@@ -956,10 +977,35 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setLoginDuplicateError('');
   };
 
-  // Filter members by current cell and query
+  // Combina os membros carregados diretamente da célula com a lista recebida via props
+  const allCellMembers = useMemo(() => {
+    const isSameCell = (mCellId?: string, targetCellId?: string) =>
+      Boolean(
+        mCellId &&
+        targetCellId &&
+        mCellId.trim().toLowerCase() === targetCellId.trim().toLowerCase()
+      );
+
+    const fromProps = members.filter((m) => isSameCell(m.cellId, cell.id));
+
+    if (directCellMembers && directCellMembers.length > 0) {
+      const mergedMap = new Map<string, CellMember>();
+      directCellMembers.forEach((m) => mergedMap.set(m.id, m));
+      // Preserva adições otimistas feitas localmente nas props
+      fromProps.forEach((m) => {
+        if (!mergedMap.has(m.id)) {
+          mergedMap.set(m.id, m);
+        }
+      });
+      return Array.from(mergedMap.values());
+    }
+
+    return fromProps;
+  }, [directCellMembers, members, cell.id]);
+
+  // Filtra membros da célula ativa por busca, papel e frequência
   const filteredMembers = useMemo(() => {
-    return members
-      .filter((m) => m.cellId === cell.id)
+    return allCellMembers
       .filter((m) => {
         const matchesQuery =
           m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -969,24 +1015,23 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
         const matchesStatus = selectedStatus === 'todos' || m.attendanceStatus === selectedStatus;
         return matchesQuery && matchesRole && matchesStatus;
       });
-  }, [members, cell.id, searchQuery, selectedRole, selectedStatus]);
+  }, [allCellMembers, searchQuery, selectedRole, selectedStatus]);
 
-  // Statistics strictly for this cell
+  // Estatísticas estritamente calculadas sobre todos os membros desta célula
   const stats = useMemo(() => {
-    const cellMems = members.filter((m) => m.cellId === cell.id);
-    const greenCount = cellMems.filter((m) => m.attendanceStatus === 'green').length;
-    const yellowCount = cellMems.filter((m) => m.attendanceStatus === 'yellow').length;
-    const redCount = cellMems.filter((m) => m.attendanceStatus === 'red').length;
-    const blackCount = cellMems.filter((m) => m.attendanceStatus === 'black').length;
+    const greenCount = allCellMembers.filter((m) => m.attendanceStatus === 'green').length;
+    const yellowCount = allCellMembers.filter((m) => m.attendanceStatus === 'yellow').length;
+    const redCount = allCellMembers.filter((m) => m.attendanceStatus === 'red').length;
+    const blackCount = allCellMembers.filter((m) => m.attendanceStatus === 'black').length;
 
     return {
-      total: cellMems.length,
+      total: allCellMembers.length,
       greenCount,
       yellowCount,
       redCount,
       blackCount,
     };
-  }, [members, cell.id]);
+  }, [allCellMembers]);
 
   const handleCreateMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1076,6 +1121,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       setFormError('');
       setLoginDuplicateError('');
       setIsAddModalOpen(false);
+      queryClient.invalidateQueries({ queryKey: ['cell-members', cell?.id] });
     } catch (err: any) {
       const msg = err?.message || 'Erro ao cadastrar membro.';
       setFormError(msg);
@@ -1385,6 +1431,16 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               <span className="bg-[#052447] text-white text-[11px] px-1.5 sm:px-2 py-0.5 rounded-full font-bold">
                 {stats.total}
               </span>
+              <button
+                type="button"
+                onClick={() => refetchDirectCellMembers()}
+                disabled={isRefetchingCellMembers}
+                title="Atualizar lista de membros da célula"
+                className="ml-1 text-slate-400 hover:text-sky-700 transition cursor-pointer p-0.5"
+                aria-label="Atualizar membros da célula"
+              >
+                <RefreshCw size={12} className={isRefetchingCellMembers ? 'animate-spin text-sky-600' : ''} />
+              </button>
             </div>
           </div>
         </div>
@@ -1429,7 +1485,12 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
           {/* Member List Rows */}
           <div className="space-y-1.5 pt-1.5 bg-[#e9eff6] rounded-b-xl w-full">
-            {filteredMembers.length === 0 ? (
+            {isLoadingCellMembers && allCellMembers.length === 0 ? (
+              <div className="bg-white rounded-xl p-8 text-center text-slate-500">
+                <Loader2 size={32} className="mx-auto text-sky-600 animate-spin mb-2" />
+                <p className="text-sm font-medium">Carregando membros da célula...</p>
+              </div>
+            ) : filteredMembers.length === 0 ? (
               <div className="bg-white rounded-xl p-8 text-center text-slate-500">
                 <AlertCircle size={32} className="mx-auto text-slate-400 mb-2" />
                 <p className="text-sm font-medium">
@@ -1570,6 +1631,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   key={option.id}
                   onClick={() => {
                     onUpdateAttendance(selectedMemberForAttendance.id, option.id, option.pct);
+                    queryClient.invalidateQueries({ queryKey: ['cell-members', cell?.id] });
                     setSelectedMemberForAttendance(null);
                   }}
                   className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left text-xs font-semibold transition cursor-pointer ${

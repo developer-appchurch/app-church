@@ -1907,7 +1907,8 @@ export const AppChurchService = {
             }
 
             if (cellId) {
-              return members.filter((m) => m.cellId === cellId);
+              const normalized = cellId.trim().toLowerCase();
+              return members.filter((m) => m.cellId && m.cellId.trim().toLowerCase() === normalized);
             }
             return members;
           }
@@ -1921,7 +1922,8 @@ export const AppChurchService = {
                 filtered = filtered.filter((m) => m.churchId === churchId);
               }
               if (cellId) {
-                filtered = filtered.filter((m) => m.cellId === cellId);
+                const normalized = cellId.trim().toLowerCase();
+                filtered = filtered.filter((m) => m.cellId && m.cellId.trim().toLowerCase() === normalized);
               }
               if (search) {
                 filtered = filtered.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
@@ -1942,7 +1944,8 @@ export const AppChurchService = {
         filtered = filtered.filter((m) => m.churchId === churchId);
       }
       if (cellId) {
-        filtered = filtered.filter((m) => m.cellId === cellId);
+        const normalized = cellId.trim().toLowerCase();
+        filtered = filtered.filter((m) => m.cellId && m.cellId.trim().toLowerCase() === normalized);
       }
       if (search) {
         filtered = filtered.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
