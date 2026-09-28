@@ -57,23 +57,24 @@ export async function GET(req: NextRequest) {
     }
 
     // Busca membro vinculado com fallback multi-critério (id do app_metadata, auth_user_id, login, email)
+    const MEMBER_SESSION_COLUMNS = 'id, igreja_id, nome, login, funcao, papel_id, unidade_id, celula_id, email, telefone, url_avatar, auth_user_id';
     const membroIdFromMeta = authUser.app_metadata?.membro_id;
     let memberRows: any[] | null = null;
 
     if (membroIdFromMeta) {
-      const { data } = await supabaseAdmin.from('membros').select('*').eq('id', membroIdFromMeta).limit(1);
+      const { data } = await supabaseAdmin.from('membros').select(MEMBER_SESSION_COLUMNS).eq('id', membroIdFromMeta).limit(1);
       memberRows = data;
     }
 
     if (!memberRows || memberRows.length === 0) {
-      const { data } = await supabaseAdmin.from('membros').select('*').eq('auth_user_id', authUser.id).limit(1);
+      const { data } = await supabaseAdmin.from('membros').select(MEMBER_SESSION_COLUMNS).eq('auth_user_id', authUser.id).limit(1);
       memberRows = data;
     }
 
     if (!memberRows || memberRows.length === 0) {
       const userMetaLogin = authUser.user_metadata?.login;
       if (userMetaLogin) {
-        const { data } = await supabaseAdmin.from('membros').select('*').ilike('login', userMetaLogin).limit(1);
+        const { data } = await supabaseAdmin.from('membros').select(MEMBER_SESSION_COLUMNS).ilike('login', userMetaLogin).limit(1);
         memberRows = data;
       }
     }
@@ -82,11 +83,11 @@ export async function GET(req: NextRequest) {
       if (authUser.email) {
         const cleanEmail = authUser.email.toLowerCase();
         // Tenta pelo email exato
-        let { data } = await supabaseAdmin.from('membros').select('*').ilike('email', cleanEmail).limit(1);
+        let { data } = await supabaseAdmin.from('membros').select(MEMBER_SESSION_COLUMNS).ilike('email', cleanEmail).limit(1);
         if (!data || data.length === 0) {
           // Se for email sintético, extrai o login do prefixo do email
           const syntheticUser = cleanEmail.split('@')[0];
-          const legRes = await supabaseAdmin.from('membros').select('*').or(`login.ilike.${syntheticUser},email.ilike.${syntheticUser}`).limit(1);
+          const legRes = await supabaseAdmin.from('membros').select(MEMBER_SESSION_COLUMNS).or(`login.ilike.${syntheticUser},email.ilike.${syntheticUser}`).limit(1);
           data = legRes.data;
         }
         memberRows = data;

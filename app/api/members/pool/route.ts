@@ -62,9 +62,13 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const churchId = searchParams.get('churchId');
     const filter = searchParams.get('filter') || 'all'; // 'all' | 'unlinked' | 'linked'
-    const search = (searchParams.get('search') || '').trim();
-    const cursorName = searchParams.get('cursorName') || null;
-    const cursorId = searchParams.get('cursorId') || null;
+    const rawSearch = (searchParams.get('search') || '').trim();
+    // Sanitiza contra quebra de sintaxe PostgREST (.or(...) utiliza vírgulas e aspas)
+    const search = rawSearch.replace(/[,()"'\\]/g, '');
+    const cursorNameRaw = searchParams.get('cursorName') || null;
+    const cursorName = cursorNameRaw ? cursorNameRaw.replace(/[,()"'\\]/g, '') : null;
+    const cursorIdRaw = searchParams.get('cursorId') || null;
+    const cursorId = cursorIdRaw && /^[a-zA-Z0-9_-]+$/.test(cursorIdRaw) ? cursorIdRaw : null;
     const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '25', 10), 1), 100);
 
     if (!churchId) {
@@ -385,6 +389,16 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
+    // Busca a unidade atual do membro para recalcular caso seja alterada/desvinculada
+    const { data: memberBefore } = await supabase
+      .from('membros')
+      .select('id, unidade_id')
+      .eq('id', memberId)
+      .eq('igreja_id', churchId)
+      .maybeSingle();
+
+    const previousUnitId = memberBefore?.unidade_id;
+
     // Atualiza unidade_id do membro em 'membros'
     const noteText = validCellId
       ? `Membro vinculado à célula ${targetCellName} em ${new Date().toLocaleDateString('pt-BR')}`
@@ -416,7 +430,23 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 
-    // Atualiza contadores na tabela unidades
+    // Atualiza contadores da unidade anterior (se houver)
+    if (previousUnitId && previousUnitId !== validCellId) {
+      try {
+        const { count } = await supabase
+          .from('membros')
+          .select('*', { count: 'exact', head: true })
+          .eq('unidade_id', previousUnitId);
+        
+        const countVal = count || 0;
+        await supabase.from('unidades').update({ quantidade_membros: countVal }).eq('id', previousUnitId);
+        try {
+          await supabase.from('celulas').update({ quantidade_membros: countVal }).eq('unidade_id', previousUnitId);
+        } catch {}
+      } catch {}
+    }
+
+    // Atualiza contadores na nova unidade vinculada
     if (validCellId) {
       try {
         const { count } = await supabase

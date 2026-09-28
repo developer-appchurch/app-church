@@ -181,24 +181,9 @@ export default function Home() {
     staleTime: 1000 * 60 * 5, // 5 minutos de cache ativo
   });
 
-  // 2. React Query: Consulta de Membros com keepPreviousData e enabled condicionado a churchId
-  const {
-    data: queriedMembers,
-    refetch: refetchMembers,
-  } = useQuery({
-    queryKey: ['church-members', user?.churchId],
-    queryFn: async () => {
-      if (!user?.churchId) return [];
-      return AppChurchService.getMembers(user.churchId);
-    },
-    enabled: Boolean(user?.churchId),
-    placeholderData: keepPreviousData,
-    staleTime: 1000 * 60 * 5, // 5 minutos de cache ativo
-  });
-
   // Combina dados em cache/estado com dados do React Query garantindo que NUNCA zere em falhas
   const effectiveCells = (queriedCells && queriedCells.length > 0) ? queriedCells : cells;
-  const effectiveMembers = (queriedMembers && queriedMembers.length > 0) ? queriedMembers : members;
+  const effectiveMembers = members;
 
   // Garante que selectedCellId seja sincronizado com a célula do usuário logado assim que as células estiverem prontas
   useEffect(() => {
@@ -219,10 +204,7 @@ export default function Home() {
   const loadChurchData = useCallback(
     async (churchId: string, initialCellId?: string, currentUserId?: string) => {
       try {
-        const [churchCells, churchMembers] = await Promise.all([
-          AppChurchService.getCells(churchId),
-          AppChurchService.getMembers(churchId),
-        ]);
+        const churchCells = await AppChurchService.getCells(churchId);
 
         if (churchCells && churchCells.length > 0) {
           setCells(churchCells);
@@ -231,10 +213,6 @@ export default function Home() {
               ? initialCellId
               : churchCells[0]?.id || '';
           setSelectedCellId(targetCellId);
-        }
-
-        if (churchMembers && churchMembers.length > 0) {
-          setMembers(churchMembers);
         }
       } catch (err) {
         console.warn('Erro ao carregar dados da igreja:', err);
@@ -254,7 +232,6 @@ export default function Home() {
         setIsAuthenticated(true);
         setIsCheckingSession(false);
         setActiveScreen('feed');
-        loadChurchData(cached.churchId, cached.currentCellId, cached.id);
       }
 
       try {
@@ -264,11 +241,11 @@ export default function Home() {
             setUser(sessionUser);
             setIsAuthenticated(true);
             setActiveScreen('feed');
-            loadChurchData(
-              sessionUser.churchId,
-              sessionUser.currentCellId,
-              sessionUser.id
-            );
+            // Se a igreja difere do cache inicial, invalida para buscar a nova igreja
+            if (cached && cached.churchId !== sessionUser.churchId) {
+              queryClient.invalidateQueries({ queryKey: ['church-cells', sessionUser.churchId] });
+              queryClient.invalidateQueries({ queryKey: ['church-members', sessionUser.churchId] });
+            }
           } else {
             // Se já há um usuário ativo no estado (ex: logou pelo formulário), não anula
             setUser((prev) => {
@@ -291,7 +268,7 @@ export default function Home() {
     return () => {
       isMounted = false;
     };
-  }, [loadChurchData]);
+  }, [queryClient]);
 
   // Connection check on mount
   useEffect(() => {
@@ -310,27 +287,19 @@ export default function Home() {
       // 1. Invalida as queries do React Query (mantém os dados na tela graças ao keepPreviousData)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['cell-members'] }),
         queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
         queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
+        queryClient.invalidateQueries({ queryKey: ['feed_posts'] }),
       ]);
 
-      // 2. Re-executa as buscas no banco diretamente
-      const [freshCells, freshMembers] = await Promise.all([
-        AppChurchService.getCells(user.churchId),
-        AppChurchService.getMembers(user.churchId),
-      ]);
-
+      // 2. Re-executa as células para atualizar seletores
+      const freshCells = await AppChurchService.getCells(user.churchId, true);
       if (freshCells && freshCells.length > 0) {
         setCells(freshCells);
       }
-      if (freshMembers && freshMembers.length > 0) {
-        setMembers(freshMembers);
-      }
 
-      queryClient.invalidateQueries({ queryKey: ['feed_posts'] });
-
-      const status = await AppChurchService.checkConnection();
+      const status = await AppChurchService.checkConnection(true);
       setConnectionStatus(status);
 
       // Notificação rápida (2s no máximo) em tom de verde claro

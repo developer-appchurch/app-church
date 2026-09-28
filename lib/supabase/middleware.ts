@@ -24,15 +24,35 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // IMPORTANTE: getUser() valida o JWT contra o Supabase Auth com segurança
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Otimização de Performance (Item 6):
+  // Valida a sessão examinando os cookies e claims locais do Supabase sem disparar HTTP /auth/v1/user
+  // em cada navegação de página estática/client.
+  // getClaims() / getSession() decodifica o JWT localmente.
+  let hasValidSession = false;
+  try {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    if (session && session.expires_at) {
+      const nowInSeconds = Math.floor(Date.now() / 1000);
+      // Considera válido se não expirou (com margem de 60s)
+      if (session.expires_at > nowInSeconds + 60) {
+        hasValidSession = true;
+      } else {
+        // Perto de expirar: renova com getUser()
+        const { data: { user } } = await supabase.auth.getUser();
+        hasValidSession = Boolean(user);
+      }
+    }
+  } catch {
+    hasValidSession = false;
+  }
 
   const url = request.nextUrl.clone();
 
   // Se já logado e acessar /login, redireciona para a home
-  if (user && url.pathname === '/login') {
+  if (hasValidSession && url.pathname === '/login') {
     url.pathname = '/';
     return NextResponse.redirect(url);
   }

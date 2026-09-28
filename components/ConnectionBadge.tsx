@@ -19,28 +19,24 @@ export const ConnectionBadge: React.FC<ConnectionBadgeProps> = ({ className = ''
   useEffect(() => {
     let isMounted = true;
 
-    const initialFetch = async (force = false) => {
-      try {
-        const res = await AppChurchService.checkConnection(force);
-        if (isMounted) setStatus(res);
-      } catch {
-        if (isMounted) {
-          setStatus({
-            connected: false,
-            isCloud: false,
-            message: '',
-            endpoint: 'supabase.co',
-            lastChecked: '',
-          });
-        }
+    const updateStatusFromNavigator = () => {
+      const isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+      if (isMounted) {
+        setStatus({
+          connected: isOnline,
+          isCloud: true,
+          message: isOnline ? 'Online' : 'Offline',
+          endpoint: 'supabase.co',
+          lastChecked: new Date().toLocaleTimeString('pt-BR'),
+        });
       }
     };
 
-    // Consulta inicial única (utiliza cache em memória se já consultado)
-    initialFetch();
+    // Fonte principal: navigator.onLine (zero queries no banco de dados)
+    updateStatusFromNavigator();
 
     const handleOnline = () => {
-      initialFetch(true);
+      updateStatusFromNavigator();
     };
 
     const handleOffline = () => {
@@ -48,6 +44,8 @@ export const ConnectionBadge: React.FC<ConnectionBadgeProps> = ({ className = ''
         setStatus((prev) => ({
           ...prev,
           connected: false,
+          message: 'Offline',
+          lastChecked: new Date().toLocaleTimeString('pt-BR'),
         }));
       }
     };

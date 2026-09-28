@@ -139,6 +139,11 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
   const [targetCellId, setTargetCellId] = useState<string>('');
   const [isAssigning, setIsAssigning] = useState<boolean>(false);
 
+  // Modal: Confirmação de Desvincular e Excluir
+  const [memberToUnassign, setMemberToUnassign] = useState<MemberListItem | null>(null);
+  const [memberToDelete, setMemberToDelete] = useState<MemberListItem | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState<boolean>(false);
+
   // Modal: Novo Membro (Pool ou Célula)
   const [isNewMemberModalOpen, setIsNewMemberModalOpen] = useState<boolean>(false);
   const [newMemberName, setNewMemberName] = useState<string>('');
@@ -355,22 +360,46 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
     }
   };
 
-  // Ação: Desvincular Membro (Retornar ao Cadastro Geral)
-  const handleUnassignMember = async (member: MemberListItem) => {
-    if (
-      !confirm(
-        `Deseja desvincular "${member.name}" da célula e movê-lo para o cadastro geral da congregação?`
-      )
-    ) {
-      return;
-    }
+  // Ação: Desvincular Membro (Retornar ao Cadastro Geral com atualização atômica e instantânea do cache)
+  const handleConfirmUnassign = async () => {
+    if (!memberToUnassign) return;
+    const member = memberToUnassign;
+    const targetMemberId = member.id;
+    setIsProcessingAction(true);
+
+    // 1. Atualização Otimista Instantânea no Cache do React Query
+    queryClient.setQueriesData({ queryKey: ['member-pool'] }, (oldData: any) => {
+      if (!oldData || !oldData.pages) return oldData;
+      return {
+        ...oldData,
+        pages: oldData.pages.map((page: any) => ({
+          ...page,
+          members: page.members.map((m: MemberListItem) => {
+            if (m.id === targetMemberId) {
+              return {
+                ...m,
+                cellId: null,
+                cellName: 'Sem Célula',
+                isUnlinked: true,
+              };
+            }
+            return m;
+          }),
+          counts: {
+            ...page.counts,
+            unlinked: (page.counts?.unlinked || 0) + 1,
+            linked: Math.max(0, (page.counts?.linked || 0) - 1),
+          },
+        })),
+      };
+    });
 
     try {
       const res = await fetch('/api/members/pool', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          memberId: member.id,
+          memberId: targetMemberId,
           cellId: null,
           churchId: user.churchId,
         }),
@@ -381,31 +410,50 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         throw new Error(resData?.error || 'Falha ao desvincular membro.');
       }
 
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
-      ]);
-      setActionSuccessBanner(`"${member.name}" foi movido para o cadastro geral (sem célula).`);
+      setMemberToUnassign(null);
+      setActionSuccessBanner(`"${member.name}" foi desvinculado e movido para o cadastro geral.`);
+
+      // Sincroniza em background
+      queryClient.invalidateQueries({ queryKey: ['church-members'] });
+      queryClient.invalidateQueries({ queryKey: ['church-cells'] });
+      queryClient.invalidateQueries({ queryKey: ['church-structure'] });
     } catch (err: any) {
       console.error('Erro ao desvincular membro:', err);
       setErrorMessage(err?.message || 'Falha ao desvincular membro.');
+      // Revalida para reverter caso tenha ocorrido erro
+      queryClient.invalidateQueries({ queryKey: ['member-pool'] });
+    } finally {
+      setIsProcessingAction(false);
     }
   };
 
-  // Ação: Excluir Membro da Congregação e Auth
-  const handleDeleteMember = async (member: MemberListItem) => {
-    if (
-      !confirm(
-        `Tem certeza que deseja excluir "${member.name}"? Isso removerá o membro do banco e seu acesso/login do sistema.`
-      )
-    ) {
-      return;
-    }
+  // Ação: Excluir Membro da Congregação e Auth com atualização atômica e instantânea do cache
+  const handleConfirmDelete = async () => {
+    if (!memberToDelete) return;
+    const member = memberToDelete;
+    const targetMemberId = member.id;
+    setIsProcessingAction(true);
+
+    // 1. Remoção Otimista Instantânea no Cache do React Query
+    queryClient.setQueriesData({ queryKey: ['member-pool'] }, (oldData: any) => {
+      if (!oldData || !oldData.pages) return oldData;
+      return {
+        ...oldData,
+        pages: oldData.pages.map((page: any) => ({
+          ...page,
+          members: page.members.filter((m: MemberListItem) => m.id !== targetMemberId),
+          counts: {
+            ...page.counts,
+            total: Math.max(0, (page.counts?.total || 0) - 1),
+            unlinked: member.isUnlinked ? Math.max(0, (page.counts?.unlinked || 0) - 1) : page.counts?.unlinked,
+            linked: !member.isUnlinked ? Math.max(0, (page.counts?.linked || 0) - 1) : page.counts?.linked,
+          },
+        })),
+      };
+    });
 
     try {
-      const res = await fetch(`/api/members/pool?memberId=${encodeURIComponent(member.id)}`, {
+      const res = await fetch(`/api/members/pool?memberId=${encodeURIComponent(targetMemberId)}`, {
         method: 'DELETE',
       });
 
@@ -414,16 +462,20 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         throw new Error(resData?.error || 'Falha ao excluir membro.');
       }
 
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
-      ]);
-      setActionSuccessBanner(`"${member.name}" e seu acesso de login foram excluídos com sucesso.`);
+      setMemberToDelete(null);
+      setActionSuccessBanner(`"${member.name}" foi excluído com sucesso.`);
+
+      // Sincroniza em background
+      queryClient.invalidateQueries({ queryKey: ['church-members'] });
+      queryClient.invalidateQueries({ queryKey: ['church-cells'] });
+      queryClient.invalidateQueries({ queryKey: ['church-structure'] });
     } catch (err: any) {
       console.error('Erro ao excluir membro:', err);
       setErrorMessage(err?.message || 'Falha ao excluir membro.');
+      // Revalida para reverter caso tenha ocorrido erro
+      queryClient.invalidateQueries({ queryKey: ['member-pool'] });
+    } finally {
+      setIsProcessingAction(false);
     }
   };
 
@@ -531,17 +583,9 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
               <Users size={24} />
             </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
-                  Nossos Membros
-                </h1>
-                <span className="px-2.5 py-0.5 rounded-full bg-sky-500/20 text-sky-300 text-[11px] font-bold border border-sky-400/30">
-                  {user.churchName}
-                </span>
-              </div>
-              <p className="text-xs text-slate-300 mt-1 max-w-xl">
-                Gestão consolidada de membros, vinculação às células e banco de pessoas sem célula.
-              </p>
+              <h1 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">
+                Nossos Membros
+              </h1>
             </div>
           </div>
 
@@ -706,7 +750,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                 {allMembers.map((member) => (
                   <div
                     key={member.id}
-                    className="p-3.5 sm:p-4 hover:bg-slate-50/80 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    className="member-card p-3.5 sm:p-4 hover:bg-slate-50/80 transition flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
                     <div className="flex items-start sm:items-center gap-3">
                       <MemberAvatar name={member.name} avatarUrl={member.avatarUrl} />
@@ -766,7 +810,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                       ) : (
                         <button
                           type="button"
-                          onClick={() => handleUnassignMember(member)}
+                          onClick={() => setMemberToUnassign(member)}
                           className="px-3 py-1.5 bg-slate-100 hover:bg-amber-50 text-slate-600 hover:text-amber-700 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 hover:border-amber-200"
                           title="Desvincular e mover para membros gerais"
                         >
@@ -777,7 +821,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
 
                       <button
                         type="button"
-                        onClick={() => handleDeleteMember(member)}
+                        onClick={() => setMemberToDelete(member)}
                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200 cursor-pointer"
                         title="Excluir membro e remover login"
                       >
@@ -1110,6 +1154,144 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar Desvinculação */}
+      {memberToUnassign && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-amber-600 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/30 text-white flex items-center justify-center">
+                  <Unlink size={16} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Desvincular Membro</h3>
+                  <p className="text-[11px] text-amber-100">
+                    Mover para o cadastro geral de membros
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMemberToUnassign(null)}
+                className="text-amber-200 hover:text-white p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Tem certeza que deseja desvincular <strong className="text-slate-900 font-bold">{memberToUnassign.name}</strong> da célula{' '}
+                <strong className="text-slate-900 font-bold">{memberToUnassign.cellName || 'atual'}</strong>?
+              </p>
+              <p className="text-[11px] text-slate-500 bg-amber-50 border border-amber-200 p-3 rounded-xl">
+                O membro continuará cadastrado na congregação, mas passará a constar como <strong>&quot;Sem Célula&quot;</strong> até que seja vinculado a uma nova unidade.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isProcessingAction}
+                  onClick={() => setMemberToUnassign(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessingAction}
+                  onClick={handleConfirmUnassign}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  {isProcessingAction ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Desvinculando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Unlink size={14} />
+                      <span>Confirmar Desvinculação</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar Exclusão */}
+      {memberToDelete && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-red-600 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-red-500/30 text-white flex items-center justify-center">
+                  <Trash2 size={16} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Excluir Membro</h3>
+                  <p className="text-[11px] text-red-100">
+                    Remover definitivamente do sistema
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMemberToDelete(null)}
+                className="text-red-200 hover:text-white p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Tem certeza que deseja excluir o cadastro de <strong className="text-slate-900 font-bold">{memberToDelete.name}</strong>?
+              </p>
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl space-y-1 text-[11px] text-red-800">
+                <p className="font-bold flex items-center gap-1">
+                  <span>Esta ação não poderá ser desfeita.</span>
+                </p>
+                <p>
+                  O membro será removido da congregação e sua conta de acesso ao aplicativo será desativada.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isProcessingAction}
+                  onClick={() => setMemberToDelete(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessingAction}
+                  onClick={handleConfirmDelete}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-60"
+                >
+                  {isProcessingAction ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>Excluindo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={14} />
+                      <span>Excluir Membro</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

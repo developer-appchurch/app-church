@@ -1372,15 +1372,29 @@ export const AppChurchService = {
                 };
               });
 
-              const unlinkedCount = mapped.filter((m) => m.isUnlinked).length;
-              const linkedCount = mapped.filter((m) => !m.isUnlinked).length;
+              let totalReal = mapped.length;
+              let unlinkedReal = mapped.filter((m) => m.isUnlinked).length;
+              let linkedReal = mapped.filter((m) => !m.isUnlinked).length;
+
+              try {
+                const [cTotal, cUnlinked, cLinked] = await Promise.all([
+                  supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId),
+                  supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId).is('unidade_id', null),
+                  supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId).not('unidade_id', 'is', null),
+                ]);
+                if (cTotal.count !== null && cTotal.count !== undefined) totalReal = cTotal.count;
+                if (cUnlinked.count !== null && cUnlinked.count !== undefined) unlinkedReal = cUnlinked.count;
+                if (cLinked.count !== null && cLinked.count !== undefined) linkedReal = cLinked.count;
+              } catch {
+                // Mantém aproximação em caso de indisponibilidade
+              }
 
               return {
                 members: mapped,
                 counts: {
-                  total: mapped.length,
-                  unlinked: unlinkedCount,
-                  linked: linkedCount,
+                  total: totalReal,
+                  unlinked: unlinkedReal,
+                  linked: linkedReal,
                 },
               };
             }
@@ -1438,6 +1452,9 @@ export const AppChurchService = {
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Falha ao vincular membro à célula.');
       }
+      invalidateMemoryCache(`members:${churchId}`);
+      invalidateMemoryCache(`cells:${churchId}`);
+      invalidateMemoryCache(`member_pool_${churchId}`);
       return data;
     }
     throw new Error('Ação requer conexão com o servidor.');
@@ -1466,6 +1483,9 @@ export const AppChurchService = {
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Falha ao cadastrar membro.');
       }
+      invalidateMemoryCache(`members:${payload.churchId}`);
+      invalidateMemoryCache(`cells:${payload.churchId}`);
+      invalidateMemoryCache(`member_pool_${payload.churchId}`);
       return data.member;
     }
     throw new Error('Ação requer conexão com o servidor.');
@@ -1477,13 +1497,13 @@ export const AppChurchService = {
    * Com cache em memória e desduplicação de chamadas concorrentes
    */
   async getCells(churchId: string, force: boolean = false): Promise<CellGroup[]> {
-    return getCachedOrExecute(`cells:${churchId || 'all'}`, 60 * 1000, async () => {
+    return getCachedOrExecute(`cells:${churchId || 'all'}`, 5 * 60 * 1000, async () => {
       if (supabase) {
         try {
-          // 1. Busca todas as unidades ativas da igreja
+          // 1. Busca todas as unidades ativas da igreja com todas as colunas reais
           let unitQuery = supabase
             .from('unidades')
-            .select('id, igreja_id, nome, pai_id')
+            .select('id, igreja_id, nome, pai_id, dia_semana, dia_reuniao, horario, horario_reuniao, bairro, endereco, foto_url, quantidade_membros')
             .eq('ativo', true);
 
           if (churchId && churchId !== 'church-master' && churchId !== 'all') {
@@ -1495,7 +1515,7 @@ export const AppChurchService = {
           if ((!units || units.length === 0) && churchId && churchId !== 'all') {
             const allUnitsRes = await supabase
               .from('unidades')
-              .select('id, igreja_id, nome, pai_id')
+              .select('id, igreja_id, nome, pai_id, dia_semana, dia_reuniao, horario, horario_reuniao, bairro, endereco, foto_url, quantidade_membros')
               .eq('ativo', true);
             units = allUnitsRes.data;
             uErr = allUnitsRes.error;
@@ -1505,11 +1525,12 @@ export const AppChurchService = {
             const unitIds = units.map((u: any) => u.id);
 
             // 2. Opcional: Busca detalhes complementares em 'celulas' (para compatibilidade suave)
+            // A tabela celulas contém estritamente: unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros
             const celulaMap = new Map<string, any>();
             try {
               const { data: celulasData } = await supabase
                 .from('celulas')
-                .select('unidade_id, bairro, endereco, dia_semana, dia_reuniao, horario, horario_reuniao, quantidade_membros, foto_url')
+                .select('unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros')
                 .in('unidade_id', unitIds);
 
               (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
@@ -1563,19 +1584,36 @@ export const AppChurchService = {
               }
             });
 
-            // 5. Contagem real de membros por unidade vinculada (evita carregar membros sem unidade)
-            const { data: membersCount } = await supabase
-              .from('membros')
-              .select('unidade_id')
-              .eq('igreja_id', churchId)
-              .not('unidade_id', 'is', null)
-              .in('unidade_id', unitIds);
+            // 5. Contagem real de membros por unidade via RPC agregada (sem limite de 1000 linhas)
             const countMap = new Map<string, number>();
-            (membersCount || []).forEach((m: any) => {
-              if (m.unidade_id) {
-                countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
+            try {
+              const { data: rpcCounts, error: rpcErr } = await supabase.rpc('contagem_membros_por_unidade', {
+                p_igreja_id: churchId,
+              });
+              if (!rpcErr && rpcCounts && rpcCounts.length > 0) {
+                rpcCounts.forEach((r: any) => {
+                  if (r.unidade_id) {
+                    countMap.set(r.unidade_id, Number(r.total_membros || 0));
+                  }
+                });
               }
-            });
+            } catch {
+              // Fallback para contagem direta
+            }
+
+            if (countMap.size === 0) {
+              const { data: membersCount } = await supabase
+                .from('membros')
+                .select('unidade_id')
+                .eq('igreja_id', churchId)
+                .not('unidade_id', 'is', null)
+                .in('unidade_id', unitIds);
+              (membersCount || []).forEach((m: any) => {
+                if (m.unidade_id) {
+                  countMap.set(m.unidade_id, (countMap.get(m.unidade_id) || 0) + 1);
+                }
+              });
+            }
 
             // Unidades que são células (possuem entrada em 'celulas' ou são unidades folha)
             const parentIdsSet = new Set(units.map((u: any) => u.pai_id).filter(Boolean));
@@ -1609,6 +1647,8 @@ export const AppChurchService = {
                 leaderNames: leaderNames,
                 sectorName: parentName || 'Setor Geral',
                 address: u.endereco || cInfo?.endereco || (u.bairro ? `Bairro ${u.bairro}` : 'Endereço da Célula'),
+                bairro: u.bairro || cInfo?.bairro || undefined,
+                fotoUrl: u.foto_url || undefined,
                 meetingDay: u.dia_semana || u.dia_reuniao || cInfo?.dia_semana || cInfo?.dia_reuniao || 'Quinta-feira',
                 meetingTime: u.horario || u.horario_reuniao || cInfo?.horario || cInfo?.horario_reuniao || '19:30',
                 memberCount: finalCount,
@@ -1677,6 +1717,9 @@ export const AppChurchService = {
             );
             saveToStorage(STORAGE_KEYS.MEMBERS, updated);
           }
+
+          invalidateMemoryCache(`cells:${payload.churchId}`);
+          invalidateMemoryCache('units:');
 
           return newCell;
         } else if (data?.error) {
@@ -1752,6 +1795,10 @@ export const AppChurchService = {
             globalCached.map((c) => (c.id === updatedCell.id ? { ...c, ...updatedCell } : c))
           );
 
+          // Invalidação do cache em memória por prefixo
+          invalidateMemoryCache(`cells:${payload.churchId}`);
+          invalidateMemoryCache('units:');
+
           return updatedCell;
         } else if (data?.error) {
           throw new Error(data.error);
@@ -1814,14 +1861,15 @@ export const AppChurchService = {
       from = options.offset ?? (options.page ? (options.page - 1) * options.limit : 0);
       to = from + options.limit - 1;
     } else if (!cellId) {
-      // Quando listando membros gerais da igreja inteira sem célula, aplica limite de segurança para evitar dump de milhares de registros
-      from = 0;
-      to = 249; // Primeiros 250 membros
+      // Quando listando sem célula e sem paginação explícita, exibe aviso e não aplica teto artificial silencioso de 250
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[AppChurchService.getMembers] Consulta global de membros chamada sem cellId nem paginação explícita. Recomenda-se uso de paginação por cursor/lote.');
+      }
     }
 
     const search = options?.search?.trim() || '';
     const cacheKey = `members:${churchId || 'all'}:${cellId || 'all'}:${from ?? 'all'}:${to ?? 'all'}:${search}`;
-    return getCachedOrExecute(cacheKey, 60 * 1000, async () => {
+    return getCachedOrExecute(cacheKey, 3 * 60 * 1000, async () => {
       const EXPLICIT_MEMBER_COLUMNS = 'id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
       const EXPLICIT_LEGACY_COLUMNS = 'id, igreja_id, celula_id, funcao_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
 
@@ -2352,6 +2400,11 @@ export const AppChurchService = {
       }
     }
 
+    // Invalidação por prefixo para evitar retorno de dados antigos (Item 9)
+    invalidateMemoryCache(`members:${validChurchId}`);
+    invalidateMemoryCache(`cells:${validChurchId}`);
+    invalidateMemoryCache(`member_pool_${validChurchId}`);
+
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     saveToStorage(STORAGE_KEYS.MEMBERS, [created, ...allMembers]);
     return created;
@@ -2388,6 +2441,11 @@ export const AppChurchService = {
         await supabase.from('membros').delete().eq('id', memberId);
       } catch {}
     }
+
+    // Invalidação por prefixo
+    invalidateMemoryCache('members:');
+    invalidateMemoryCache('cells:');
+    invalidateMemoryCache('member_pool_');
 
     const allMembers = loadFromStorage(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
     saveToStorage(
@@ -2747,7 +2805,7 @@ export const AppChurchService = {
     const userLikedPosts: string[] =
       typeof window !== 'undefined' ? loadFromStorage<string[]>(userLikesKey, []) : [];
     const isCurrentlyLiked = userLikedPosts.includes(postId);
-    const nextLiked = !isCurrentlyLiked;
+    let nextLiked = !isCurrentlyLiked;
 
     if (typeof window !== 'undefined') {
       if (nextLiked) {
@@ -2778,7 +2836,21 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        // Tenta sincronizar com a tabela curtidas
+        if (userId) {
+          // Usa a nova RPC atômica criada no banco
+          const { data: rpcData, error: rpcError } = await supabase.rpc('toggle_curtida_post', {
+            p_post_id: postId,
+            p_membro_id: userId,
+          });
+
+          if (!rpcError && rpcData && rpcData.length > 0) {
+            finalLikesCount = rpcData[0].likes_count;
+            nextLiked = rpcData[0].liked;
+            return { liked: nextLiked, likesCount: finalLikesCount };
+          }
+        }
+
+        // Fallback direto caso a RPC não esteja disponível
         if (userId) {
           try {
             if (nextLiked) {
@@ -2791,7 +2863,6 @@ export const AppChurchService = {
           }
         }
 
-        // Atualização atômica na tabela postagens_feed
         let { data: postRow } = await supabase
           .from('postagens_feed')
           .select('quantidade_curtidas')
@@ -3068,6 +3139,7 @@ export const AppChurchService = {
 
     const allAnnouncements = loadFromStorage(STORAGE_KEYS.ANNOUNCEMENTS, INITIAL_ANNOUNCEMENTS);
     saveToStorage(STORAGE_KEYS.ANNOUNCEMENTS, [newAnnouncement, ...allAnnouncements]);
+    invalidateMemoryCache(`announcements:${newAnnouncement.churchId}`);
     return newAnnouncement;
   },
 
@@ -3093,6 +3165,7 @@ export const AppChurchService = {
       return item;
     });
     saveToStorage(STORAGE_KEYS.ANNOUNCEMENTS, updated);
+    invalidateMemoryCache('announcements:');
 
     if (supabase) {
       try {
@@ -3236,59 +3309,64 @@ export const AppChurchService = {
     const resultMap: Record<string, Record<string, { completed: boolean; completedAt?: string }>> = {};
     if (!memberIds || memberIds.length === 0) return resultMap;
 
-    // 1. Preenche a partir do cache local / INITIAL_LEADERSHIP_PROGRESS
-    const allTracks = loadFromStorage<Record<string, LeadershipTrackProgress>>(
-      STORAGE_KEYS.TRACKS,
-      INITIAL_LEADERSHIP_PROGRESS
-    );
+    const sortedIds = [...memberIds].sort();
+    const cacheKey = `track_status_map:${churchId || 'all'}:${sortedIds.slice(0, 10).join('_')}:${sortedIds.length}`;
 
-    memberIds.forEach((mId) => {
-      resultMap[mId] = {};
-      const track = allTracks[mId];
-      if (track?.steps) {
-        track.steps.forEach((st) => {
-          resultMap[mId][String(st.id)] = {
-            completed: Boolean(st.completed),
-            completedAt: st.completedAt,
-          };
-        });
-      }
-    });
+    return getCachedOrExecute(cacheKey, 3 * 60 * 1000, async () => {
+      // 1. Preenche a partir do cache local / INITIAL_LEADERSHIP_PROGRESS
+      const allTracks = loadFromStorage<Record<string, LeadershipTrackProgress>>(
+        STORAGE_KEYS.TRACKS,
+        INITIAL_LEADERSHIP_PROGRESS
+      );
 
-    // 2. Se Supabase estiver conectado, busca registros reais de membro_etapas_trilha
-    if (supabase) {
-      try {
-        let { data: stepRows, error } = await supabase
-          .from('membro_etapas_trilha')
-          .select('membro_id, etapa_id, concluida, concluida_em')
-          .in('membro_id', memberIds);
-
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          const legRows = await supabase
-            .from('member_track_steps')
-            .select('membro_id, etapa_id, concluida, concluida_em')
-            .in('membro_id', memberIds);
-          stepRows = legRows.data;
-          error = legRows.error;
-        }
-
-        if (!error && stepRows) {
-          stepRows.forEach((row: any) => {
-            const mId = row.membro_id;
-            const stId = String(row.etapa_id);
-            if (!resultMap[mId]) resultMap[mId] = {};
-            resultMap[mId][stId] = {
-              completed: Boolean(row.concluida),
-              completedAt: row.concluida_em,
+      memberIds.forEach((mId) => {
+        resultMap[mId] = {};
+        const track = allTracks[mId];
+        if (track?.steps) {
+          track.steps.forEach((st) => {
+            resultMap[mId][String(st.id)] = {
+              completed: Boolean(st.completed),
+              completedAt: st.completedAt,
             };
           });
         }
-      } catch (err) {
-        console.warn('Erro ao carregar etapas do trilho do Supabase:', err);
-      }
-    }
+      });
 
-    return resultMap;
+      // 2. Se Supabase estiver conectado, busca registros reais de membro_etapas_trilha em lote
+      if (supabase) {
+        try {
+          let { data: stepRows, error } = await supabase
+            .from('membro_etapas_trilha')
+            .select('membro_id, etapa_id, concluida, concluida_em')
+            .in('membro_id', memberIds);
+
+          if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+            const legRows = await supabase
+              .from('member_track_steps')
+              .select('membro_id, etapa_id, concluida, concluida_em')
+              .in('membro_id', memberIds);
+            stepRows = legRows.data;
+            error = legRows.error;
+          }
+
+          if (!error && stepRows) {
+            stepRows.forEach((row: any) => {
+              const mId = row.membro_id;
+              const stId = String(row.etapa_id);
+              if (!resultMap[mId]) resultMap[mId] = {};
+              resultMap[mId][stId] = {
+                completed: Boolean(row.concluida),
+                completedAt: row.concluida_em,
+              };
+            });
+          }
+        } catch (err) {
+          console.warn('Erro ao carregar etapas do trilho do Supabase:', err);
+        }
+      }
+
+      return resultMap;
+    });
   },
 
   /**
@@ -3449,6 +3527,8 @@ export const AppChurchService = {
         : m
     );
     saveToStorage(STORAGE_KEYS.MEMBERS, updatedMembers);
+    invalidateMemoryCache('track_status_map:');
+    invalidateMemoryCache('members:');
   },
 
   /**
@@ -3671,6 +3751,8 @@ export const AppChurchService = {
     });
 
     saveToStorage(STORAGE_KEYS.TRACKS, allTracks);
+    invalidateMemoryCache('track_status_map:');
+    invalidateMemoryCache('members:');
   },
 
   /**
@@ -3682,16 +3764,17 @@ export const AppChurchService = {
     return getCachedOrExecute('roles', 5 * 60 * 1000, async () => {
       if (supabase) {
         try {
+          const ROLE_COLUMNS = 'id, nome, slug, descricao, nivel_hierarquia, cor_distintivo';
           let { data, error } = await supabase
             .from('papeis')
-            .select('*')
+            .select(ROLE_COLUMNS)
             .order('nivel_hierarquia', { ascending: true })
             .order('nome', { ascending: true });
 
           if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
             const legRes = await supabase
               .from('roles')
-              .select('*')
+              .select(ROLE_COLUMNS)
               .order('nivel_hierarquia', { ascending: true })
               .order('nome', { ascending: true });
             data = legRes.data;

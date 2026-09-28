@@ -9,9 +9,10 @@ export function AppQueryProvider({ children }: { children: React.ReactNode }) {
       new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 1000 * 60 * 2, // 2 minutos stale-while-revalidate
-            gcTime: 1000 * 60 * 10, // 10 minutos em memória
-            refetchOnWindowFocus: false,
+            staleTime: 1000 * 60 * 3, // 3 minutos stale-while-revalidate
+            gcTime: 1000 * 60 * 15, // 15 minutos em memória
+            refetchOnWindowFocus: false, // Não refaz queries ao alternar abas
+            refetchOnReconnect: false, // Evita rajadas de queries desnecessárias ao acordar tela ou trocar 4G/Wi-Fi
             retry: 1,
           },
         },

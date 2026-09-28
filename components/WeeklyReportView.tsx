@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { AppChurchService } from '../lib/supabase';
 import { CellGroup, CellMember, UserProfile, WeeklyReport } from '../types';
 import {
   FileText,
@@ -103,10 +105,23 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
 
   // Filtra apenas membros pertencentes à célula selecionada
   const currentCellId = currentCell?.id;
+
+  // Busca os membros da célula selecionada sob demanda (compartilha cache com Minha Célula sem teto de 250)
+  const { data: directMembers } = useQuery({
+    queryKey: ['cell-members', currentCellId],
+    queryFn: async () => {
+      if (!currentCellId) return [];
+      return AppChurchService.getMembers(currentUser?.churchId || currentCell.churchId, currentCellId);
+    },
+    enabled: Boolean(currentCellId),
+    staleTime: 1000 * 60 * 3, // 3 minutos
+  });
+
   const cellMembers = useMemo(() => {
     if (!currentCellId) return [];
+    if (directMembers && directMembers.length > 0) return directMembers;
     return members.filter((m) => m.cellId === currentCellId);
-  }, [members, currentCellId]);
+  }, [directMembers, members, currentCellId]);
 
   // Células ordenadas alfabeticamente para o seletor
   const sortedCells = useMemo(() => {

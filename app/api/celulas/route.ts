@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     // 1. Busca todas as unidades ativas da igreja
     let unitsQuery = supabase
       .from('unidades')
-      .select('*')
+      .select('id, igreja_id, nome, pai_id, ativo, dia_semana, dia_reuniao, horario, horario_reuniao, endereco, bairro, foto_url, quantidade_membros')
       .eq('ativo', true);
 
     if (churchId !== 'all' && churchId !== 'church-master') {
@@ -57,11 +57,12 @@ export async function GET(req: NextRequest) {
     const unitIds = rawUnits.map((u) => u.id);
 
     // 2. Opcional: Busca detalhes complementares em 'celulas' (para fallback durante migração suave)
+    // Tabela celulas contém estritamente: unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros
     const celulaDetailMap = new Map<string, any>();
     try {
       const { data: celulasRows } = await supabase
         .from('celulas')
-        .select('*')
+        .select('unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros')
         .in('unidade_id', unitIds);
 
       (celulasRows || []).forEach((c: any) => {
@@ -113,11 +114,13 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    // 5. Contagem em tempo real de membros por unidade (como garantia além da coluna quantidade_membros)
+    // 5. Contagem em tempo real de membros por unidade vinculada (evita carregar membros sem unidade)
     const { data: membersCountData } = await supabase
       .from('membros')
       .select('unidade_id')
-      .eq('igreja_id', churchId);
+      .eq('igreja_id', churchId)
+      .not('unidade_id', 'is', null)
+      .in('unidade_id', unitIds);
 
     const countMap = new Map<string, number>();
     (membersCountData || []).forEach((m: any) => {

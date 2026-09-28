@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { CellMember, CellGroup, TrackStep, UserProfile, AttendanceStatus } from '../types';
 import { INITIAL_TRACK_STEPS } from '../data/initialData';
 import { AppChurchService } from '../lib/supabase';
@@ -198,8 +199,30 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
     selectedSectorFilter,
   ]);
 
+  // Identifica a célula alvo se uma célula específica estiver selecionada
+  const activeSingleCellId = useMemo(() => {
+    if (selectedCellIdState && selectedCellIdState !== 'todas') return selectedCellIdState;
+    if (isCellLeaderRole && !hasMultipleLedCells) return currentCell?.id || userLedCells[0]?.id;
+    return null;
+  }, [selectedCellIdState, isCellLeaderRole, hasMultipleLedCells, currentCell?.id, userLedCells]);
+
+  // Busca os membros da célula ativa via React Query (sem teto de 250 e reaproveitando cache)
+  const { data: directCellMembers } = useQuery({
+    queryKey: ['cell-members', activeSingleCellId],
+    queryFn: async () => {
+      if (!activeSingleCellId) return [];
+      return AppChurchService.getMembers(currentUser?.churchId || currentCell?.churchId, activeSingleCellId);
+    },
+    enabled: Boolean(activeSingleCellId),
+    staleTime: 1000 * 60 * 3,
+  });
+
   // Membros referentes ao nível selecionado na navegação hierárquica
   const levelMembers = useMemo(() => {
+    if (activeSingleCellId && directCellMembers && directCellMembers.length > 0) {
+      return directCellMembers;
+    }
+
     let list = members;
 
     // Filtra por congregação/igreja
@@ -246,6 +269,8 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
 
     return list;
   }, [
+    activeSingleCellId,
+    directCellMembers,
     members,
     currentUser,
     isCellLeaderRole,
