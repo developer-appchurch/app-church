@@ -122,8 +122,8 @@ export function resolveRoleIdByName(roleName?: string, explicitId?: string): str
   if (norm.includes('rede')) return 'b2000000-0000-0000-0000-000000000005';
   if (norm.includes('area')) return 'b2000000-0000-0000-0000-000000000004';
   if (norm.includes('setor')) return 'b2000000-0000-0000-0000-000000000009';
-  if (norm.includes('celula') || norm.includes('lider')) return 'b2000000-0000-0000-0000-000000000010';
   if (norm.includes('treinamento')) return 'b2000000-0000-0000-0000-000000000011';
+  if (norm.includes('celula') || norm.includes('lider')) return 'b2000000-0000-0000-0000-000000000010';
   if (norm.includes('anfitriao')) return 'b2000000-0000-0000-0000-000000000012';
   if (norm.includes('secretario')) return 'b2000000-0000-0000-0000-000000000013';
   if (norm.includes('intercessor')) return 'b2000000-0000-0000-0000-000000000014';
@@ -4182,5 +4182,214 @@ export const AppChurchService = {
         : m
     );
     saveToStorage(STORAGE_KEYS.MEMBERS, updatedMembers);
+  },
+
+  /**
+   * Operação em lote de Multiplicação de Célula de alta performance:
+   * 1. Atualiza unidade_id (cellId) de todos os membros transferidos para a nova célula em lote único (SQL .in).
+   * 2. Promove os líderes selecionados da nova célula a 'Líder de Célula' respeitando hierarquia superior (Pastor, Líder de Setor).
+   * 3. Na célula de origem, só altera membros se houver nova nomeação de líder. Membros que continuam sem alteração não são tocados.
+   * 4. Atualiza os líderes das duas células em 'unidade_lideres'.
+   * 5. Atualiza o storage local em UMA ÚNICA passada.
+   */
+  async multiplyCellExecute(params: {
+    churchId: string;
+    originCellId: string;
+    destCellId: string;
+    transferredMemberIds: string[];
+    destLeaderIds: string[];
+    originLeaderIds: string[];
+  }): Promise<{ success: boolean }> {
+    const {
+      churchId,
+      originCellId,
+      destCellId,
+      transferredMemberIds,
+      destLeaderIds,
+      originLeaderIds,
+    } = params;
+
+    const allMembers = loadFromStorage<CellMember[]>(STORAGE_KEYS.MEMBERS, INITIAL_MEMBERS);
+    const allRoles = INITIAL_ROLES;
+
+    // Identificar membros transferidos regulares (não líderes da nova célula)
+    const regularTransferredIds = transferredMemberIds.filter((id) => !destLeaderIds.includes(id));
+    const destLeaderMembers = transferredMemberIds.filter((id) => destLeaderIds.includes(id));
+
+    // Determinar membros da origem que precisam de alteração de função (somente se não forem já líderes ou superiores)
+    const originLeaderMembersToPromote: { id: string; roleId: string; roleName: string }[] = [];
+    for (const leaderId of originLeaderIds) {
+      const mem = allMembers.find((m) => m.id === leaderId);
+      if (mem) {
+        const currentRole = allRoles.find((r) => r.id === mem.roleId || r.name === mem.role);
+        const currentLevel = currentRole ? currentRole.hierarchyLevel : 1;
+        // Só precisa alterar a função se for nível inferior a Líder de Célula (nível 2)
+        if (currentLevel < 2) {
+          originLeaderMembersToPromote.push({
+            id: leaderId,
+            roleId: ROLE_UUIDS.LIDER_CELULA,
+            roleName: 'Líder de Célula',
+          });
+        }
+      }
+    }
+
+    // Determinar dados de líderes da nova célula respeitando a hierarquia
+    const destLeaderUpdates: { id: string; roleId?: string; roleName?: string }[] = [];
+    for (const leaderId of destLeaderMembers) {
+      const mem = allMembers.find((m) => m.id === leaderId);
+      if (mem) {
+        const currentRole = allRoles.find((r) => r.id === mem.roleId || r.name === mem.role);
+        const currentLevel = currentRole ? currentRole.hierarchyLevel : 1;
+        if (currentLevel > 2) {
+          // Mantém a função hierárquica superior original (Pastor, Líder de Setor, etc.)
+          destLeaderUpdates.push({ id: leaderId });
+        } else {
+          destLeaderUpdates.push({
+            id: leaderId,
+            roleId: ROLE_UUIDS.LIDER_CELULA,
+            roleName: 'Líder de Célula',
+          });
+        }
+      } else {
+        destLeaderUpdates.push({
+          id: leaderId,
+          roleId: ROLE_UUIDS.LIDER_CELULA,
+          roleName: 'Líder de Célula',
+        });
+      }
+    }
+
+    // 1. Execuções no Supabase em paralelo de altíssima velocidade
+    const supabaseTasks: Promise<any>[] = [];
+
+    if (supabase) {
+      const nowIso = new Date().toISOString();
+
+      // Tarefa A: Atualizar unidade_id de todos os membros regulares transferidos em UMA ÚNICA chamada SQL .in
+      if (regularTransferredIds.length > 0) {
+        supabaseTasks.push(
+          (async () => {
+            try {
+              let { error } = await supabase
+                .from('membros')
+                .update({ unidade_id: destCellId, atualizado_em: nowIso })
+                .in('id', regularTransferredIds);
+
+              if (error && (error.code === '42P01' || error.message?.includes('unidade_id'))) {
+                await supabase
+                  .from('members')
+                  .update({ cell_id: destCellId, atualizado_em: nowIso })
+                  .in('id', regularTransferredIds);
+              }
+            } catch (err) {
+              console.warn('Erro ao atualizar membros regulares no Supabase:', err);
+            }
+          })()
+        );
+      }
+
+      // Tarefa B: Atualizar líderes da nova célula
+      for (const destLeader of destLeaderUpdates) {
+        supabaseTasks.push(
+          (async () => {
+            try {
+              const payload: any = {
+                unidade_id: destCellId,
+                atualizado_em: nowIso,
+              };
+              if (destLeader.roleId) payload.papel_id = destLeader.roleId;
+              if (destLeader.roleName) payload.funcao = destLeader.roleName;
+
+              let { error } = await supabase
+                .from('membros')
+                .update(payload)
+                .eq('id', destLeader.id);
+
+              if (error && (error.code === '42P01' || error.message?.includes('papel_id'))) {
+                const altPayload: any = {
+                  cell_id: destCellId,
+                  atualizado_em: nowIso,
+                };
+                if (destLeader.roleId) altPayload.funcao_id = destLeader.roleId;
+                if (destLeader.roleName) altPayload.funcao = destLeader.roleName;
+                await supabase.from('members').update(altPayload).eq('id', destLeader.id);
+              }
+            } catch (err) {
+              console.warn(`Erro ao atualizar líder ${destLeader.id} no Supabase:`, err);
+            }
+          })()
+        );
+      }
+
+      // Tarefa C: Atualizar apenas os novos líderes da origem que precisarem de promoção
+      for (const originLeader of originLeaderMembersToPromote) {
+        supabaseTasks.push(
+          (async () => {
+            try {
+              await supabase
+                .from('membros')
+                .update({
+                  papel_id: originLeader.roleId,
+                  funcao: originLeader.roleName,
+                  atualizado_em: nowIso,
+                })
+                .eq('id', originLeader.id);
+            } catch (err) {
+              console.warn(`Erro ao atualizar líder da origem ${originLeader.id} no Supabase:`, err);
+            }
+          })()
+        );
+      }
+    }
+
+    // Tarefa D: Atualizar líderes de unidades em unidade_lideres
+    const unitLeaderTasks: Promise<any>[] = [
+      this.updateUnitLeaders(destCellId, churchId, destLeaderIds).catch((e) =>
+        console.warn('Erro ao atualizar unidade_lideres destino:', e)
+      ),
+      this.updateUnitLeaders(originCellId, churchId, originLeaderIds).catch((e) =>
+        console.warn('Erro ao atualizar unidade_lideres origem:', e)
+      ),
+    ];
+
+    // Aguardar todas as tarefas remotas em paralelo
+    await Promise.all([...supabaseTasks, ...unitLeaderTasks]);
+
+    // 2. Atualizar Cache / LocalStorage em UMA ÚNICA PASSADA
+    const updatedMembers = allMembers.map((m) => {
+      // Membro transferido
+      if (transferredMemberIds.includes(m.id)) {
+        const destLeaderInfo = destLeaderUpdates.find((d) => d.id === m.id);
+        return {
+          ...m,
+          cellId: destCellId,
+          roleId: destLeaderInfo?.roleId || m.roleId,
+          role: (destLeaderInfo?.roleName || m.role) as UserRole,
+        };
+      }
+      // Membro da origem promovido a líder
+      const originPromoteInfo = originLeaderMembersToPromote.find((o) => o.id === m.id);
+      if (originPromoteInfo) {
+        return {
+          ...m,
+          roleId: originPromoteInfo.roleId,
+          role: originPromoteInfo.roleName as UserRole,
+        };
+      }
+      // Qualquer outro membro que permaneceu na origem: INALTERADO
+      return m;
+    });
+
+    saveToStorage(STORAGE_KEYS.MEMBERS, updatedMembers);
+
+    // Invalida caches pertinentes
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.clear();
+      } catch (_) {}
+    }
+
+    return { success: true };
   },
 };

@@ -5,6 +5,7 @@ export type UserRole =
   | 'Discipulador'
   | 'Discipulador em Treinamento'
   | 'Líder em Treinamento'
+  | 'Líder em treinamento'
   | 'Líder de Célula'
   | 'Líder de Setor'
   | 'Líder de Área'
