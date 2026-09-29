@@ -232,6 +232,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: Compass,
     },
     {
+      id: 'multiply_cell' as ActiveScreen,
+      label: 'Multiplicar Célula',
+      sublabel: 'Multiplique em poucos passos',
+      icon: Sparkles,
+    },
+    {
       id: 'member_pool' as ActiveScreen,
       label: 'Nossos Membros',
       sublabel: 'Gestão geral & vínculo de membros',

@@ -240,6 +240,7 @@ export type ActiveScreen =
   | 'feed'
   | 'my_cell'
   | 'our_cells'
+  | 'multiply_cell'
   | 'leadership_track'
   | 'reports'
   | 'register_church'

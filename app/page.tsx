@@ -81,6 +81,11 @@ const NossasCelulasView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const MultiplyCellView = dynamic(
+  () => import('../components/MultiplyCellView').then((m) => m.MultiplyCellView),
+  { loading: ViewLoading, ssr: false }
+);
+
 const NotificationPermissionBanner = dynamic(
   () => import('../components/NotificationPermissionBanner').then((m) => m.NotificationPermissionBanner),
   { ssr: false }
@@ -681,6 +686,21 @@ export default function Home() {
               churchName={user.churchName}
               cells={effectiveCells}
               onUpdateCell={handleUpdateCell}
+            />
+          )}
+
+          {activeScreen === 'multiply_cell' && user && (
+            <MultiplyCellView
+              currentUser={user}
+              cells={effectiveCells}
+              currentCell={currentCell}
+              onNavigate={(screen) => setActiveScreen(screen)}
+              onRefreshCells={() => {
+                refetchCells();
+                queryClient.invalidateQueries({ queryKey: ['church-cells'] });
+                queryClient.invalidateQueries({ queryKey: ['churchUnits'] });
+              }}
+              onSelectCell={setSelectedCellId}
             />
           )}
 
