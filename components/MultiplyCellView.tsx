@@ -144,13 +144,53 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
   onRefreshCells,
   onSelectCell,
 }) => {
+  // Regras de Hierarquia de Liderança
+  const userRole = currentUser?.role || 'Membro';
+  const userRoleNorm = userRole.toLowerCase().trim();
+
+  // Níveis hierárquicos:
+  // - Líder de Célula (e Líder em Treinamento / Membro): apenas pode multiplicar a própria célula e não troca
+  // - Líder de Setor: pode trocar célula, mas apenas dentro do próprio setor
+  // - A partir de Líder de Área (Líder de Área, Pastor, Supervisor, Admin): pode trocar células e escolher setor
+  const isCellLeaderLevel =
+    userRoleNorm.includes('celula') ||
+    userRoleNorm.includes('treinamento') ||
+    userRoleNorm === 'membro';
+
+  const isSectorLeader =
+    userRoleNorm.includes('setor') &&
+    !userRoleNorm.includes('area') &&
+    !userRoleNorm.includes('pastor') &&
+    !userRoleNorm.includes('supervisor') &&
+    !userRoleNorm.includes('admin');
+
+  const isAreaLeaderOrAbove =
+    userRoleNorm.includes('area') ||
+    userRoleNorm.includes('rede') ||
+    userRoleNorm.includes('distrito') ||
+    userRoleNorm.includes('pastor') ||
+    userRoleNorm.includes('supervisor') ||
+    userRoleNorm.includes('admin') ||
+    currentUser?.isSystemAdmin === true;
+
+  // Regra: Líder de Célula apenas multiplica a própria célula e NÃO DEVE ver botão de trocar
+  const canChangeOriginCell = !isCellLeaderLevel;
+
   // 1. Estado da Célula de Origem e Destino
   const initialOriginId = useMemo(() => {
     if (currentCell && cells.some((c) => c.id === currentCell.id)) {
       return currentCell.id;
     }
+    if (currentUser?.currentCellId && cells.some((c) => c.id === currentUser.currentCellId)) {
+      return currentUser.currentCellId;
+    }
+    if (isSectorLeader) {
+      const uSector = (currentUser.sector || '').toLowerCase().trim();
+      const sectorCell = cells.find((c) => (c.sectorName || '').toLowerCase().trim() === uSector);
+      if (sectorCell) return sectorCell.id;
+    }
     return cells.length > 0 ? cells[0].id : '';
-  }, [currentCell, cells]);
+  }, [currentCell, currentUser, cells, isSectorLeader]);
 
   const [originCellId, setOriginCellId] = useState<string>(initialOriginId);
   const [destCellId, setDestCellId] = useState<string>('');
@@ -162,14 +202,75 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
   const [originSearchTerm, setOriginSearchTerm] = useState<string>('');
   const [destSearchTerm, setDestSearchTerm] = useState<string>('');
 
+  // Célula de Origem Selecionada
+  const originCell = useMemo(() => {
+    return cells.find((c) => c.id === originCellId) || null;
+  }, [cells, originCellId]);
+
+  // Célula de Destino Selecionada
+  const destCell = useMemo(() => {
+    return cells.find((c) => c.id === destCellId) || null;
+  }, [cells, destCellId]);
+
+  // Setores disponíveis na igreja para seleção
+  const availableSectors = useMemo(() => {
+    const set = new Set<string>();
+    if (originCell?.sectorName) set.add(originCell.sectorName);
+    if (currentUser.sector) set.add(currentUser.sector);
+    cells.forEach((c) => {
+      if (c.sectorName) set.add(c.sectorName);
+    });
+    return Array.from(set).filter(Boolean);
+  }, [cells, originCell?.sectorName, currentUser.sector]);
+
   // 3. Formulário de Criação de Nova Célula
   const [newCellName, setNewCellName] = useState<string>('');
   const [newMeetingDay, setNewMeetingDay] = useState<string>('Quarta-feira');
   const [newMeetingTime, setNewMeetingTime] = useState<string>('19:30');
   const [newNeighborhood, setNewNeighborhood] = useState<string>('Centro');
   const [newAddress, setNewAddress] = useState<string>('');
+  const [newSectorName, setNewSectorName] = useState<string>(
+    originCell?.sectorName || currentUser.sector || 'Geral'
+  );
   const [isCreatingCell, setIsCreatingCell] = useState<boolean>(false);
   const [createCellError, setCreateCellError] = useState<string>('');
+
+  // Atualiza o setor padrão ao alterar a célula de origem ou abrir o modal
+  useEffect(() => {
+    if (originCell?.sectorName) {
+      setNewSectorName(originCell.sectorName);
+    } else if (currentUser.sector) {
+      setNewSectorName(currentUser.sector);
+    }
+  }, [originCell?.sectorName, currentUser.sector, isCreateCellModalOpen]);
+
+  // Células elegíveis para Origem de acordo com a hierarquia
+  const availableOriginCells = useMemo(() => {
+    if (isAreaLeaderOrAbove) {
+      return cells;
+    }
+    if (isSectorLeader) {
+      const uSector = (currentUser.sector || originCell?.sectorName || '').toLowerCase().trim();
+      return cells.filter(
+        (c) => (c.sectorName || '').toLowerCase().trim() === uSector
+      );
+    }
+    // Líder de Célula: apenas a própria célula
+    const userCellId = currentUser.currentCellId || currentUser.cellId || currentCell?.id;
+    return cells.filter((c) => c.id === userCellId);
+  }, [cells, isAreaLeaderOrAbove, isSectorLeader, currentUser.sector, currentUser.currentCellId, currentUser.cellId, currentCell?.id, originCell?.sectorName]);
+
+  // Células disponíveis para Destino (exclui a de origem e respeita o setor para líder de setor)
+  const availableDestCells = useMemo(() => {
+    return cells.filter((c) => {
+      if (c.id === originCellId) return false;
+      if (isSectorLeader) {
+        const uSector = (currentUser.sector || originCell?.sectorName || '').toLowerCase().trim();
+        return (c.sectorName || '').toLowerCase().trim() === uSector;
+      }
+      return true;
+    });
+  }, [cells, originCellId, isSectorLeader, currentUser.sector, originCell?.sectorName]);
 
   // 4. Membros da Célula de Origem & IDs Transferidos
   const [originMembers, setOriginMembers] = useState<CellMember[]>([]);
@@ -194,16 +295,6 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
       return () => clearTimeout(timer);
     }
   }, [successToast]);
-
-  // Célula de Origem Selecionada
-  const originCell = useMemo(() => {
-    return cells.find((c) => c.id === originCellId) || null;
-  }, [cells, originCellId]);
-
-  // Célula de Destino Selecionada
-  const destCell = useMemo(() => {
-    return cells.find((c) => c.id === destCellId) || null;
-  }, [cells, destCellId]);
 
   // Helper para verificar se um membro é um dos líderes originais atribuídos à célula
   const isOriginalCellLeader = useCallback(
@@ -340,11 +431,18 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
     setCreateCellError('');
 
     try {
+      // Associa o setor seguindo a regra de hierarquia direta:
+      // - Líder de Célula e Líder de Setor: setor associado automaticamente ao setor do usuário / célula de origem
+      // - Líder de Área ou superior: setor escolhido no seletor ou padrão da célula
+      const assignedSector = isAreaLeaderOrAbove
+        ? (newSectorName.trim() || originCell?.sectorName || currentUser.sector || 'Geral')
+        : (originCell?.sectorName || currentUser.sector || 'Geral');
+
       const created = await AppChurchService.createCell({
         churchId: currentUser.churchId,
         name: newCellName.trim(),
         leaderName: currentUser.name || 'A Definir',
-        sectorName: originCell?.sectorName || currentUser.sector || 'Geral',
+        sectorName: assignedSector,
         neighborhood: newNeighborhood.trim() || 'Centro',
         address: newAddress.trim() || `Bairro ${newNeighborhood.trim()}`,
         meetingDay: newMeetingDay,
@@ -354,6 +452,7 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
 
       if (created && created.id) {
         onRefreshCells?.();
+        // Seleciona automaticamente como célula de destino no Passo 3
         setDestCellId(created.id);
         setIsCreateCellModalOpen(false);
         setNewCellName('');
@@ -463,11 +562,6 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
     }
   };
 
-  // Células disponíveis para Destino (exclui a de origem)
-  const availableDestCells = useMemo(() => {
-    return cells.filter((c) => c.id !== originCellId);
-  }, [cells, originCellId]);
-
   return (
     <div className="bg-[#e9eff6] min-h-screen pb-20 font-sans select-none w-full overflow-x-hidden">
       <div className="max-w-6xl mx-auto px-2.5 sm:px-6 pt-3 sm:pt-4 space-y-3">
@@ -531,19 +625,34 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
 
         {/* Passo 1 — Célula de origem */}
         <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-2xs space-y-3">
-          {/* Cabeçalho do Passo 1 */}
-          <div className="flex items-center gap-2.5">
-            <span className="w-6 h-6 rounded-full bg-[#052447] text-white text-xs font-bold flex items-center justify-center shrink-0">
-              1
-            </span>
-            <div className="min-w-0">
-              <h3 className="text-sm sm:text-base font-extrabold text-[#052447] leading-tight truncate">
-                Célula de origem
-              </h3>
-              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-                Qual célula vai multiplicar?
-              </p>
+          {/* Cabeçalho do Passo 1 com botão Criar Nova Célula compacto ao lado */}
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <span className="w-6 h-6 rounded-full bg-[#052447] text-white text-xs font-bold flex items-center justify-center shrink-0">
+                1
+              </span>
+              <div className="min-w-0">
+                <h3 className="text-sm sm:text-base font-extrabold text-[#052447] leading-tight truncate">
+                  Célula de origem
+                </h3>
+                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate">
+                  Qual célula vai multiplicar?
+                </p>
+              </div>
             </div>
+
+            {/* Botão Criar nova célula compacto e padronizado */}
+            <button
+              type="button"
+              onClick={() => {
+                setCreateCellError('');
+                setIsCreateCellModalOpen(true);
+              }}
+              className="bg-[#052447] hover:bg-[#073366] active:scale-95 text-white text-xs font-bold rounded-xl py-2 px-3 flex items-center gap-1.5 transition cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
+            >
+              <Plus size={14} strokeWidth={2.5} />
+              <span>Criar nova célula</span>
+            </button>
           </div>
 
           {/* Seletor da Célula de Origem */}
@@ -557,38 +666,30 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
                   Setor {originCell.sectorName || 'Geral'} • {originCell.meetingDay || 'Quarta-feira'} {originCell.meetingTime || '19:30'} • {originMembers.length} membros
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsSelectOriginModalOpen(true)}
-                className="text-xs font-bold text-sky-700 hover:text-sky-800 hover:underline cursor-pointer shrink-0 ml-2"
-              >
-                Trocar
-              </button>
+              {canChangeOriginCell && (
+                <button
+                  type="button"
+                  onClick={() => setIsSelectOriginModalOpen(true)}
+                  className="text-xs font-bold text-sky-700 hover:text-sky-800 hover:underline cursor-pointer shrink-0 ml-2"
+                >
+                  Trocar
+                </button>
+              )}
             </div>
           ) : (
             <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-3 text-center">
               <p className="text-xs text-slate-500">Nenhuma célula selecionada.</p>
-              <button
-                type="button"
-                onClick={() => setIsSelectOriginModalOpen(true)}
-                className="mt-1 text-xs font-bold text-sky-700 hover:underline cursor-pointer"
-              >
-                Selecionar Célula
-              </button>
+              {canChangeOriginCell && (
+                <button
+                  type="button"
+                  onClick={() => setIsSelectOriginModalOpen(true)}
+                  className="mt-1 text-xs font-bold text-sky-700 hover:underline cursor-pointer"
+                >
+                  Selecionar Célula
+                </button>
+              )}
             </div>
           )}
-
-          {/* Botão Criar Nova Célula */}
-          <button
-            type="button"
-            onClick={() => {
-              setCreateCellError('');
-              setIsCreateCellModalOpen(true);
-            }}
-            className="w-full bg-[#052447] hover:bg-[#073366] active:scale-[0.99] text-white text-xs font-bold rounded-xl py-2.5 px-3 flex items-center justify-center gap-1.5 transition cursor-pointer shadow-xs"
-          >
-            <span>＋ Criar nova célula</span>
-          </button>
         </div>
 
         {/* Passos 2 e 3 — Dois quadros lado a lado (2 colunas iguais) */}
@@ -1040,7 +1141,7 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
             </div>
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0">
-              {cells
+              {availableOriginCells
                 .filter(
                   (c) =>
                     !originSearchTerm ||
@@ -1078,7 +1179,7 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
       )}
 
       {/* =========================================================================
-          MODAL / BOTTOM SHEET: SELECIONAR CÉLULA DE DESTINO
+          MODAL / BOTTOM SHEET: SELECIONAR CÉLULA DE DESTINO (Apenas Pesquisa)
       ========================================================================= */}
       {isSelectDestModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
@@ -1142,17 +1243,6 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
                     </div>
                   );
                 })}
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSelectDestModalOpen(false);
-                  setIsCreateCellModalOpen(true);
-                }}
-                className="w-full p-3 rounded-xl border border-dashed border-sky-600 text-sky-700 bg-sky-50 hover:bg-sky-100 text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
-              >
-                <span>＋ Criar nova célula agora</span>
-              </button>
             </div>
           </div>
         </div>
@@ -1208,6 +1298,38 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
                   placeholder="Ex: Célula Emanuel, Célula Shalon..."
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:border-sky-600"
                 />
+              </div>
+
+              {/* Setor da Nova Célula com Regra Hierárquica */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Setor da Nova Célula <span className="text-rose-500">*</span>
+                </label>
+                {isAreaLeaderOrAbove ? (
+                  <div className="space-y-1">
+                    <select
+                      value={newSectorName}
+                      onChange={(e) => setNewSectorName(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:border-sky-600 cursor-pointer"
+                    >
+                      {availableSectors.map((sec) => (
+                        <option key={sec} value={sec}>
+                          Setor {sec}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-slate-500">
+                      Como {userRole}, você pode direcionar a nova célula para qualquer setor sob sua área.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between text-xs font-semibold text-slate-800">
+                    <span>Setor {newSectorName || currentUser.sector || originCell?.sectorName || 'Geral'}</span>
+                    <span className="text-[10px] font-bold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md">
+                      Vinculado ao seu setor
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Dia da Semana e Horário */}

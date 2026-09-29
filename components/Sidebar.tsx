@@ -200,6 +200,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     user?.role === 'Administrador' ||
     user?.login === 'admin';
 
+  const userRoleNorm = (user?.role || '').toLowerCase().trim();
+  const isMemberOnly = userRoleNorm === 'membro' || userRoleNorm === 'visitante' || userRoleNorm === '';
+  const canAccessLeadershipFeatures = !isMemberOnly;
+
   const menuItems = [
     {
       id: 'feed' as ActiveScreen,
@@ -213,48 +217,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
       sublabel: 'Membros, Frequência & Trilho',
       icon: Users,
     },
-    {
-      id: 'reports' as ActiveScreen,
-      label: 'Relatório Semanal',
-      sublabel: 'Lançar relatório de presença',
-      icon: FileText,
-    },
-    {
-      id: 'leadership_track' as ActiveScreen,
-      label: 'Trilho de Liderança',
-      sublabel: 'Visão Geral do Discipulado',
-      icon: Award,
-    },
+    ...(canAccessLeadershipFeatures
+      ? [
+          {
+            id: 'reports' as ActiveScreen,
+            label: 'Relatório Semanal',
+            sublabel: 'Lançar relatório de presença',
+            icon: FileText,
+          },
+          {
+            id: 'leadership_track' as ActiveScreen,
+            label: 'Trilho de Liderança',
+            sublabel: 'Visão Geral do Discipulado',
+            icon: Award,
+          },
+        ]
+      : []),
     {
       id: 'our_cells' as ActiveScreen,
       label: 'Nossas Células',
       sublabel: 'Galeria & busca de todas as células',
       icon: Compass,
     },
-    {
-      id: 'multiply_cell' as ActiveScreen,
-      label: 'Multiplicar Célula',
-      sublabel: 'Multiplique em poucos passos',
-      icon: Sparkles,
-    },
-    {
-      id: 'member_pool' as ActiveScreen,
-      label: 'Nossos Membros',
-      sublabel: 'Gestão geral & vínculo de membros',
-      icon: Users,
-    },
-    {
-      id: 'hierarchy_units' as ActiveScreen,
-      label: 'Níveis Organizacionais',
-      sublabel: 'Cadastro por nível (Área, Setor, Célula)',
-      icon: Layers,
-    },
-    {
-      id: 'church_overview' as ActiveScreen,
-      label: 'Visão Geral da Igreja',
-      sublabel: 'Organograma & árvore hierárquica',
-      icon: Network,
-    },
+    ...(canAccessLeadershipFeatures
+      ? [
+          {
+            id: 'multiply_cell' as ActiveScreen,
+            label: 'Multiplicar Célula',
+            sublabel: 'Multiplique em poucos passos',
+            icon: Sparkles,
+          },
+          {
+            id: 'member_pool' as ActiveScreen,
+            label: 'Nossos Membros',
+            sublabel: 'Gestão geral & vínculo de membros',
+            icon: Users,
+          },
+          {
+            id: 'hierarchy_units' as ActiveScreen,
+            label: 'Níveis Organizacionais',
+            sublabel: 'Cadastro por nível (Área, Setor, Célula)',
+            icon: Layers,
+          },
+          {
+            id: 'church_overview' as ActiveScreen,
+            label: 'Visão Geral da Igreja',
+            sublabel: 'Organograma & árvore hierárquica',
+            icon: Network,
+          },
+        ]
+      : []),
     ...(isSystemAdmin
       ? [
           {
