@@ -610,29 +610,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Falha ao criar unidade: ${insertUnitErr.message}` }, { status: 500 });
     }
 
-    // 4. Se for célula (nível folha), manter sincronizado na tabela 'celulas' para retrocompatibilidade
-    if (isLeafLevel) {
-      try {
-        const celulaPayload = {
-          unidade_id: unitId,
-          bairro: input.neighborhood?.trim() || 'Centro',
-          endereco: input.address?.trim() || '',
-          dia_semana: input.meetingDay?.trim() || 'Quarta-feira',
-          horario: input.meetingTime?.trim() || '19:30',
-          quantidade_membros: 0,
-          criado_em: new Date().toISOString(),
-          atualizado_em: new Date().toISOString(),
-        };
-
-        await supabase
-          .from('celulas')
-          .upsert([celulaPayload], { onConflict: 'unidade_id' });
-      } catch (cErr) {
-        console.warn('Aviso ao registrar detalhes em celulas:', cErr);
-      }
-    }
-
-    // 5. Inserir múltiplos líderes na tabela unidade_lideres e atualizar papel_id/funcao se necessário
+    // 4. Inserir múltiplos líderes na tabela unidade_lideres e atualizar papel_id/funcao se necessário
     const leadersAssigned: any[] = [];
     if (input.leaderMemberIds && input.leaderMemberIds.length > 0) {
       const { data: roles } = await supabase
@@ -918,6 +896,118 @@ export async function PATCH(req: NextRequest) {
     console.error('Erro na rota /api/hierarchy/units PATCH:', err);
     return NextResponse.json(
       { error: err?.message || 'Erro interno ao atualizar líderes da unidade.' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/hierarchy/units
+ * Exclui ou desativa uma unidade/célula de 'public.unidades'.
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const unitId = searchParams.get('unitId');
+    const churchId = searchParams.get('churchId');
+    const hardDelete = searchParams.get('hardDelete') === 'true';
+
+    if (!unitId || !churchId) {
+      return NextResponse.json(
+        { error: 'Parâmetros unitId e churchId são obrigatórios.' },
+        { status: 400 }
+      );
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+    }
+
+    // 1. Verifica se a unidade existe e pertence à igreja
+    const { data: unit, error: checkErr } = await supabase
+      .from('unidades')
+      .select('id, nome, igreja_id, ativo')
+      .eq('id', unitId)
+      .eq('igreja_id', churchId)
+      .maybeSingle();
+
+    if (checkErr || !unit) {
+      return NextResponse.json({ error: 'Unidade não encontrada nesta igreja.' }, { status: 404 });
+    }
+
+    // 2. Impede exclusão se houver unidades filhas ativas vinculadas
+    const { data: children } = await supabase
+      .from('unidades')
+      .select('id, nome')
+      .eq('pai_id', unitId)
+      .eq('ativo', true)
+      .limit(5);
+
+    if (children && children.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Não é possível excluir esta unidade pois existem ${children.length} subunidade(s) vinculadas a ela (ex: "${children[0].nome}"). Transfira-as antes de excluir.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    if (hardDelete) {
+      // Desvincula membros
+      await supabase
+        .from('membros')
+        .update({ unidade_id: null, observacoes: 'Membro desvinculado por exclusão de unidade' })
+        .eq('unidade_id', unitId)
+        .eq('igreja_id', churchId);
+
+      // Remove líderes
+      await supabase
+        .from('unidade_lideres')
+        .delete()
+        .eq('unidade_id', unitId);
+
+      // Exclui a unidade
+      const { error: delErr } = await supabase
+        .from('unidades')
+        .delete()
+        .eq('id', unitId)
+        .eq('igreja_id', churchId);
+
+      if (delErr) {
+        return NextResponse.json({ error: delErr.message }, { status: 500 });
+      }
+
+      invalidateServerHierarchyUnitsCache(churchId);
+      return NextResponse.json({
+        success: true,
+        message: `Unidade "${unit.nome}" excluída com sucesso.`,
+      });
+    } else {
+      // Soft-delete / Desativação
+      const { error: deactErr } = await supabase
+        .from('unidades')
+        .update({
+          ativo: false,
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq('id', unitId)
+        .eq('igreja_id', churchId);
+
+      if (deactErr) {
+        return NextResponse.json({ error: deactErr.message }, { status: 500 });
+      }
+
+      invalidateServerHierarchyUnitsCache(churchId);
+      return NextResponse.json({
+        success: true,
+        message: `Unidade "${unit.nome}" desativada com sucesso.`,
+      });
+    }
+  } catch (err: any) {
+    console.error('Erro na rota DELETE /api/hierarchy/units:', err);
+    return NextResponse.json(
+      { error: err?.message || 'Erro interno ao excluir unidade.' },
       { status: 500 }
     );
   }

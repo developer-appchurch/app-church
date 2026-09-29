@@ -399,7 +399,7 @@ export async function POST(req: NextRequest) {
     // =========================================================================
     // 5. MONTA PERFIL COMPLETO DO USUÁRIO PARA O APLICATIVO EM PARALELO
     // =========================================================================
-    const resolvedUnitId = member.unidade_id || member.celula_id;
+    const resolvedUnitId = member.unidade_id;
 
     const [churchRes, unitRes] = await Promise.all([
       member.igreja_id
@@ -436,7 +436,7 @@ export async function POST(req: NextRequest) {
       role: member.funcao || 'Membro',
       roleId: member.papel_id || 'b2000000-0000-0000-0000-000000000003',
       sector,
-      currentCellId: member.unidade_id || member.celula_id || '',
+      currentCellId: member.unidade_id || '',
       email: member.email || `${canonicalLogin}@appchurch.local`,
       phone: member.telefone || '',
       avatarUrl:

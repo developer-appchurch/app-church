@@ -173,7 +173,7 @@ export async function GET(req: NextRequest) {
       : null;
 
     const members: MemberListItem[] = pagedRows.map((m: any) => {
-      const effectiveUnitId = m.unidade_id || m.celula_id || null;
+      const effectiveUnitId = m.unidade_id || null;
       const isUnlinked = !effectiveUnitId;
       const cellName = effectiveUnitId ? unitMap.get(effectiveUnitId) || 'Célula Vinculada' : 'Sem Célula (Geral)';
 
@@ -356,21 +356,10 @@ export async function PATCH(req: NextRequest) {
       if (unitCheck) {
         targetCellName = unitCheck.nome;
       } else {
-        const { data: cellCheck } = await supabase
-          .from('cells')
-          .select('id, nome')
-          .eq('id', validCellId)
-          .eq('igreja_id', churchId)
-          .maybeSingle();
-
-        if (cellCheck) {
-          targetCellName = cellCheck.nome;
-        } else {
-          return NextResponse.json(
-            { error: 'Célula selecionada não foi encontrada ou não pertence a esta igreja.' },
-            { status: 400 }
-          );
-        }
+        return NextResponse.json(
+          { error: 'Célula selecionada não foi encontrada ou não pertence a esta igreja.' },
+          { status: 400 }
+        );
       }
     }
 

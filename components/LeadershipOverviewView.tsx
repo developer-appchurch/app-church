@@ -559,20 +559,11 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                 <LeadershipBadgeIcon className="w-7 h-7 sm:w-8 sm:h-8 text-sky-300" size={28} />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full">
-                    Discipulado & Formação
-                  </span>
-                  <span className="text-xs text-slate-400">•</span>
-                  <span className="text-xs font-semibold text-slate-600 truncate">
-                    {currentUser?.churchName || 'Igreja Local'}
-                  </span>
-                </div>
                 <h2 className="text-lg sm:text-xl font-extrabold text-[#052447] mt-0.5 truncate">
-                  Trilho de Liderança • {currentCellName}
+                  Trilho de Liderança
                 </h2>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-                  Acompanhe a maturidade espiritual e etapas de cada discípulo conforme o nível hierárquico.
+                  Acompanhe a trajetória do membro na igreja.
                 </p>
               </div>
             </div>
@@ -730,12 +721,12 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
         <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200/90 shadow-2xs mb-4 space-y-3">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             {/* 2 Dropdowns solicitados pelo usuário */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 flex-1">
+            <div className="grid grid-cols-2 gap-2 sm:gap-2.5 flex-1">
               {/* Dropdown 1: Etapa do Trilho */}
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-                <Award size={15} className="text-sky-800 shrink-0" />
+              <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2 sm:px-3 py-1.5 sm:py-2">
+                <Award size={14} className="text-sky-800 shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  <label className="block text-[8px] sm:text-[9px] font-bold uppercase tracking-wider text-slate-400 truncate">
                     Etapa do Trilho
                   </label>
                   <select
@@ -746,9 +737,9 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                       setBatchSuccessMessage(null);
                       setBatchErrorMessage(null);
                     }}
-                    className="w-full text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer truncate"
+                    className="w-full text-[11px] sm:text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer truncate"
                   >
-                    <option value="all">Todas as Etapas do Trilho</option>
+                    <option value="all">Todas as Etapas</option>
                     {stages.map((st, idx) => (
                       <option key={st.id} value={String(st.id)}>
                         Etapa {st.stepNumber || idx + 1}: {st.title}
@@ -759,16 +750,16 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
               </div>
 
               {/* Dropdown 2: Status (Concluído ou Pendente) */}
-              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+              <div className="flex items-center gap-1.5 sm:gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2 sm:px-3 py-1.5 sm:py-2">
                 {selectedStatusFilter === 'completed' ? (
-                  <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                  <CheckCircle2 size={14} className="text-emerald-600 shrink-0" />
                 ) : selectedStatusFilter === 'pending' ? (
-                  <Clock size={15} className="text-amber-600 shrink-0" />
+                  <Clock size={14} className="text-amber-600 shrink-0" />
                 ) : (
-                  <Filter size={15} className="text-slate-500 shrink-0" />
+                  <Filter size={14} className="text-slate-500 shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
-                  <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  <label className="block text-[8px] sm:text-[9px] font-bold uppercase tracking-wider text-slate-400 truncate">
                     Status da Etapa
                   </label>
                   <select
@@ -779,9 +770,9 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                       setBatchSuccessMessage(null);
                       setBatchErrorMessage(null);
                     }}
-                    className="w-full text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer truncate"
+                    className="w-full text-[11px] sm:text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer truncate"
                   >
-                    <option value="all">Todos os Status (Concluídos e Pendentes)</option>
+                    <option value="all">Todos os Status</option>
                     <option value="completed">Concluído</option>
                     <option value="pending">Pendente</option>
                   </select>
@@ -806,27 +797,27 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
           </div>
 
           {/* Barra de Resumo de Contagens dos Filtros */}
-          <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-slate-500 font-medium">Exibindo:</span>
-              <span className="font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded-md">
+          <div className="pt-1.5 sm:pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5 sm:gap-2 text-[10px] sm:text-xs">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              <span className="hidden sm:inline text-slate-500 font-medium">Exibindo:</span>
+              <span className="font-bold text-slate-800 bg-slate-100 px-1.5 sm:px-2 py-0.5 rounded-md whitespace-nowrap">
                 {filteredMembers.length}{' '}
-                {filteredMembers.length === 1 ? 'discípulo' : 'discípulos'}
+                {filteredMembers.length === 1 ? 'membro' : 'membros'}
               </span>
               {selectedStageObject && (
-                <span className="text-[11px] font-bold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md truncate max-w-[200px]">
+                <span className="hidden md:inline-block text-[11px] font-bold text-sky-800 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md truncate max-w-[180px]">
                   {selectedStageObject.title}
                 </span>
               )}
             </div>
 
-            <div className="flex items-center gap-2 text-[11px] font-bold">
-              <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
-                <CheckCircle2 size={12} />
+            <div className="flex items-center gap-1 sm:gap-2 text-[10px] sm:text-[11px] font-bold shrink-0">
+              <span className="inline-flex items-center gap-1 text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 sm:px-2 py-0.5 rounded-md whitespace-nowrap">
+                <CheckCircle2 size={11} className="sm:w-3 sm:h-3" />
                 <span>{statsCounts.completed} Concluídos</span>
               </span>
-              <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
-                <Clock size={12} />
+              <span className="inline-flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-1.5 sm:px-2 py-0.5 rounded-md whitespace-nowrap">
+                <Clock size={11} className="sm:w-3 sm:h-3" />
                 <span>{statsCounts.pending} Pendentes</span>
               </span>
             </div>
@@ -1035,7 +1026,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                 >
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 sm:gap-3">
                     {/* Discípulo & Identificação */}
-                    <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                    <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
                       {/* Checkbox para seleção em lote */}
                       {isBatchModeActive && (
                         <button
@@ -1080,29 +1071,53 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                         />
                       </div>
 
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
                           <h4 className="text-sm font-extrabold text-[#052447] group-hover:text-sky-800 transition truncate">
                             {member.name}
                           </h4>
-                          <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md shrink-0">
-                            {member.role || 'Membro'}
-                          </span>
+
+                          {/* Botão de abrir trilho apenas com o ícone no mobile, alinhado à direita ao lado do nome */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenMemberTrack(member);
+                            }}
+                            className="md:hidden p-1 rounded-lg text-[#0e3056] hover:bg-sky-50 hover:text-sky-700 active:scale-95 transition-all cursor-pointer shrink-0 ml-auto"
+                            title={`Ver Trilho de Liderança de ${member.name}`}
+                            aria-label={`Trilho de liderança de ${member.name}`}
+                          >
+                            <LeadershipBadgeIcon
+                              className="w-6 h-6 text-[#0e3056] group-hover:scale-105 transition-transform"
+                              size={24}
+                            />
+                          </button>
                         </div>
 
-                        <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5 flex-wrap">
-                          {memberCell && (
-                            <span className="font-semibold text-slate-700">
-                              Célula {memberCell.name}
-                            </span>
-                          )}
-                          {member.phone && <span>• {member.phone}</span>}
-                        </div>
+                        {/* Percentual concluído abaixo do nome do membro (somente mobile, sem negrito) */}
+                        {selectedStageFilter === 'all' && (
+                          <p className="text-xs text-slate-500 font-normal mt-0.5 md:hidden">
+                            {progressPercentage}% concluído
+                          </p>
+                        )}
+
+                        {member.phone && (
+                          <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5 flex-wrap">
+                            <span>{member.phone}</span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
                     {/* Status da Etapa Selecionada ou Progresso Geral */}
-                    <div className="flex items-center justify-between md:justify-end gap-3 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
+                    <div
+                      className={`items-center justify-between md:justify-end gap-3 ${
+                        selectedStageFilter !== 'all'
+                          ? 'flex pt-2 md:pt-0 border-t md:border-t-0 border-slate-100'
+                          : 'hidden md:flex'
+                      }`}
+                    >
                       {selectedStageFilter !== 'all' ? (
                         <div className="flex items-center gap-2">
                           {isDoneForSelectedStage ? (
@@ -1128,9 +1143,6 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                             <span className="text-xs font-extrabold text-[#052447] block">
                               {progressPercentage}% concluído
                             </span>
-                            <span className="text-[10px] text-slate-500">
-                              {completedCount} de {totalStages} etapas
-                            </span>
                           </div>
                           {/* Barra de Progresso Compacta */}
                           <div className="w-16 sm:w-24 h-2 rounded-full bg-slate-100 overflow-hidden border border-slate-200/60">
@@ -1142,14 +1154,14 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                         </div>
                       )}
 
-                      {/* Botão de Ação para Abrir o Trilho */}
+                      {/* Botão de Ação para Abrir o Trilho (Desktop) */}
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
                           onOpenMemberTrack(member);
                         }}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-sky-50 group-hover:bg-[#052447] text-sky-800 group-hover:text-white border border-sky-200 group-hover:border-[#052447] text-xs font-bold transition shadow-2xs cursor-pointer shrink-0"
+                        className="hidden md:inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-sky-50 group-hover:bg-[#052447] text-sky-800 group-hover:text-white border border-sky-200 group-hover:border-[#052447] text-xs font-bold transition shadow-2xs cursor-pointer shrink-0"
                       >
                         <span>Abrir Trilho</span>
                         <ChevronRight size={13} />

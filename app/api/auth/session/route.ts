@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Busca membro vinculado com fallback multi-critério (id do app_metadata, auth_user_id, login, email)
-    const MEMBER_SESSION_COLUMNS = 'id, igreja_id, nome, login, funcao, papel_id, unidade_id, celula_id, email, telefone, url_avatar, auth_user_id';
+    const MEMBER_SESSION_COLUMNS = 'id, igreja_id, nome, login, funcao, papel_id, unidade_id, email, telefone, url_avatar, auth_user_id';
     const membroIdFromMeta = authUser.app_metadata?.membro_id;
     let memberRows: any[] | null = null;
 
@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
     }
 
     let sector = 'Setor Geral';
-    const resolvedUnitId = member.unidade_id || member.celula_id;
+    const resolvedUnitId = member.unidade_id;
     if (resolvedUnitId) {
       const { data: unitData } = await supabaseAdmin
         .from('unidades')
@@ -151,7 +151,7 @@ export async function GET(req: NextRequest) {
       role: member.funcao || 'Membro',
       roleId: member.papel_id || 'b2000000-0000-0000-0000-000000000003',
       sector,
-      currentCellId: member.unidade_id || member.celula_id || '',
+      currentCellId: member.unidade_id || '',
       email: member.email || `${member.login || 'membro'}@appchurch.local`,
       phone: member.telefone || '',
       avatarUrl:

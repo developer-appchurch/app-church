@@ -3,7 +3,10 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { CelulaCardItem } from '@/types';
 
 /**
- * Rota de listagem de Células da Igreja com busca multi-campo, paginação e isolamento estrito por igreja
+ * Rota de listagem de Células da Igreja utilizando 'public.unidades' como fonte única de verdade.
+ * Identifica células pelo nivel_tipo_id correspondente ao nível "Célula".
+ * A quantidade de membros é obtida diretamente de 'unidades.quantidade_membros' (mantida pelo trigger PostgreSQL).
+ * 
  * GET /api/celulas?churchId=...&search=...&diaSemana=...&page=1&pageSize=12
  */
 export async function GET(req: NextRequest) {
@@ -27,14 +30,75 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 1. Busca todas as unidades ativas da igreja
+    // 1. Identifica o(s) ID(s) do nível hierárquico 'Célula' em 'nivel_tipo' para a congregação
+    let cellLevelIds: string[] = [];
+    let nivelQuery = supabase
+      .from('nivel_tipo')
+      .select('id, nome, ordem')
+      .order('ordem', { ascending: false });
+
+    if (churchId !== 'all' && churchId !== 'church-master') {
+      nivelQuery = nivelQuery.eq('igreja_id', churchId);
+    }
+
+    const { data: niveis, error: nivelErr } = await nivelQuery;
+    if (nivelErr) {
+      console.warn('[API /api/celulas] Erro ao consultar nivel_tipo:', nivelErr.message);
+    }
+
+    if (niveis && niveis.length > 0) {
+      const matchedLevels = niveis.filter((n: any) => {
+        const nomeNorm = (n.nome || '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .trim();
+        return nomeNorm === 'celula' || nomeNorm.includes('celula') || n.ordem === 40;
+      });
+
+      if (matchedLevels.length > 0) {
+        cellLevelIds = matchedLevels.map((n: any) => n.id);
+      } else {
+        // Fallback: se nenhum nome tiver 'celula', o nível de maior ordem (folha) é a célula
+        cellLevelIds = [niveis[0].id];
+      }
+    }
+
+    // 2. Consulta diretamente 'public.unidades' como fonte única de verdade
+    // Filtrando por igreja_id + nivel_tipo_id + ativo = true
     let unitsQuery = supabase
       .from('unidades')
-      .select('id, igreja_id, nome, pai_id, ativo, dia_semana, dia_reuniao, horario, horario_reuniao, endereco, bairro, foto_url, quantidade_membros')
+      .select(`
+        id,
+        igreja_id,
+        nome,
+        pai_id,
+        unidade_criadora_id,
+        ativo,
+        dia_semana,
+        dia_reuniao,
+        horario,
+        horario_reuniao,
+        endereco,
+        bairro,
+        cep,
+        cidade,
+        estado,
+        latitude,
+        longitude,
+        foto_url,
+        quantidade_membros
+      `)
       .eq('ativo', true);
 
     if (churchId !== 'all' && churchId !== 'church-master') {
       unitsQuery = unitsQuery.eq('igreja_id', churchId);
+    }
+
+    if (cellLevelIds.length === 1) {
+      unitsQuery = unitsQuery.eq('nivel_tipo_id', cellLevelIds[0]);
+    } else if (cellLevelIds.length > 1) {
+      unitsQuery = unitsQuery.in('nivel_tipo_id', cellLevelIds);
     }
 
     const { data: rawUnits, error: unitsError } = await unitsQuery;
@@ -56,49 +120,59 @@ export async function GET(req: NextRequest) {
 
     const unitIds = rawUnits.map((u) => u.id);
 
-    // 2. Opcional: Busca detalhes complementares em 'celulas' (para fallback durante migração suave)
-    // Tabela celulas contém estritamente: unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros
-    const celulaDetailMap = new Map<string, any>();
-    try {
-      const { data: celulasRows } = await supabase
-        .from('celulas')
-        .select('unidade_id, bairro, endereco, dia_semana, horario, quantidade_membros')
-        .in('unidade_id', unitIds);
+    // 3. Resolução hierárquica em lote: busca pais (Setores) e avós (Áreas) em 'unidades'
+    const parentIds = [...new Set(rawUnits.map((u: any) => u.pai_id).filter(Boolean))];
+    const parentMap = new Map<string, { id: string; nome: string; pai_id?: string | null }>();
 
-      (celulasRows || []).forEach((c: any) => {
-        celulaDetailMap.set(c.unidade_id, c);
-      });
-    } catch {
-      // Tabela 'celulas' é opcional; dados primários estão em 'unidades'
+    if (parentIds.length > 0) {
+      const { data: parentUnits } = await supabase
+        .from('unidades')
+        .select('id, nome, pai_id')
+        .in('id', parentIds);
+
+      (parentUnits || []).forEach((p: any) => parentMap.set(p.id, p));
+
+      // Busca avós (Áreas) se os pais possuírem pai_id
+      const grandParentIds = [
+        ...new Set(
+          (parentUnits || [])
+            .map((p: any) => p.pai_id)
+            .filter((id: string | null) => id && !parentMap.has(id))
+        ),
+      ];
+
+      if (grandParentIds.length > 0) {
+        const { data: grandParents } = await supabase
+          .from('unidades')
+          .select('id, nome, pai_id')
+          .in('id', grandParentIds);
+
+        (grandParents || []).forEach((gp: any) => parentMap.set(gp.id, gp));
+      }
     }
 
-    // 3. Mapeia unidades pai (setores / áreas)
-    const parentNameMap = new Map<string, string>();
-    const parentIdMap = new Map<string, string>();
-    rawUnits.forEach((u: any) => {
-      parentNameMap.set(u.id, u.nome);
-      if (u.pai_id) parentIdMap.set(u.id, u.pai_id);
-    });
-
-    // 4. Busca líderes atribuídos em unidade_lideres
+    // 4. Busca líderes atribuídos em 'unidade_lideres' em lote (evitando N+1)
     const { data: leadersData } = await supabase
       .from('unidade_lideres')
       .select('unidade_id, pessoa_id, papel')
       .in('unidade_id', unitIds)
       .eq('ativo', true);
 
-    const leaderPessoaIds = (leadersData || []).map((l: any) => l.pessoa_id);
+    const leaderPessoaIds = [...new Set((leadersData || []).map((l: any) => l.pessoa_id).filter(Boolean))];
     const leaderMemberMap = new Map<string, string>();
+
     if (leaderPessoaIds.length > 0) {
       const { data: leaderMembers } = await supabase
         .from('membros')
         .select('id, nome')
         .in('id', leaderPessoaIds);
+
       (leaderMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m.nome));
     }
 
     const leadersByUnit = new Map<string, string[]>();
     const leaderNamesByUnit = new Map<string, string[]>();
+
     (leadersData || []).forEach((l: any) => {
       if (l.unidade_id && l.pessoa_id) {
         const idList = leadersByUnit.get(l.unidade_id) || [];
@@ -114,43 +188,26 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    // 5. Identifica unidades que são de fato células (possuem entrada em celulas ou não são nós pais)
-    const parentIdsSet = new Set(rawUnits.map((u: any) => u.pai_id).filter(Boolean));
-    let cellUnits = rawUnits.filter((u: any) => celulaDetailMap.has(u.id) || !parentIdsSet.has(u.id));
-    if (cellUnits.length === 0) cellUnits = rawUnits;
+    // 5. Monta a lista completa de células utilizando unicamente os campos de 'unidades'
+    const allCelulas: CelulaCardItem[] = rawUnits.map((u: any) => {
+      const parentUnit = u.pai_id ? parentMap.get(u.pai_id) : undefined;
+      const sectorName = parentUnit?.nome || 'Setor Geral';
+      const grandParentUnit = parentUnit?.pai_id ? parentMap.get(parentUnit.pai_id) : undefined;
+      const areaName = grandParentUnit?.nome || undefined;
 
-    // 6. Monta a lista completa de células com quantidade_membros diretamente da coluna pré-calculada
-    const allCelulas: CelulaCardItem[] = cellUnits.map((u: any) => {
-      const detail = celulaDetailMap.get(u.id);
-      const parentName = u.pai_id ? parentNameMap.get(u.pai_id) : 'Setor Geral';
-      const grandparentId = u.pai_id ? parentIdMap.get(u.pai_id) : null;
-      const areaName = grandparentId ? parentNameMap.get(grandparentId) : undefined;
       const leaderNames = leaderNamesByUnit.get(u.id) || [];
       const leaderIds = leadersByUnit.get(u.id) || [];
 
-      // Mapeia prioritariamente as colunas de 'unidades' e fallback suave para 'celulas'
-      const realDiaSemana =
-        u?.dia_semana ||
-        u?.dia_reuniao ||
-        detail?.dia_semana ||
-        detail?.dia_reuniao ||
-        '';
+      const realDiaSemana = u.dia_semana || u.dia_reuniao || '';
+      const realHorario = u.horario || u.horario_reuniao || '';
+      const realBairro = u.bairro || 'Bairro Central';
+      const realEndereco = u.endereco || 'Endereço da Célula';
+      const realFotoUrl = u.foto_url || undefined;
 
-      const realHorario =
-        u?.horario ||
-        u?.horario_reuniao ||
-        detail?.horario ||
-        detail?.horario_reuniao ||
-        '';
-
-      const realBairro = u?.bairro || detail?.bairro || 'Bairro Central';
-      const realEndereco = u?.endereco || detail?.endereco || 'Endereço da Célula';
-      const realFotoUrl = u?.foto_url || detail?.foto_url || undefined;
-      
-      // Quantidade de membros lida diretamente da coluna pré-calculada de unidades
-      const finalMemberCount = typeof u?.quantidade_membros === 'number' 
-        ? u.quantidade_membros 
-        : (detail?.quantidade_membros ?? 0);
+      // Quantidade de membros lida diretamente de unidades.quantidade_membros (trigger mantido)
+      const finalMemberCount = typeof u.quantidade_membros === 'number'
+        ? u.quantidade_membros
+        : (Number(u.quantidade_membros) || 0);
 
       return {
         id: u.id,
@@ -166,12 +223,12 @@ export async function GET(req: NextRequest) {
         quantidade_membros: finalMemberCount,
         leaderNames,
         leaderMemberIds: leaderIds,
-        sectorName: parentName,
+        sectorName,
         areaName,
       };
     });
 
-    // 7. Aplicação de filtros combinados: nome, bairro e dia_semana (case-insensitive & sem acento)
+    // 6. Aplicação de filtros combinados: dia_semana e busca textual (case-insensitive & sem acento)
     const normalizeText = (t: string) =>
       t
         .toLowerCase()

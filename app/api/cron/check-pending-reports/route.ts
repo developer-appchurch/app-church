@@ -124,24 +124,11 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
     }
 
     if (units && units.length > 0) {
-      const unitIds = units.map((u: any) => u.id);
-      let celulaMap = new Map<string, any>();
-      try {
-        const { data: celulasData } = await supabase
-          .from('celulas')
-          .select('unidade_id, dia_semana, dia_reuniao')
-          .in('unidade_id', unitIds);
-
-        (celulasData || []).forEach((c: any) => celulaMap.set(c.unidade_id, c));
-      } catch {
-        // Tabela celulas é opcional
-      }
-
       rawCells = units.map((u: any) => ({
         id: u.id,
         nome: u.nome,
         igreja_id: u.igreja_id,
-        dia_reuniao: u.dia_semana || u.dia_reuniao || celulaMap.get(u.id)?.dia_semana || celulaMap.get(u.id)?.dia_reuniao || 'Terça-feira',
+        dia_reuniao: u.dia_semana || u.dia_reuniao || 'Terça-feira',
       }));
     } else {
       // Tenta tabela unidades_organizacionais se unidades não existir

@@ -1424,19 +1424,6 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 <option value="black">Ausente</option>
               </select>
             </div>
-
-            {/* Contador de Membros da Célula integrado ao bloco de filtros */}
-            <div
-              id="cell-members-count-badge"
-              className="bg-white border border-slate-200 rounded-xl px-2.5 sm:px-3 py-2 text-xs font-bold text-[#04213d] flex items-center gap-1 sm:gap-1.5 shrink-0 shadow-2xs whitespace-nowrap"
-              title="Quantidade total de membros nesta célula"
-            >
-              <Users size={14} className="text-slate-500 sm:hidden shrink-0" />
-              <span className="text-slate-500 font-medium hidden sm:inline">Membros:</span>
-              <span className="bg-[#052447] text-white text-[11px] px-1.5 sm:px-2 py-0.5 rounded-full font-bold">
-                {stats.total}
-              </span>
-            </div>
           </div>
         </div>
       </div>

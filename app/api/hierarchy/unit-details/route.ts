@@ -79,14 +79,12 @@ export async function GET(req: NextRequest) {
     const [
       levelRes,
       parentRes,
-      celulaRes,
       leadersRes,
       membersRes,
       coverageRes,
     ] = await Promise.all([
       supabase.from('nivel_tipo').select('nome, ordem').eq('id', unit.nivel_tipo_id).maybeSingle(),
       unit.pai_id ? supabase.from('unidades').select('nome').eq('id', unit.pai_id).maybeSingle() : Promise.resolve({ data: null }),
-      supabase.from('celulas').select('*').eq('unidade_id', unitId).maybeSingle(),
       supabase
         .from('unidade_lideres')
         .select('pessoa_id, papel, ativo')
@@ -146,7 +144,6 @@ export async function GET(req: NextRequest) {
       }));
     }
 
-    const celData = celulaRes?.data;
     const membersList = (membersRes.data || []).map((m: any) => ({
       id: m.id,
       name: m.nome,
@@ -169,12 +166,12 @@ export async function GET(req: NextRequest) {
       parentId: unit.pai_id,
       parentName: parentRes.data?.nome,
       isActive: unit.ativo !== false,
-      meetingDay: unit.dia_semana || unit.dia_reuniao || celData?.dia_semana || celData?.dia_reuniao,
-      meetingTime: unit.horario || unit.horario_reuniao || celData?.horario || celData?.horario_reuniao,
-      neighborhood: unit.bairro || celData?.bairro,
-      address: unit.endereco || celData?.endereco,
-      latitude: (unit.latitude || celData?.latitude) ? Number(unit.latitude || celData?.latitude) : undefined,
-      longitude: (unit.longitude || celData?.longitude) ? Number(unit.longitude || celData?.longitude) : undefined,
+      meetingDay: unit.dia_semana || unit.dia_reuniao,
+      meetingTime: unit.horario || unit.horario_reuniao,
+      neighborhood: unit.bairro,
+      address: unit.endereco,
+      latitude: unit.latitude ? Number(unit.latitude) : undefined,
+      longitude: unit.longitude ? Number(unit.longitude) : undefined,
       memberCount: finalMemberCount,
       leaders: leaderDetails,
       members: membersList,

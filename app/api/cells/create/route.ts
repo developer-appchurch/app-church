@@ -139,28 +139,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Sincronização secundária em 'celulas' (para compatibilidade retroativa)
-    try {
-      await supabase.from('celulas').upsert(
-        [
-          {
-            unidade_id: unitId,
-            bairro: body.neighborhood?.trim() || 'Centro',
-            endereco: formattedAddress,
-            dia_semana: meetingDay,
-            horario: meetingTime,
-            quantidade_membros: initialMembersCount,
-            criado_em: new Date().toISOString(),
-            atualizado_em: new Date().toISOString(),
-          },
-        ],
-        { onConflict: 'unidade_id' }
-      );
-    } catch (cErr) {
-      console.warn('Aviso ao registrar em celulas:', cErr);
-    }
-
-    // 4. Se houver líder especificado, vincula à célula em unidade_lideres e atualiza membro
+    // 3. Se houver líder especificado, vincula à célula em unidade_lideres e atualiza membro
     if (body.leaderMemberId) {
       await Promise.all([
         supabase

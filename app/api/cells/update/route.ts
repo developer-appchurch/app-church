@@ -26,6 +26,9 @@ export async function POST(req: NextRequest) {
       fotoUrl,
       parentUnitId,
       userMemberId,
+      ativo,
+      motherCellId,
+      unidade_criadora_id,
     } = body;
 
     if (!cellId || !churchId) {
@@ -171,6 +174,11 @@ export async function POST(req: NextRequest) {
     if (addressVal !== undefined) unitUpdatePayload.endereco = addressVal;
     if (fotoUrl !== undefined) unitUpdatePayload.foto_url = fotoUrl || null;
     if (parentUnitId !== undefined) unitUpdatePayload.pai_id = parentUnitId || null;
+    if (ativo !== undefined) unitUpdatePayload.ativo = Boolean(ativo);
+    const resolvedMother = motherCellId || unidade_criadora_id;
+    if (resolvedMother !== undefined) {
+      unitUpdatePayload.unidade_criadora_id = resolvedMother && resolvedMother.trim() !== '' ? resolvedMother.trim() : null;
+    }
 
     const { data: updatedUnit, error: updateErr } = await supabase
       .from('unidades')
@@ -187,31 +195,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Sincronização secundária em 'celulas' (para compatibilidade retroativa)
-    try {
-      const celulaPayload: any = {
-        dia_semana: meetingDayVal,
-        horario: meetingTimeVal,
-        atualizado_em: new Date().toISOString(),
-      };
-      if (neighborhoodVal !== undefined) celulaPayload.bairro = neighborhoodVal;
-      if (addressVal !== undefined) celulaPayload.endereco = addressVal;
-
-      await supabase
-        .from('celulas')
-        .upsert(
-          {
-            unidade_id: cellId,
-            ...celulaPayload,
-            quantidade_membros: updatedUnit.quantidade_membros || 0,
-          },
-          { onConflict: 'unidade_id' }
-        );
-    } catch (cErr) {
-      console.warn('[UpdateCell] Aviso sincronizando celulas:', cErr);
-    }
-
-    // 5. Busca líderes e nome do setor/pai para retorno rápido
+    // 4. Busca líderes e nome do setor/pai para retorno rápido
     let parentName = 'Setor Geral';
     if (updatedUnit.pai_id) {
       const { data: pData } = await supabase
@@ -289,6 +273,101 @@ export async function POST(req: NextRequest) {
     console.error('Erro na rota /api/cells/update:', error);
     return NextResponse.json(
       { error: error?.message || 'Erro interno ao atualizar dados da célula.' },
+      { status: 500 }
+    );
+  }
+}
+
+/**
+ * DELETE /api/cells/update
+ * Permite desativar (ativo = false) ou excluir com segurança uma célula de 'public.unidades'.
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const cellId = searchParams.get('cellId');
+    const churchId = searchParams.get('churchId');
+    const hardDelete = searchParams.get('hardDelete') === 'true';
+
+    if (!cellId || !churchId) {
+      return NextResponse.json(
+        { error: 'Parâmetros cellId e churchId são obrigatórios.' },
+        { status: 400 }
+      );
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+    }
+
+    // 1. Confirma existência e isolamento da célula em unidades
+    const { data: unit, error: checkErr } = await supabase
+      .from('unidades')
+      .select('id, nome, igreja_id')
+      .eq('id', cellId)
+      .eq('igreja_id', churchId)
+      .maybeSingle();
+
+    if (checkErr || !unit) {
+      return NextResponse.json({ error: 'Célula não encontrada nesta igreja.' }, { status: 404 });
+    }
+
+    if (hardDelete) {
+      // Desvincula membros antes da exclusão física
+      await supabase
+        .from('membros')
+        .update({ unidade_id: null, observacoes: 'Membro desvinculado por exclusão da célula' })
+        .eq('unidade_id', cellId)
+        .eq('igreja_id', churchId);
+
+      // Remove líderes associados da célula
+      await supabase
+        .from('unidade_lideres')
+        .delete()
+        .eq('unidade_id', cellId);
+
+      // Exclui a unidade
+      const { error: delErr } = await supabase
+        .from('unidades')
+        .delete()
+        .eq('id', cellId)
+        .eq('igreja_id', churchId);
+
+      if (delErr) {
+        console.error('[DeleteCell] Falha ao deletar de unidades:', delErr);
+        return NextResponse.json({ error: delErr.message }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Célula "${unit.nome}" excluída com sucesso.`,
+      });
+    } else {
+      // Soft-delete / Desativação padrão
+      const { error: deactErr } = await supabase
+        .from('unidades')
+        .update({
+          ativo: false,
+          atualizado_em: new Date().toISOString(),
+        })
+        .eq('id', cellId)
+        .eq('igreja_id', churchId);
+
+      if (deactErr) {
+        console.error('[DeleteCell] Falha ao desativar unidade:', deactErr);
+        return NextResponse.json({ error: deactErr.message }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: `Célula "${unit.nome}" desativada com sucesso.`,
+      });
+    }
+  } catch (error: any) {
+    console.error('Erro na rota DELETE /api/cells/update:', error);
+    return NextResponse.json(
+      { error: error?.message || 'Erro interno ao excluir célula.' },
       { status: 500 }
     );
   }

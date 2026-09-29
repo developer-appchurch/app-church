@@ -368,36 +368,20 @@ export async function POST(req: NextRequest) {
     if (pastorErr && pastorErr.message?.includes('not-null') && pastorErr.message?.includes('celula_id')) {
       console.warn('Auto-recuperação: celula_id possui NOT NULL no banco. Criando célula inicial de transição...');
       try {
-        const seedCellId = generateUUID();
         const seedUnitId = generateUUID();
 
-        // 1. Cria a célula na tabela cells
-        await supabase.from('cells').insert([
-          {
-            id: seedCellId,
-            church_id: churchId,
-            name: 'Célula Betel',
-            leader_name: input.pastorName.trim(),
-            sector_name: 'Setor Geral',
-            address: `${input.city.trim()} - Centro`,
-            meeting_day: 'Quarta-feira',
-            meeting_time: '19:30',
-          },
-        ]);
-
-        // 2. Cria a unidade hierárquica correspondente
+        // 1. Cria a unidade hierárquica correspondente na tabela unidades
         const { data: tipoNivel } = await supabase
-          .from('niveis_hierarquicos')
+          .from('nivel_tipo')
           .select('id')
           .eq('igreja_id', churchId)
-          .eq('nome', 'Célula')
+          .ilike('nome', 'Célula')
           .maybeSingle();
 
         await supabase.from('unidades').insert([
           {
             id: seedUnitId,
             igreja_id: churchId,
-            tipo_unidade_id: tipoNivel?.id || null,
             nivel_tipo_id: tipoNivel?.id || null,
             nome: 'Célula Betel',
             bairro: 'Centro',
@@ -411,31 +395,12 @@ export async function POST(req: NextRequest) {
           },
         ]);
 
-        // 3. Opcional: Cria a celula vinculada se a tabela celulas existir
-        try {
-          await supabase.from('celulas').insert([
-            {
-              id: seedCellId,
-              unidade_id: seedUnitId,
-              dia_semana: 'Quarta-feira',
-              dia_reuniao: 'Quarta-feira',
-              horario: '19:30',
-              horario_reuniao: '19:30',
-              endereco: `${input.city.trim()} - Centro`,
-              bairro: 'Centro',
-              quantidade_membros: 1,
-            },
-          ]);
-        } catch {
-          // Tabela celulas é opcional
-        }
-
-        // 4. Atribui a unidade_id / celula_id ao pastor e tenta novamente
+        // 2. Atribui a unidade_id ao pastor e tenta novamente
         pastorMemberPt.unidade_id = seedUnitId;
         pastorProfile.currentCellId = seedUnitId;
         const retryPastor = await supabase.from('membros').insert([pastorMemberPt]);
         if (retryPastor.error) {
-          const legPayload: any = { ...pastorMemberPt, celula_id: seedCellId, funcao_id: resolvedRoleId };
+          const legPayload: any = { ...pastorMemberPt, celula_id: seedUnitId, funcao_id: resolvedRoleId };
           delete legPayload.unidade_id;
           delete legPayload.papel_id;
           const retryLeg = await supabase.from('members').insert([legPayload]);

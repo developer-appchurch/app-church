@@ -14,7 +14,6 @@
     "@supabase/supabase-js": "^2.116.0",
     "@tanstack/react-query": "^5.103.2",
     "@tanstack/react-virtual": "^3.14.13",
-    "@types/bcryptjs": "^3.0.0",
     "@vercel/speed-insights": "^2.0.0",
     "autoprefixer": "^10.4.21",
     "bcryptjs": "^3.0.3",
@@ -31,12 +30,13 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.11",
+    "@types/bcryptjs": "^3.0.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
-    "eslint": "9.39.1",
-    "eslint-config-next": "16.0.8",
+    "eslint": "^9",
+    "eslint-config-next": "^15.4.9",
     "tailwindcss": "4.1.11",
     "typescript": "5.9.3"
   }
