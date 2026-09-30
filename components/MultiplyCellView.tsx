@@ -234,6 +234,7 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
   );
   const [isCreatingCell, setIsCreatingCell] = useState<boolean>(false);
   const [createCellError, setCreateCellError] = useState<string>('');
+  const [showHierarchyNotice, setShowHierarchyNotice] = useState<boolean>(false);
 
   // Atualiza o setor padrão ao alterar a célula de origem ou abrir o modal
   useEffect(() => {
@@ -641,7 +642,7 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
               </div>
             </div>
 
-            {/* Botão Criar nova célula compacto e padronizado */}
+            {/* Botão Criar Célula compacto e padronizado */}
             <button
               type="button"
               onClick={() => {
@@ -651,7 +652,7 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
               className="bg-[#052447] hover:bg-[#073366] active:scale-95 text-white text-xs font-bold rounded-xl py-2 px-3 flex items-center gap-1.5 transition cursor-pointer shadow-xs shrink-0 whitespace-nowrap"
             >
               <Plus size={14} strokeWidth={2.5} />
-              <span>Criar nova célula</span>
+              <span>Criar Célula</span>
             </button>
           </div>
 
@@ -712,8 +713,8 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
             </div>
 
             {/* Linha com Chip e Ação Enviar Todos */}
-            <div className="flex items-center justify-between gap-1 py-2 shrink-0">
-              <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-md whitespace-nowrap">
+            <div className="flex items-center justify-end sm:justify-between gap-1 py-2 shrink-0">
+              <span className="hidden sm:inline-block bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-0.5 rounded-md whitespace-nowrap">
                 {remainingMembers.length} continuam
               </span>
               {remainingMembers.length > 0 && (
@@ -771,15 +772,6 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
                 ))
               )}
             </div>
-
-            {/* Rodapé informativo */}
-            {remainingMembers.length > 4 && (
-              <div className="pt-1.5 border-t border-slate-100 text-center shrink-0">
-                <span className="text-[10px] font-semibold text-slate-400">
-                  + {remainingMembers.length} membros — role para ver
-                </span>
-              </div>
-            )}
           </div>
 
           {/* Quadro 3: Nova Célula (Destino) */}
@@ -815,12 +807,9 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
               </button>
             </div>
 
-            {/* Linha com Chip e Ação Devolver Todos */}
-            <div className="flex items-center justify-between gap-1 py-1.5 shrink-0">
-              <span className="bg-sky-50 text-sky-800 border border-sky-200 text-[10px] font-bold px-2 py-0.5 rounded-md whitespace-nowrap">
-                {transferredMembers.length} vão
-              </span>
-              {transferredMembers.length > 0 && (
+            {/* Linha com Ação Devolver Todos */}
+            {transferredMembers.length > 0 && (
+              <div className="flex items-center justify-end gap-1 py-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={handleReturnAll}
@@ -828,8 +817,8 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
                 >
                   ← Devolver todos
                 </button>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Lista de Membros Enviados */}
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-0.5 min-h-0">
@@ -872,15 +861,6 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
                 })
               )}
             </div>
-
-            {/* Rodapé informativo */}
-            {transferredMembers.length > 4 && (
-              <div className="pt-1.5 border-t border-slate-100 text-center shrink-0">
-                <span className="text-[10px] font-semibold text-slate-400">
-                  + {transferredMembers.length} membros na nova célula
-                </span>
-              </div>
-            )}
           </div>
         </div>
 
@@ -893,22 +873,39 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
                 4
               </span>
               <div className="min-w-0 flex-1">
-                <h3 className="text-xs sm:text-sm font-extrabold text-[#052447] leading-tight truncate">
-                  Definição dos Líderes das Células
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs sm:text-sm font-extrabold text-[#052447] leading-tight truncate">
+                    Definição dos Líderes das Células
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowHierarchyNotice((prev) => !prev)}
+                    className={`p-1 rounded-lg border transition cursor-pointer shrink-0 ${
+                      showHierarchyNotice
+                        ? 'bg-sky-100 border-sky-300 text-sky-800'
+                        : 'bg-slate-50 border-slate-200 text-slate-500 hover:text-sky-700 hover:bg-sky-50'
+                    }`}
+                    title="Observação sobre regra de hierarquia"
+                    aria-label="Observação sobre regra de hierarquia"
+                  >
+                    <ShieldCheck size={14} className="shrink-0" />
+                  </button>
+                </div>
                 <p className="text-[10px] sm:text-[11px] text-slate-500 leading-tight mt-0.5">
-                  O líder da célula permanece selecionado automaticamente onde estiver. Toque em qualquer membro para definir ou alterar os líderes.
+                  Toque em qualquer membro para definir ou alterar os líderes.
                 </p>
               </div>
             </div>
 
-            {/* Aviso sobre preservação hierárquica */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 sm:p-2.5 text-[10px] sm:text-[11px] text-slate-600 flex items-center gap-2">
-              <ShieldCheck size={16} className="text-sky-700 shrink-0" />
-              <span>
-                <strong>Regra de Hierarquia:</strong> Membros com cargos superiores (Pastor, Líder de Setor, etc.) mantêm sua função original mais alta ao serem vinculados.
-              </span>
-            </div>
+            {/* Aviso sobre preservação hierárquica (visível ao clicar no ícone) */}
+            {showHierarchyNotice && (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2 sm:p-2.5 text-[10px] sm:text-[11px] text-slate-600 flex items-center gap-2 animate-in fade-in duration-150">
+                <ShieldCheck size={16} className="text-sky-700 shrink-0" />
+                <span>
+                  <strong>Regra de Hierarquia:</strong> Membros com cargos superiores (Pastor, Líder de Setor, etc.) mantêm sua função original mais alta ao serem vinculados.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Bloco de 2 Colunas lado a lado */}

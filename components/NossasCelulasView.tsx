@@ -91,27 +91,24 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   const churchId = currentUser?.churchId || 'church-sobral';
   const displayChurchName = churchName || currentUser?.churchName || 'Nossa Igreja';
 
-  // 1. Unidades hierárquicas para verificação estrita de cobertura
-  const [units, setUnits] = useState<OrganizationalUnit[]>([]);
+  // 1. Unidades hierárquicas para verificação estrita de cobertura (compartilhado via React Query)
+  const { data: cachedUnits } = useQuery({
+    queryKey: ['churchUnits', churchId],
+    queryFn: () => AppChurchService.getUnits(churchId),
+    enabled: Boolean(churchId),
+    staleTime: 1000 * 60 * 15,
+  });
+  const units = cachedUnits || [];
 
-  useEffect(() => {
-    let isMounted = true;
-    async function loadUnits() {
-      if (!churchId) return;
-      try {
-        const fetched = await AppChurchService.getUnits(churchId);
-        if (isMounted && fetched && fetched.length > 0) {
-          setUnits(fetched);
-        }
-      } catch (err) {
-        console.warn('Aviso ao carregar unidades na visualização de células:', err);
-      }
+  // Se recebemos cells via props do App principal (já em memória e cacheadas), convertemos instantaneamente
+  const propCardCelulas = useMemo(() => {
+    if (cells && cells.length > 0) {
+      return cells.map(mapCellGroupToCardItem);
     }
-    loadUnits();
-    return () => {
-      isMounted = false;
-    };
-  }, [churchId]);
+    return undefined;
+  }, [cells]);
+
+  const hasPropData = Boolean(propCardCelulas && propCardCelulas.length > 0);
 
   // 2. React Query: Células da congregação em cache persistente de alta performance (15 min)
   const {
@@ -130,20 +127,26 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
       });
       return res.celulas;
     },
-    enabled: Boolean(churchId),
+    // Se já recebemos cells do app via prop, NÃO disparamos requisição redundante pela rede!
+    // Isso economiza 100% das chamadas/Log Queries no Supabase e abre a tela em 0ms
+    enabled: Boolean(churchId) && !hasPropData,
+    initialData: propCardCelulas || (initialCelulas && initialCelulas.length > 0 ? initialCelulas : undefined),
     staleTime: 1000 * 60 * 15,
   });
 
-  // Lista de células direta do React Query ou dados iniciais passados explicitamente
+  // Lista de células direta: prioriza prop instantânea / cache do React Query
   const allCelulas: CelulaCardItem[] = useMemo(() => {
-    if (queriedCelulas) {
+    if (propCardCelulas && propCardCelulas.length > 0) {
+      return propCardCelulas;
+    }
+    if (queriedCelulas && queriedCelulas.length > 0) {
       return queriedCelulas;
     }
     if (initialCelulas && initialCelulas.length > 0) {
       return initialCelulas;
     }
     return [];
-  }, [queriedCelulas, initialCelulas]);
+  }, [propCardCelulas, queriedCelulas, initialCelulas]);
 
   // 3. Estados de Filtros Rápidos (Em Memória / Instantâneo)
   const [searchTerm, setSearchTerm] = useState<string>('');

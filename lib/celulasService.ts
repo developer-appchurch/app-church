@@ -75,8 +75,6 @@ export async function getCelulasByIgreja(
     headers: {
       'Content-Type': 'application/json',
     },
-    // Permite revalidação sob demanda
-    cache: 'no-store',
   });
 
   if (!res.ok) {

@@ -1952,17 +1952,17 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   />
                 </div>
 
-                {/* Grid: Dia da Semana & Horário */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                      <Calendar size={13} className="text-sky-700" />
-                      <span>Dia da Reunião:</span>
+                {/* Grid: Dia da Semana & Horário (2 Colunas para otimizar espaço vertical) */}
+                <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
+                  <div className="min-w-0">
+                    <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1 flex items-center gap-1 truncate">
+                      <Calendar size={13} className="text-sky-700 shrink-0" />
+                      <span className="truncate">Dia da Reunião:</span>
                     </label>
                     <select
                       value={editMeetingDay}
                       onChange={(e) => setEditMeetingDay(e.target.value)}
-                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium bg-white cursor-pointer"
+                      className="w-full text-xs sm:text-sm p-2 sm:p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium bg-white cursor-pointer truncate"
                     >
                       <option value="Segunda-feira">Segunda-feira</option>
                       <option value="Terça-feira">Terça-feira</option>
@@ -1974,25 +1974,25 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                      <Clock size={13} className="text-sky-700" />
-                      <span>Horário da Reunião:</span>
+                  <div className="min-w-0">
+                    <label className="block text-[11px] sm:text-xs font-bold text-slate-700 mb-1 flex items-center gap-1 truncate">
+                      <Clock size={13} className="text-sky-700 shrink-0" />
+                      <span className="truncate">Horário da Reunião:</span>
                     </label>
                     <input
                       type="time"
                       required
                       value={editMeetingTime}
                       onChange={(e) => setEditMeetingTime(e.target.value)}
-                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium bg-white cursor-pointer"
+                      className="w-full text-xs sm:text-sm p-2 sm:p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium bg-white cursor-pointer"
                     />
                     <div className="flex items-center gap-1 mt-1.5 overflow-x-auto no-scrollbar">
-                      {['18:00', '19:00', '19:30', '20:00', '20:30'].map((preset) => (
+                      {['19:00', '19:30', '20:00'].map((preset) => (
                         <button
                           key={preset}
                           type="button"
                           onClick={() => setEditMeetingTime(preset)}
-                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-md transition cursor-pointer shrink-0 ${
+                          className={`text-[9.5px] sm:text-[10px] font-semibold px-1.5 sm:px-2 py-0.5 rounded-md transition cursor-pointer shrink-0 ${
                             editMeetingTime === preset
                               ? 'bg-[#052447] text-white font-bold'
                               : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
@@ -2066,19 +2066,34 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     </div>
 
                     <div className="flex-1 space-y-1">
-                      <button
-                        type="button"
-                        onClick={() => cellFileInputRef.current?.click()}
-                        disabled={isOptimizingCellPhoto}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 text-xs font-semibold rounded-xl transition cursor-pointer"
-                      >
-                        {isOptimizingCellPhoto ? (
-                          <Loader2 size={13} className="animate-spin text-sky-600" />
-                        ) : (
-                          <Upload size={13} />
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => cellFileInputRef.current?.click()}
+                          disabled={isOptimizingCellPhoto}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-900 border border-sky-200 text-xs font-semibold rounded-xl transition cursor-pointer"
+                        >
+                          {isOptimizingCellPhoto ? (
+                            <Loader2 size={13} className="animate-spin text-sky-600" />
+                          ) : (
+                            <Upload size={13} />
+                          )}
+                          <span>Carregar Foto</span>
+                        </button>
+                        {editFotoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditFotoUrl('');
+                              setCellPhotoStats(null);
+                            }}
+                            className="px-2 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-xl transition cursor-pointer font-medium"
+                            title="Remover foto"
+                          >
+                            Remover
+                          </button>
                         )}
-                        <span>Carregar Foto do Dispositivo</span>
-                      </button>
+                      </div>
                       <input
                         ref={cellFileInputRef}
                         type="file"
@@ -2086,9 +2101,6 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                         className="hidden"
                         onChange={handleCellPhotoSelected}
                       />
-                      <p className="text-[10px] text-slate-400">
-                        Convertida automaticamente para WebP leve.
-                      </p>
                     </div>
                   </div>
 
@@ -2104,17 +2116,6 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       {cellPhotoError}
                     </div>
                   )}
-
-                  {/* Input de URL alternativo */}
-                  <div>
-                    <input
-                      type="url"
-                      value={editFotoUrl}
-                      onChange={(e) => setEditFotoUrl(e.target.value)}
-                      placeholder="Ou informe o link da imagem (URL https://...)"
-                      className="w-full text-xs p-2 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800"
-                    />
-                  </div>
                 </div>
               </div>
 
