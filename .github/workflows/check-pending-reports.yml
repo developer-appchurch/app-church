@@ -1,0 +1,32 @@
+name: Verificar relatórios pendentes e enviar notificações
+
+# Horários em UTC. Fortaleza/Brasília = UTC-3 (sem horário de verão).
+# Para converter: hora_UTC = hora_Brasil + 3
+# Exemplo abaixo: segunda-feira às 08h00 (Brasil) = 11h00 UTC
+on:
+  schedule:
+    - cron: '0 11 * * 1'
+  # Permite disparar manualmente pela aba "Actions" do GitHub, sem esperar o horário
+  workflow_dispatch:
+
+jobs:
+  check-pending-reports:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar endpoint de verificação de relatórios pendentes
+        run: |
+          response=$(curl -s -o response.json -w "%{http_code}" -X POST \
+            "${{ secrets.APP_URL }}/api/cron/check-pending-reports" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json")
+
+          echo "HTTP status: $response"
+          echo "--- Resposta do servidor ---"
+          cat response.json
+
+          if [ "$response" -ge 400 ]; then
+            echo "❌ O endpoint retornou erro (status $response)."
+            exit 1
+          fi
+
+          echo "✅ Verificação concluída com sucesso."
