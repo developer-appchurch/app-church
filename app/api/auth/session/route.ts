@@ -122,6 +122,7 @@ export async function GET(req: NextRequest) {
     }
 
     let sector = 'Setor Geral';
+    let cellName = '';
     const resolvedUnitId = member.unidade_id;
     if (resolvedUnitId) {
       const { data: unitData } = await supabaseAdmin
@@ -130,6 +131,9 @@ export async function GET(req: NextRequest) {
         .eq('id', resolvedUnitId)
         .maybeSingle();
 
+      if (unitData?.nome) {
+        cellName = unitData.nome;
+      }
       if (unitData?.pai_id) {
         const { data: parentUnit } = await supabaseAdmin
           .from('unidades')
@@ -152,6 +156,8 @@ export async function GET(req: NextRequest) {
       roleId: member.papel_id || 'b2000000-0000-0000-0000-000000000003',
       sector,
       currentCellId: member.unidade_id || '',
+      cellId: member.unidade_id || '',
+      cellName: cellName || '',
       email: member.email || `${member.login || 'membro'}@appchurch.local`,
       phone: member.telefone || '',
       avatarUrl:

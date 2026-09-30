@@ -1,7 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseUrl } from './config';
 
+let cachedAdminClient: SupabaseClient | null = null;
+
 export function getSupabaseAdminClient(): SupabaseClient | null {
+  if (cachedAdminClient) return cachedAdminClient;
+
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   const url = getSupabaseUrl();
 
@@ -16,10 +20,12 @@ export function getSupabaseAdminClient(): SupabaseClient | null {
     return null;
   }
 
-  return createClient(url, serviceKey, {
+  cachedAdminClient = createClient(url, serviceKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
+
+  return cachedAdminClient;
 }

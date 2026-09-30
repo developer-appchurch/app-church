@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Inserir em 'unidades' com todos os atributos consolidados
-    // quantidade_membros inicia em 0 e é mantido pelo trigger caso um líder seja associado
+    // Toda pessoa vinculada (inclusive líder) faz parte da quantidade_membros
     const initialMembersCount = body.leaderMemberId ? 1 : 0;
     const motherCellId = body.unidade_criadora_id || body.motherCellId || null;
 
@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
       dia_reuniao: meetingDay,
       horario: meetingTime,
       horario_reuniao: meetingTime,
-      quantidade_membros: 0,
+      quantidade_membros: initialMembersCount,
       ativo: true,
       criado_em: new Date().toISOString(),
       atualizado_em: new Date().toISOString(),

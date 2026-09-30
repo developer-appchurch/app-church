@@ -187,11 +187,48 @@ export async function GET(req: NextRequest) {
         flatQuery = flatQuery.eq('nivel_tipo_id', levelTypeId);
       }
 
-      const unitsRes = await flatQuery;
+      let unitsRes = await flatQuery;
 
       if (unitsRes.error) {
-        console.error('Erro ao consultar unidades (flat):', unitsRes.error);
-        return NextResponse.json({ error: unitsRes.error.message }, { status: 500 });
+        if (unitsRes.error.code === '42P01' || unitsRes.error.message?.includes('does not exist')) {
+          console.warn(
+            `[Fallback DB] Tabela "unidades" (flat) não encontrada (código: ${unitsRes.error.code || '42P01'}). Acionando fallback para tabela "units". Mensagem: ${unitsRes.error.message}`
+          );
+          let fallbackQuery = supabase
+            .from('units')
+            .select(`
+              id,
+              pai_id,
+              nivel_tipo_id,
+              nome,
+              ativo,
+              igreja_id,
+              unidade_criadora_id,
+              quantidade_membros,
+              dia_semana,
+              dia_reuniao,
+              horario,
+              horario_reuniao,
+              bairro,
+              endereco,
+              foto_url
+            `)
+            .eq('igreja_id', churchId)
+            .eq('ativo', true)
+            .order('nome', { ascending: true });
+
+          if (levelTypeId) {
+            fallbackQuery = fallbackQuery.eq('nivel_tipo_id', levelTypeId);
+          }
+          const legRes = await fallbackQuery;
+          if (!legRes.error && legRes.data) {
+            unitsRes = legRes;
+          }
+        }
+        if (unitsRes.error) {
+          console.error('Erro ao consultar unidades (flat):', unitsRes.error);
+          return NextResponse.json({ error: unitsRes.error.message }, { status: 500 });
+        }
       }
 
       const rows = unitsRes.data || [];
@@ -232,22 +269,45 @@ export async function GET(req: NextRequest) {
             unitLeadersMap.set(l.unidade_id, list);
           });
         } else {
+          if (lErr) {
+            console.warn(
+              `[Fallback DB] Join com "membros" via FK em "unidade_lideres" falhou (código: ${lErr.code || 'N/A'}). Acionando fallback manual para tabela "membros". Mensagem: ${lErr.message}`
+            );
+          }
+
           // Fallback caso o foreign key nomeado difira no schema do usuário
-          const { data: fallbackLeaders } = await supabase
+          const { data: fallbackLeaders, error: rawLeadersErr } = await supabase
             .from('unidade_lideres')
             .select('unidade_id, pessoa_id, papel')
             .in('unidade_id', unitIds)
             .eq('ativo', true);
+
+          if (rawLeadersErr && (rawLeadersErr.code === '42P01' || rawLeadersErr.message?.includes('does not exist'))) {
+            console.warn(
+              `[Fallback DB] Tabela "unidade_lideres" (flat) não encontrada (código: ${rawLeadersErr.code || '42P01'}). Mensagem: ${rawLeadersErr.message}`
+            );
+          }
 
           const rawLeaderRows = fallbackLeaders || [];
           const leaderPessoaIds = Array.from(new Set<string>(rawLeaderRows.map((l: any) => l.pessoa_id).filter(Boolean)));
 
           const leaderMemberMap = new Map<string, any>();
           if (leaderPessoaIds.length > 0) {
-            const { data: ptMembers } = await supabase
+            let { data: ptMembers, error: memErr } = await supabase
               .from('membros')
               .select('id, nome, funcao, url_avatar, telefone')
               .in('id', leaderPessoaIds);
+
+            if (memErr && (memErr.code === '42P01' || memErr.message?.includes('does not exist'))) {
+              console.warn(
+                `[Fallback DB] Tabela "membros" (flat) não encontrada (código: ${memErr.code || '42P01'}). Acionando fallback para tabela "members". Mensagem: ${memErr.message}`
+              );
+              const { data: legMembers } = await supabase
+                .from('members')
+                .select('id, nome, funcao, url_avatar, telefone')
+                .in('id', leaderPessoaIds);
+              ptMembers = legMembers;
+            }
 
             (ptMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m));
           }
@@ -301,12 +361,12 @@ export async function GET(req: NextRequest) {
         };
       });
 
-      const resultPayload = {
-        success: true,
-        units: flatUnits,
-      };
-      serverHierarchyUnitsCache.set(cacheKey, { data: resultPayload, expiry: Date.now() + 60 * 1000 });
-      return NextResponse.json(resultPayload);
+      const responsePayload = { success: true, units: flatUnits };
+      serverHierarchyUnitsCache.set(cacheKey, {
+        data: responsePayload,
+        expiry: now + 60_000,
+      });
+      return NextResponse.json(responsePayload);
     }
 
     // 2. Modo Completo com resolução em lote (Compatibilidade)
@@ -350,15 +410,60 @@ export async function GET(req: NextRequest) {
       unitsQuery = unitsQuery.eq('nivel_tipo_id', levelTypeId);
     }
 
-    const { data: unitsData, error: unitsError } = await unitsQuery;
+    let { data: unitsData, error: unitsError } = await unitsQuery;
 
     if (unitsError) {
-      console.error('Erro ao buscar unidades:', unitsError);
-      return NextResponse.json({ error: unitsError.message }, { status: 500 });
+      if (unitsError.code === '42P01' || unitsError.message?.includes('does not exist')) {
+        console.warn(
+          `[Fallback DB] Tabela "unidades" (full) não encontrada (código: ${unitsError.code || '42P01'}). Acionando fallback para tabela "units". Mensagem: ${unitsError.message}`
+        );
+        let fallbackUnitsQuery = supabase
+          .from('units')
+          .select(`
+            id,
+            igreja_id,
+            nivel_tipo_id,
+            pai_id,
+            unidade_criadora_id,
+            nome,
+            ativo,
+            quantidade_membros,
+            dia_semana,
+            dia_reuniao,
+            horario,
+            horario_reuniao,
+            bairro,
+            endereco,
+            foto_url,
+            criado_em
+          `)
+          .eq('igreja_id', churchId)
+          .eq('ativo', true)
+          .order('nome', { ascending: true });
+
+        if (levelTypeId) {
+          fallbackUnitsQuery = fallbackUnitsQuery.eq('nivel_tipo_id', levelTypeId);
+        }
+
+        const legRes = await fallbackUnitsQuery;
+        if (!legRes.error && legRes.data) {
+          unitsData = legRes.data;
+          unitsError = null;
+        }
+      }
+      if (unitsError) {
+        console.error('Erro ao buscar unidades:', unitsError);
+        return NextResponse.json({ error: unitsError.message }, { status: 500 });
+      }
     }
 
     if (!unitsData || unitsData.length === 0) {
-      return NextResponse.json({ success: true, units: [] });
+      const responsePayload = { success: true, units: [] };
+      serverHierarchyUnitsCache.set(cacheKey, {
+        data: responsePayload,
+        expiry: now + 60_000,
+      });
+      return NextResponse.json(responsePayload);
     }
 
     // Mapeamento de nomes de todas as unidades
@@ -401,21 +506,44 @@ export async function GET(req: NextRequest) {
           leadersMap.set(l.unidade_id, existing);
         });
       } else {
+        if (lErr) {
+          console.warn(
+            `[Fallback DB] Join com "membros" via FK em "unidade_lideres" (full) falhou (código: ${lErr.code || 'N/A'}). Acionando fallback manual para tabela "membros". Mensagem: ${lErr.message}`
+          );
+        }
+
         // Fallback por lote de IDs
-        const { data: rawLideres } = await supabase
+        const { data: rawLideres, error: rawLideresErr } = await supabase
           .from('unidade_lideres')
           .select('unidade_id, pessoa_id, papel')
           .in('unidade_id', unitIds)
           .eq('ativo', true);
 
+        if (rawLideresErr && (rawLideresErr.code === '42P01' || rawLideresErr.message?.includes('does not exist'))) {
+          console.warn(
+            `[Fallback DB] Tabela "unidade_lideres" (full) não encontrada (código: ${rawLideresErr.code || '42P01'}). Mensagem: ${rawLideresErr.message}`
+          );
+        }
+
         const leaderPessoaIds = (rawLideres || []).map((l: any) => l.pessoa_id).filter(Boolean);
         const leaderMemberMap = new Map<string, any>();
 
         if (leaderPessoaIds.length > 0) {
-          const { data: ptMembers } = await supabase
+          let { data: ptMembers, error: memErr } = await supabase
             .from('membros')
             .select('id, nome, funcao, url_avatar, telefone')
             .in('id', leaderPessoaIds);
+
+          if (memErr && (memErr.code === '42P01' || memErr.message?.includes('does not exist'))) {
+            console.warn(
+              `[Fallback DB] Tabela "membros" (full) não encontrada (código: ${memErr.code || '42P01'}). Acionando fallback para tabela "members". Mensagem: ${memErr.message}`
+            );
+            const { data: legMembers } = await supabase
+              .from('members')
+              .select('id, nome, funcao, url_avatar, telefone')
+              .in('id', leaderPessoaIds);
+            ptMembers = legMembers;
+          }
 
           (ptMembers || []).forEach((m: any) => leaderMemberMap.set(m.id, m));
         }
@@ -468,12 +596,12 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    const fullPayload = {
-      success: true,
-      units: formattedUnits,
-    };
-    serverHierarchyUnitsCache.set(cacheKey, { data: fullPayload, expiry: Date.now() + 60 * 1000 });
-    return NextResponse.json(fullPayload);
+    const responsePayload = { success: true, units: formattedUnits };
+    serverHierarchyUnitsCache.set(cacheKey, {
+      data: responsePayload,
+      expiry: now + 60_000,
+    });
+    return NextResponse.json(responsePayload);
   } catch (err: any) {
     console.error('Erro na rota /api/hierarchy/units GET:', err);
     return NextResponse.json({ error: err?.message || 'Erro interno.' }, { status: 500 });
@@ -599,7 +727,7 @@ export async function POST(req: NextRequest) {
       horario_reuniao: input.meetingTime?.trim() || (isLeafLevel ? '19:30' : null),
       latitude: input.latitude !== undefined ? Number(input.latitude) : null,
       longitude: input.longitude !== undefined ? Number(input.longitude) : null,
-      quantidade_membros: 0,
+      quantidade_membros: isLeafLevel ? (input.leaderMemberIds?.length || 0) : 0,
       criado_em: new Date().toISOString(),
       atualizado_em: new Date().toISOString(),
     };
@@ -637,10 +765,21 @@ export async function POST(req: NextRequest) {
       }
 
       // Buscar membros para verificar o nível hierárquico atual e promover se for menor
-      const { data: currentMembers } = await supabase
+      let { data: currentMembers, error: curMemErr } = await supabase
         .from('membros')
         .select('id, nome, papel_id, funcao, unidade_id')
         .in('id', input.leaderMemberIds);
+
+      if (curMemErr && (curMemErr.code === '42P01' || curMemErr.message?.includes('does not exist'))) {
+        console.warn(
+          `[Fallback DB] Tabela "membros" (POST currentMembers) não encontrada (código: ${curMemErr.code || '42P01'}). Acionando fallback para tabela "members". Mensagem: ${curMemErr.message}`
+        );
+        const { data: legMembers } = await supabase
+          .from('members')
+          .select('id, nome, papel_id, funcao, unidade_id')
+          .in('id', input.leaderMemberIds);
+        currentMembers = legMembers;
+      }
 
       if (currentMembers && currentMembers.length > 0) {
         for (const m of currentMembers) {
@@ -663,16 +802,33 @@ export async function POST(req: NextRequest) {
               updatePayload.unidade_id = unitId;
             }
 
-            await supabase.from('membros').update(updatePayload).eq('id', m.id);
+            const { error: updMemErr } = await supabase.from('membros').update(updatePayload).eq('id', m.id);
+            if (updMemErr && (updMemErr.code === '42P01' || updMemErr.message?.includes('does not exist'))) {
+              console.warn(
+                `[Fallback DB] Tabela "membros" (POST update) não encontrada (código: ${updMemErr.code || '42P01'}). Acionando fallback para tabela "members". Mensagem: ${updMemErr.message}`
+              );
+              await supabase.from('members').update(updatePayload).eq('id', m.id);
+            }
           }
         }
       }
 
       // Buscar dados para retorno dos líderes atribuídos
-      const { data: membersInfo } = await supabase
+      let { data: membersInfo, error: memInfoErr } = await supabase
         .from('membros')
         .select('id, nome, funcao, url_avatar, telefone')
         .in('id', input.leaderMemberIds);
+
+      if (memInfoErr && (memInfoErr.code === '42P01' || memInfoErr.message?.includes('does not exist'))) {
+        console.warn(
+          `[Fallback DB] Tabela "membros" (POST membersInfo) não encontrada (código: ${memInfoErr.code || '42P01'}). Acionando fallback para tabela "members". Mensagem: ${memInfoErr.message}`
+        );
+        const { data: legMembers } = await supabase
+          .from('members')
+          .select('id, nome, funcao, url_avatar, telefone')
+          .in('id', input.leaderMemberIds);
+        membersInfo = legMembers;
+      }
 
       (membersInfo || []).forEach((m: any) => {
         leadersAssigned.push({
@@ -683,6 +839,19 @@ export async function POST(req: NextRequest) {
           phone: m.telefone,
         });
       });
+
+      if (isLeafLevel) {
+        const { count: realCount } = await supabase
+          .from('membros')
+          .select('*', { count: 'exact', head: true })
+          .eq('unidade_id', unitId);
+        if (typeof realCount === 'number') {
+          await supabase
+            .from('unidades')
+            .update({ quantidade_membros: realCount, atualizado_em: new Date().toISOString() })
+            .eq('id', unitId);
+        }
+      }
     }
 
     // 6. Retorno da unidade criada
@@ -807,10 +976,21 @@ export async function PATCH(req: NextRequest) {
       }
 
       // Buscar membros para verificar o nível hierárquico atual e promover se for menor
-      const { data: currentMembers } = await supabase
+      let { data: currentMembers, error: curMemErr } = await supabase
         .from('membros')
         .select('id, nome, papel_id, funcao, unidade_id')
         .in('id', safeLeaderIds);
+
+      if (curMemErr && (curMemErr.code === '42P01' || curMemErr.message?.includes('does not exist'))) {
+        console.warn(
+          `[Fallback DB] Tabela "membros" (PATCH currentMembers) não encontrada (código: ${curMemErr.code || '42P01'}). Acionando fallback para tabela "members". Mensagem: ${curMemErr.message}`
+        );
+        const { data: legMembers } = await supabase
+          .from('members')
+          .select('id, nome, papel_id, funcao, unidade_id')
+          .in('id', safeLeaderIds);
+        currentMembers = legMembers;
+      }
 
       if (currentMembers && currentMembers.length > 0) {
         for (const m of currentMembers) {
@@ -839,7 +1019,12 @@ export async function PATCH(req: NextRequest) {
               .update(updatePayload)
               .eq('id', m.id);
 
-            if (updErr) {
+            if (updErr && (updErr.code === '42P01' || updErr.message?.includes('does not exist'))) {
+              console.warn(
+                `[Fallback DB] Tabela "membros" (PATCH update) não encontrada (código: ${updErr.code || '42P01'}). Acionando fallback para tabela "members". Mensagem: ${updErr.message}`
+              );
+              await supabase.from('members').update(updatePayload).eq('id', m.id);
+            } else if (updErr) {
               console.error(`Erro ao atualizar membro ${m.id} na promoção de liderança:`, updErr);
             }
 
@@ -864,10 +1049,21 @@ export async function PATCH(req: NextRequest) {
     // 5. Buscar informações dos novos líderes selecionados
     let leadersAssigned: any[] = [];
     if (safeLeaderIds.length > 0) {
-      const { data: membersInfo } = await supabase
+      let { data: membersInfo, error: memInfoErr } = await supabase
         .from('membros')
         .select('id, nome, funcao, url_avatar, telefone')
         .in('id', safeLeaderIds);
+
+      if (memInfoErr && (memInfoErr.code === '42P01' || memInfoErr.message?.includes('does not exist'))) {
+        console.warn(
+          `[Fallback DB] Tabela "membros" (PATCH membersInfo) não encontrada (código: ${memInfoErr.code || '42P01'}). Acionando fallback para tabela "members". Mensagem: ${memInfoErr.message}`
+        );
+        const { data: legMembers } = await supabase
+          .from('members')
+          .select('id, nome, funcao, url_avatar, telefone')
+          .in('id', safeLeaderIds);
+        membersInfo = legMembers;
+      }
 
       if (membersInfo && membersInfo.length > 0) {
         leadersAssigned = membersInfo.map((m: any) => {
@@ -880,6 +1076,19 @@ export async function PATCH(req: NextRequest) {
             phone: m.telefone,
           };
         });
+      }
+    }
+
+    if (isLeafLevel) {
+      const { count: realCount } = await supabase
+        .from('membros')
+        .select('*', { count: 'exact', head: true })
+        .eq('unidade_id', unitId);
+      if (typeof realCount === 'number') {
+        await supabase
+          .from('unidades')
+          .update({ quantidade_membros: realCount, atualizado_em: new Date().toISOString() })
+          .eq('id', unitId);
       }
     }
 

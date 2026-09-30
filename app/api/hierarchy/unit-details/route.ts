@@ -152,10 +152,21 @@ export async function GET(req: NextRequest) {
       phone: m.telefone,
     }));
 
+    const realMembersCount = (membersRes.data || []).length;
     const finalMemberCount =
-      typeof unit.quantidade_membros === 'number'
+      typeof unit.quantidade_membros === 'number' && unit.quantidade_membros > 0
         ? unit.quantidade_membros
-        : (Number(unit.quantidade_membros) || 0);
+        : realMembersCount;
+
+    // Se o valor no banco estiver desatualizado em relação aos membros vinculados, sincroniza
+    if (typeof unit.quantidade_membros === 'number' && unit.quantidade_membros !== realMembersCount && realMembersCount > 0) {
+      Promise.resolve(
+        supabase
+          .from('unidades')
+          .update({ quantidade_membros: realMembersCount, atualizado_em: new Date().toISOString() })
+          .eq('id', unit.id)
+      ).catch(() => {});
+    }
 
     const response: UnitDetailResponse = {
       id: unit.id,

@@ -57,14 +57,13 @@ export async function POST(req: NextRequest) {
         END IF;
       END $$;`,
 
-      // 3. Atualiza contagem real de membros
+      // 3. Atualiza contagem real de membros (todas as pessoas vinculadas àquela unidade_id, independentemente da função)
       `UPDATE public.unidades u
       SET quantidade_membros = COALESCE(
         (
           SELECT COUNT(*) 
           FROM public.membros m 
-          WHERE m.unidade_id = u.id 
-          AND (m.ativo IS NULL OR m.ativo = true)
+          WHERE m.unidade_id = u.id
         ),
         0
       );`,
@@ -73,34 +72,64 @@ export async function POST(req: NextRequest) {
       `CREATE OR REPLACE FUNCTION public.sync_unidade_quantidade_membros()
       RETURNS TRIGGER AS $$
       BEGIN
-        IF (TG_OP = 'DELETE' OR TG_OP = 'UPDATE') THEN
-          IF OLD.unidade_id IS NOT NULL THEN
-            UPDATE public.unidades
-            SET 
-              quantidade_membros = (
-                SELECT COUNT(*) 
-                FROM public.membros 
-                WHERE unidade_id = OLD.unidade_id 
-                AND (ativo IS NULL OR ativo = true)
-              ),
-              atualizado_em = now()
-            WHERE id = OLD.unidade_id;
-          END IF;
-        END IF;
-
-        IF (TG_OP = 'INSERT' OR TG_OP = 'UPDATE') THEN
+        IF (TG_OP = 'INSERT') THEN
           IF NEW.unidade_id IS NOT NULL THEN
             UPDATE public.unidades
             SET 
               quantidade_membros = (
                 SELECT COUNT(*) 
                 FROM public.membros 
-                WHERE unidade_id = NEW.unidade_id 
-                AND (ativo IS NULL OR ativo = true)
+                WHERE unidade_id = NEW.unidade_id
               ),
               atualizado_em = now()
             WHERE id = NEW.unidade_id;
           END IF;
+          RETURN NEW;
+
+        ELSIF (TG_OP = 'DELETE') THEN
+          IF OLD.unidade_id IS NOT NULL THEN
+            UPDATE public.unidades
+            SET 
+              quantidade_membros = (
+                SELECT COUNT(*) 
+                FROM public.membros 
+                WHERE unidade_id = OLD.unidade_id
+              ),
+              atualizado_em = now()
+            WHERE id = OLD.unidade_id;
+          END IF;
+          RETURN OLD;
+
+        ELSIF (TG_OP = 'UPDATE') THEN
+          -- Se a pessoa mudar de uma unidade para outra:
+          -- remover da unidade antiga e adicionar na nova.
+          -- Se apenas a função/cargo mudar, mas ela continuar na mesma unidade: NÃO altera quantidade_membros.
+          IF OLD.unidade_id IS DISTINCT FROM NEW.unidade_id THEN
+            IF OLD.unidade_id IS NOT NULL THEN
+              UPDATE public.unidades
+              SET 
+                quantidade_membros = (
+                  SELECT COUNT(*) 
+                  FROM public.membros 
+                  WHERE unidade_id = OLD.unidade_id
+                ),
+                atualizado_em = now()
+              WHERE id = OLD.unidade_id;
+            END IF;
+
+            IF NEW.unidade_id IS NOT NULL THEN
+              UPDATE public.unidades
+              SET 
+                quantidade_membros = (
+                  SELECT COUNT(*) 
+                  FROM public.membros 
+                  WHERE unidade_id = NEW.unidade_id
+                ),
+                atualizado_em = now()
+              WHERE id = NEW.unidade_id;
+            END IF;
+          END IF;
+          RETURN NEW;
         END IF;
 
         RETURN NULL;

@@ -71,10 +71,10 @@ export const FeedView: React.FC<FeedViewProps> = ({
 }) => {
   const queryClient = useQueryClient();
 
-  // Query Key para isolamento por igreja e célula
+  // Query Key estável para o feed da congregação (isolado por igreja, sem reiniciar a busca ao inicializar a célula)
   const queryKey = useMemo(
-    () => ['feed_posts', currentUser.churchId, currentCell?.id],
-    [currentUser.churchId, currentCell?.id]
+    () => ['feed_posts', currentUser.churchId],
+    [currentUser.churchId]
   );
 
   // 1. Paginação por Cursor e Cache com Stale-While-Revalidate via useInfiniteQuery
@@ -781,7 +781,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                   {currentUser.name}
                 </h4>
                 <p className="text-[11px] text-slate-500">
-                  Compartilhando na <strong>Célula {currentCell.name}</strong>
+                  Compartilhando na <strong className="font-bold text-slate-700">Célula {currentCell?.name || currentUser?.cellName || 'Minha Célula'}</strong>
                 </p>
               </div>
             </div>
@@ -791,7 +791,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                 id="feed-post-caption-input"
                 value={newPostCaption}
                 onChange={(e) => setNewPostCaption(e.target.value)}
-                placeholder={`O que Deus fez na Célula - ${currentCell.name} essa semana?`}
+                placeholder={`O que Deus fez na Célula - ${currentCell?.name || currentUser?.cellName || 'Minha Célula'} essa semana?`}
                 rows={2}
                 className="w-full bg-[#f8fafc] border border-slate-200 rounded-xl py-2 px-3 sm:p-3 text-xs sm:text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#052447] focus:ring-1 focus:ring-[#052447] min-h-[50px] sm:min-h-[70px] resize-y"
               />

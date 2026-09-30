@@ -4,7 +4,11 @@ const DEFAULT_SUPABASE_URL = 'https://srjkwwddbxniqhzqvrhc.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyamt3d2RkYnhuaXFoenF2cmhjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMDI4MjgsImV4cCI6MjEwNTU3ODgyOH0.9uvatfClKVxyzBrBC7zGL9ujSaVYtyxf74q6i1YVOjs';
 
+let cachedServerClient: SupabaseClient | null = null;
+
 export function getSupabaseServerClient(): SupabaseClient | null {
+  if (cachedServerClient) return cachedServerClient;
+
   const serviceKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
@@ -30,10 +34,12 @@ export function getSupabaseServerClient(): SupabaseClient | null {
 
   if (!serviceKey || !url) return null;
 
-  return createClient(url, serviceKey, {
+  cachedServerClient = createClient(url, serviceKey, {
     auth: {
       persistSession: false,
       autoRefreshToken: false,
     },
   });
+
+  return cachedServerClient;
 }

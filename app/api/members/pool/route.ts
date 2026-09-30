@@ -300,7 +300,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Falha ao cadastrar membro: ${insertErr.message}` }, { status: 500 });
     }
 
-    // O trigger PostgreSQL atualizar_quantidade_membros_unidade() sincroniza automaticamente quantidade_membros em unidades
+    // Sincroniza quantidade_membros na unidade (toda pessoa vinculada, independente da função)
+    if (validCellId) {
+      const { count: realCount } = await supabase
+        .from('membros')
+        .select('*', { count: 'exact', head: true })
+        .eq('unidade_id', validCellId);
+      if (typeof realCount === 'number') {
+        await supabase
+          .from('unidades')
+          .update({ quantidade_membros: realCount, atualizado_em: new Date().toISOString() })
+          .eq('id', validCellId);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       member: {
@@ -404,7 +417,34 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 
-    // O trigger PostgreSQL atualizar_quantidade_membros_unidade() sincroniza automaticamente quantidade_membros ao mudar unidade_id
+    // Se a unidade mudou, atualiza a contagem da unidade antiga e da nova
+    if (previousUnitId !== validCellId) {
+      if (previousUnitId) {
+        const { count: oldCount } = await supabase
+          .from('membros')
+          .select('*', { count: 'exact', head: true })
+          .eq('unidade_id', previousUnitId);
+        if (typeof oldCount === 'number') {
+          await supabase
+            .from('unidades')
+            .update({ quantidade_membros: oldCount, atualizado_em: new Date().toISOString() })
+            .eq('id', previousUnitId);
+        }
+      }
+      if (validCellId) {
+        const { count: newCount } = await supabase
+          .from('membros')
+          .select('*', { count: 'exact', head: true })
+          .eq('unidade_id', validCellId);
+        if (typeof newCount === 'number') {
+          await supabase
+            .from('unidades')
+            .update({ quantidade_membros: newCount, atualizado_em: new Date().toISOString() })
+            .eq('id', validCellId);
+        }
+      }
+    }
+
     return NextResponse.json({
       success: true,
       memberId,
@@ -464,7 +504,20 @@ export async function DELETE(req: NextRequest) {
       await deleteAuthUserForMember(authUserId);
     }
 
-    // O trigger PostgreSQL atualizar_quantidade_membros_unidade() decrementa automaticamente quantidade_membros ao excluir
+    // Atualiza quantidade_membros da unidade correspondente
+    if (oldUnitId) {
+      const { count: remCount } = await supabase
+        .from('membros')
+        .select('*', { count: 'exact', head: true })
+        .eq('unidade_id', oldUnitId);
+      if (typeof remCount === 'number') {
+        await supabase
+          .from('unidades')
+          .update({ quantidade_membros: remCount, atualizado_em: new Date().toISOString() })
+          .eq('id', oldUnitId);
+      }
+    }
+
     return NextResponse.json({ success: true, deletedMemberId: memberId, authDeleted: Boolean(authUserId) });
   } catch (err: any) {
     console.error('Erro na rota /api/members/pool DELETE:', err);

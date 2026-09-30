@@ -31,6 +31,9 @@ export async function POST(req: NextRequest) {
       `CREATE INDEX IF NOT EXISTS idx_unidades_igreja_nivel_ativo ON unidades(igreja_id, nivel_tipo_id) WHERE ativo = true;`,
       `CREATE INDEX IF NOT EXISTS idx_unidades_bairro_trgm ON unidades USING gin (bairro gin_trgm_ops);`,
       `CREATE INDEX IF NOT EXISTS idx_unidades_endereco_trgm ON unidades USING gin (endereco gin_trgm_ops);`,
+      `CREATE INDEX IF NOT EXISTS idx_relatorios_semanais_unidade_data ON relatorios_semanais(unidade_id, data_relatorio DESC);`,
+      `CREATE INDEX IF NOT EXISTS idx_relatorios_semanais_igreja ON relatorios_semanais(igreja_id);`,
+      `CREATE INDEX IF NOT EXISTS idx_relatorio_presencas_relatorio ON relatorio_presencas(relatorio_id);`,
     ];
 
     const results: any[] = [];

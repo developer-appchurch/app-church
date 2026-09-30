@@ -509,6 +509,7 @@ export const AppChurchService = {
 
           // Busca informações da célula/unidade/setor
           let sector = 'Setor Geral';
+          let cellName = '';
           const resolvedUnitId = m.unidade_id || m.celula_id;
           if (resolvedUnitId) {
             const { data: unitData } = await supabase
@@ -517,6 +518,9 @@ export const AppChurchService = {
               .eq('id', resolvedUnitId)
               .maybeSingle();
 
+            if (unitData?.nome) {
+              cellName = unitData.nome;
+            }
             if (unitData?.pai_id) {
               const { data: parentUnit } = await supabase
                 .from('unidades')
@@ -539,6 +543,8 @@ export const AppChurchService = {
             roleId: resolveRoleIdByName(m.funcao, m.papel_id || m.funcao_id),
             sector,
             currentCellId: resolvedUnitId || '',
+            cellId: resolvedUnitId || '',
+            cellName: cellName || '',
             email: m.email || `${m.login || cleanLogin}@appchurch.local`,
             phone: m.telefone || '',
             avatarUrl:

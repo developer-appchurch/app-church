@@ -176,6 +176,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (validCellId) {
+      const { count: cellCount } = await supabase
+        .from('membros')
+        .select('*', { count: 'exact', head: true })
+        .eq('unidade_id', validCellId);
+      if (typeof cellCount === 'number') {
+        await supabase
+          .from('unidades')
+          .update({ quantidade_membros: cellCount, atualizado_em: new Date().toISOString() })
+          .eq('id', validCellId);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       member: {

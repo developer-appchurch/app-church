@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
@@ -108,7 +108,13 @@ export default function Home() {
 
   // Church-isolated collections
   const [cells, setCells] = useState<CellGroup[]>([]);
-  const [selectedCellId, setSelectedCellId] = useState<string>('');
+  const [selectedCellId, setSelectedCellId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const cached = AppChurchService.getCachedUser();
+      return cached?.currentCellId || cached?.cellId || '';
+    }
+    return '';
+  });
   const [members, setMembers] = useState<CellMember[]>([]);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [announcements, setAnnouncements] = useState<ChurchAnnouncement[]>([]);
@@ -190,20 +196,19 @@ export default function Home() {
   const effectiveCells = (queriedCells && queriedCells.length > 0) ? queriedCells : cells;
   const effectiveMembers = members;
 
-  // Garante que selectedCellId seja sincronizado com a célula do usuário logado assim que as células estiverem prontas
+  // Garante que selectedCellId seja sincronizado com a célula do usuário logado de forma direta
   useEffect(() => {
     if (effectiveCells.length > 0) {
-      if (!selectedCellId || !effectiveCells.some((c) => c.id === selectedCellId)) {
-        const preferredCellId =
-          user?.currentCellId && effectiveCells.some((c) => c.id === user.currentCellId)
-            ? user.currentCellId
-            : effectiveCells[0].id;
-        queueMicrotask(() => {
-          setSelectedCellId(preferredCellId);
-        });
+      const userCellId = user?.currentCellId || user?.cellId;
+      if (userCellId && effectiveCells.some((c) => c.id === userCellId)) {
+        if (selectedCellId !== userCellId) {
+          setSelectedCellId(userCellId);
+        }
+      } else if (!selectedCellId || !effectiveCells.some((c) => c.id === selectedCellId)) {
+        setSelectedCellId(effectiveCells[0].id);
       }
     }
-  }, [effectiveCells, selectedCellId, user?.currentCellId]);
+  }, [effectiveCells, selectedCellId, user?.currentCellId, user?.cellId]);
 
   // Load church data isolated by churchId
   const loadChurchData = useCallback(
@@ -237,6 +242,9 @@ export default function Home() {
         setIsAuthenticated(true);
         setIsCheckingSession(false);
         setActiveScreen('feed');
+        if (cached.currentCellId) {
+          setSelectedCellId(cached.currentCellId);
+        }
       }
 
       try {
@@ -246,6 +254,9 @@ export default function Home() {
             setUser(sessionUser);
             setIsAuthenticated(true);
             setActiveScreen('feed');
+            if (sessionUser.currentCellId) {
+              setSelectedCellId(sessionUser.currentCellId);
+            }
             // Se a igreja difere do cache inicial, invalida para buscar a nova igreja
             if (cached && cached.churchId !== sessionUser.churchId) {
               queryClient.invalidateQueries({ queryKey: ['church-cells', sessionUser.churchId] });
@@ -378,7 +389,13 @@ export default function Home() {
     if (created.cellId) {
       setCells((prev) =>
         prev.map((c) =>
-          c.id === created.cellId ? { ...c, memberCount: (c.memberCount || 0) + 1 } : c
+          c.id === created.cellId
+            ? {
+                ...c,
+                memberCount: (c.memberCount || 0) + 1,
+                quantidade_membros: (c.quantidade_membros || 0) + 1,
+              }
+            : c
         )
       );
     }
@@ -543,21 +560,76 @@ export default function Home() {
     }
   };
 
-  // Current active cell
-  const currentCell: CellGroup =
-    effectiveCells.find((c) => c.id === selectedCellId) ||
-    effectiveCells[0] || {
+  // Current active cell: sempre garante a célula do usuário logado de forma estável e consistente
+  const currentCell: CellGroup = useMemo(() => {
+    const userCellId = user?.currentCellId || user?.cellId;
+    const targetCellId = selectedCellId || userCellId;
+
+    if (targetCellId && effectiveCells.length > 0) {
+      const match = effectiveCells.find((c) => c.id === targetCellId);
+      if (match) return match;
+    }
+
+    if (userCellId && effectiveCells.length > 0) {
+      const userMatch = effectiveCells.find((c) => c.id === userCellId);
+      if (userMatch) return userMatch;
+    }
+
+    // Se o usuário possui célula em seu perfil, utiliza os dados reais dele antes mesmo da lista de células carregar
+    if (userCellId) {
+      return {
+        id: userCellId,
+        churchId: user?.churchId || 'church-default',
+        name: user?.cellName || 'Minha Célula',
+        leaderName: user?.name || 'Líder',
+        sectorName: user?.sector || 'Setor Geral',
+        address: 'Pendente de cadastro',
+        meetingDay: 'Quinta-feira',
+        meetingTime: '19:30',
+        memberCount: 0,
+        quantidade_membros: 0,
+      };
+    }
+
+    if (effectiveCells.length > 0) {
+      return effectiveCells[0];
+    }
+
+    return {
       id: 'cell-pending',
       churchId: user?.churchId || 'church-default',
-      name: effectiveCells.length === 0 ? 'Nenhuma Célula Cadastrada' : 'Adonai',
+      name: 'Nenhuma Célula Cadastrada',
       leaderName: user?.name || 'Pastor Titular',
-      sectorName: effectiveCells.length === 0 ? 'Pendente' : 'Setor Geral',
-      address: effectiveCells.length === 0 ? 'Pendente de cadastro' : 'Rua Sumaré, 245 - Junco',
+      sectorName: 'Pendente',
+      address: 'Pendente de cadastro',
       meetingDay: 'Quinta-feira',
       meetingTime: '19:30',
       memberCount: 0,
       quantidade_membros: 0,
     };
+  }, [effectiveCells, selectedCellId, user]);
+
+  // Pré-aquecimento em segundo plano da tela de Relatório Semanal para carregamento instantâneo
+  useEffect(() => {
+    if (currentCell?.id && currentCell.id !== 'cell-pending') {
+      const timer = setTimeout(() => {
+        import('../components/WeeklyReportView').catch(() => {});
+        queryClient.prefetchQuery({
+          queryKey: ['weekly-reports', currentCell.id, currentCell.churchId],
+          queryFn: async () => {
+            const url = `/api/reports?cellId=${encodeURIComponent(currentCell.id)}${
+              currentCell.churchId ? `&churchId=${encodeURIComponent(currentCell.churchId)}` : ''
+            }&mode=recent`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error('Falha no prefetch de relatórios');
+            return res.json();
+          },
+          staleTime: 1000 * 60 * 3,
+        }).catch(() => {});
+      }, 1200);
+      return () => clearTimeout(timer);
+    }
+  }, [currentCell?.id, currentCell?.churchId, queryClient]);
 
   // 0. Splash / Skeleton durante a validação da sessão para evitar piscar a tela de login
   if (isCheckingSession) {

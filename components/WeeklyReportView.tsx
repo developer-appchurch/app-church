@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppChurchService } from '../lib/supabase';
 import { CellGroup, CellMember, UserProfile, WeeklyReport } from '../types';
 import {
@@ -51,15 +51,67 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
   // Modal de Detalhes do Relatório
   const [selectedReportForDetail, setSelectedReportForDetail] = useState<WeeklyReport | null>(null);
 
-  // Reports state (from database relatorios_semanais)
-  const [reports, setReports] = useState<WeeklyReport[]>([]);
-  const [isLoadingReports, setIsLoadingReports] = useState(true);
-  const [reportsError, setReportsError] = useState<string | null>(null);
-  const [hasMoreOlder, setHasMoreOlder] = useState(false);
-  const [olderReportsCount, setOlderReportsCount] = useState(0);
+  const queryClient = useQueryClient();
+
+  // Filtra apenas membros pertencentes à célula selecionada
+  const currentCellId = currentCell?.id;
+
+  // React Query para Relatórios Recentes (3 minutos de cache ativo, instantâneo ao trocar de tela)
+  const {
+    data: reportsPayload,
+    isLoading: isLoadingReportsQuery,
+    isFetching: isFetchingReports,
+    error: reportsErrorObj,
+    refetch: refetchRecentReports,
+  } = useQuery({
+    queryKey: ['weekly-reports', currentCellId, currentCell?.churchId],
+    queryFn: async () => {
+      if (!currentCellId) return { reports: [], hasOlderReports: false, olderReportsCount: 0 };
+      const url = `/api/reports?cellId=${encodeURIComponent(currentCellId)}${
+        currentCell?.churchId ? `&churchId=${encodeURIComponent(currentCell.churchId)}` : ''
+      }&mode=recent`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || 'Erro ao carregar relatórios');
+      }
+      return json;
+    },
+    enabled: Boolean(currentCellId),
+    staleTime: 1000 * 60 * 3, // 3 minutos de cache persistente em memória
+    gcTime: 1000 * 60 * 15,
+  });
+
+  // Estado para relatórios mais antigos paginados sob demanda
+  const [olderReports, setOlderReports] = useState<WeeklyReport[]>([]);
   const [olderOffset, setOlderOffset] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadedOlderCount, setLoadedOlderCount] = useState(0);
+
+  // Limpa relatórios antigos ao alternar de célula
+  useEffect(() => {
+    setOlderReports([]);
+    setOlderOffset(0);
+    setLoadedOlderCount(0);
+  }, [currentCellId]);
+
+  const baseReports: WeeklyReport[] = useMemo(() => reportsPayload?.reports || [], [reportsPayload]);
+
+  const reports: WeeklyReport[] = useMemo(() => {
+    if (olderReports.length === 0) return baseReports;
+    const existingIds = new Set(baseReports.map((r) => r.id));
+    const filteredOlder = olderReports.filter((r) => !existingIds.has(r.id));
+    return [...baseReports, ...filteredOlder];
+  }, [baseReports, olderReports]);
+
+  const olderReportsCount = Number(reportsPayload?.olderReportsCount || 0);
+  const hasMoreOlder = useMemo(() => {
+    if (!reportsPayload?.hasOlderReports) return false;
+    return olderOffset + olderReports.length < olderReportsCount;
+  }, [reportsPayload?.hasOlderReports, olderOffset, olderReports.length, olderReportsCount]);
+
+  const isLoadingReports = isLoadingReportsQuery && !reportsPayload;
+  const reportsError = reportsErrorObj ? (reportsErrorObj as Error).message : null;
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -102,9 +154,6 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
   const [childrenCount, setChildrenCount] = useState('0');
   const [observacao, setObservacao] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Filtra apenas membros pertencentes à célula selecionada
-  const currentCellId = currentCell?.id;
 
   // Busca os membros da célula selecionada sob demanda (compartilha cache com Minha Célula sem teto de 250)
   const { data: directMembers } = useQuery({
@@ -231,44 +280,14 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     setEditingReportId(null);
   }, [cellMembers]);
 
-  // Carrega relatórios iniciais dos últimos 2 meses para máxima performance
-  const fetchRecentReports = useCallback(async () => {
-    if (!currentCell?.id) return;
-    setIsLoadingReports(true);
-    setReportsError(null);
-
-    try {
-      const url = `/api/reports?cellId=${encodeURIComponent(currentCell.id)}${
-        currentCell.churchId ? `&churchId=${encodeURIComponent(currentCell.churchId)}` : ''
-      }&mode=recent`;
-      const res = await fetch(url);
-      const json = await res.json();
-
-      if (!res.ok) {
-        throw new Error(json.error || 'Erro ao carregar relatórios');
-      }
-
-      setReports(json.reports || []);
-      setHasMoreOlder(Boolean(json.hasOlderReports));
-      setOlderReportsCount(Number(json.olderReportsCount || 0));
-      setOlderOffset(0);
-      setLoadedOlderCount(0);
-    } catch (err: any) {
-      console.error('[WeeklyReportView] Erro ao buscar relatórios:', err);
-      setReportsError(err.message || 'Não foi possível carregar o histórico de relatórios.');
-    } finally {
-      setIsLoadingReports(false);
-    }
-  }, [currentCell.id, currentCell.churchId]);
-
   // Carrega mais relatórios antigos de forma paginada (lotes de 10)
   const fetchMoreOlderReports = useCallback(async () => {
-    if (!currentCell?.id || isLoadingMore || !hasMoreOlder) return;
+    if (!currentCellId || isLoadingMore || !hasMoreOlder) return;
     setIsLoadingMore(true);
 
     try {
-      const url = `/api/reports?cellId=${encodeURIComponent(currentCell.id)}${
-        currentCell.churchId ? `&churchId=${encodeURIComponent(currentCell.churchId)}` : ''
+      const url = `/api/reports?cellId=${encodeURIComponent(currentCellId)}${
+        currentCell?.churchId ? `&churchId=${encodeURIComponent(currentCell.churchId)}` : ''
       }&mode=older&offset=${olderOffset}&limit=10`;
 
       const res = await fetch(url);
@@ -280,14 +299,13 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
 
       const newOlderReports: WeeklyReport[] = json.reports || [];
 
-      setReports((prev) => {
+      setOlderReports((prev) => {
         const existingIds = new Set(prev.map((r) => r.id));
         const filteredNew = newOlderReports.filter((r) => !existingIds.has(r.id));
         return [...prev, ...filteredNew];
       });
 
       setOlderOffset(Number(json.nextOffset || olderOffset + newOlderReports.length));
-      setHasMoreOlder(Boolean(json.hasMore));
       setLoadedOlderCount((prev) => prev + newOlderReports.length);
     } catch (err: any) {
       console.error('[WeeklyReportView] Erro ao carregar mais relatórios:', err);
@@ -295,41 +313,13 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [currentCell.id, currentCell.churchId, olderOffset, isLoadingMore, hasMoreOlder]);
+  }, [currentCellId, currentCell?.churchId, olderOffset, isLoadingMore, hasMoreOlder]);
 
-  useEffect(() => {
-    let isMounted = true;
-    const load = async () => {
-      if (!currentCell?.id) return;
-      try {
-        const url = `/api/reports?cellId=${encodeURIComponent(currentCell.id)}${
-          currentCell.churchId ? `&churchId=${encodeURIComponent(currentCell.churchId)}` : ''
-        }&mode=recent`;
-        const res = await fetch(url);
-        const json = await res.json();
-        if (isMounted) {
-          if (!res.ok) throw new Error(json.error || 'Erro ao carregar relatórios');
-          setReports(json.reports || []);
-          setHasMoreOlder(Boolean(json.hasOlderReports));
-          setOlderReportsCount(Number(json.olderReportsCount || 0));
-          setOlderOffset(0);
-          setLoadedOlderCount(0);
-        }
-      } catch (err: any) {
-        if (isMounted) {
-          setReportsError(err.message || 'Não foi possível carregar o histórico de relatórios.');
-        }
-      } finally {
-        if (isMounted) {
-          setIsLoadingReports(false);
-        }
-      }
-    };
-    load();
-    return () => {
-      isMounted = false;
-    };
-  }, [currentCell.id, currentCell.churchId]);
+  const handleResetToRecent = useCallback(() => {
+    setOlderReports([]);
+    setOlderOffset(0);
+    setLoadedOlderCount(0);
+  }, []);
 
   const togglePresence = (id: string) => {
     setPresentMemberIds((prev) =>
@@ -412,22 +402,32 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
         return;
       }
 
-      // Atualiza imediatamente o estado local e modal de detalhes
-      if (json.report) {
-        setReports((prev) => {
-          const exists = prev.some((r) => r.id === json.report.id);
-          if (exists) {
-            return prev.map((r) => (r.id === json.report.id ? json.report : r));
+      // Atualiza imediatamente o cache do React Query
+      if (json.report && currentCell?.id) {
+        queryClient.setQueryData(
+          ['weekly-reports', currentCell.id, currentCell.churchId],
+          (old: any) => {
+            if (!old) return { reports: [json.report], hasOlderReports: false, olderReportsCount: 0 };
+            const oldReports: WeeklyReport[] = old.reports || [];
+            const exists = oldReports.some((r) => r.id === json.report.id);
+            const updatedReports = exists
+              ? oldReports.map((r) => (r.id === json.report.id ? json.report : r))
+              : [json.report, ...oldReports];
+            return {
+              ...old,
+              reports: updatedReports,
+            };
           }
-          return [json.report, ...prev];
-        });
+        );
         if (selectedReportForDetail && selectedReportForDetail.id === json.report.id) {
           setSelectedReportForDetail(json.report);
         }
       }
 
       // Revalida em segundo plano com o banco de dados
-      await fetchRecentReports();
+      if (currentCell?.id) {
+        queryClient.invalidateQueries({ queryKey: ['weekly-reports', currentCell.id] });
+      }
 
       setDuplicateWarning(null);
       setIsModalOpen(false);
@@ -509,9 +509,16 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
         {/* Cabeçalho no Tom de Azul do App com Informações em Branco e Seletor de Célula */}
         <div className="bg-[#052447] text-white p-4 sm:p-5 rounded-2xl border border-[#052447] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3.5">
           <div className="min-w-0 flex-1">
-            <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight">
-              Relatório Semanal
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight">
+                Relatório Semanal
+              </h3>
+              {isFetchingReports && !isLoadingReports && (
+                <span title="Sincronizando em segundo plano...">
+                  <RefreshCw size={13} className="animate-spin text-sky-300" />
+                </span>
+              )}
+            </div>
             <p className="text-xs text-sky-200 mt-0.5 truncate">
               Histórico semanal dos relatórios
             </p>
@@ -564,7 +571,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
               <p className="text-xs font-bold">{reportsError}</p>
               <button
                 type="button"
-                onClick={fetchRecentReports}
+                onClick={() => refetchRecentReports()}
                 className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700 transition"
               >
                 Tentar novamente
@@ -742,7 +749,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   {loadedOlderCount > 0 && (
                     <button
                       type="button"
-                      onClick={fetchRecentReports}
+                      onClick={handleResetToRecent}
                       className="inline-flex items-center gap-1 px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold text-xs rounded-lg transition cursor-pointer shadow-2xs"
                       title="Redefinir visualização rápida"
                     >

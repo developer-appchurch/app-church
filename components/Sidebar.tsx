@@ -40,6 +40,7 @@ import { ActiveScreen, UserProfile, CellGroup } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService } from '../lib/supabase';
 import { usePushNotifications } from '../hooks/usePushNotifications';
+import { useQueryClient } from '@tanstack/react-query';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -92,6 +93,28 @@ export const Sidebar: React.FC<SidebarProps> = ({
     subscribeToPush,
     refreshPermission: refreshPushPermission,
   } = usePushNotifications(user?.id);
+
+  const queryClient = useQueryClient();
+
+  const handlePrefetchItem = (screenId: ActiveScreen) => {
+    if (screenId === 'reports' && currentCell?.id) {
+      // 1. Pré-carrega o chunk do componente WeeklyReportView
+      import('./WeeklyReportView').catch(() => {});
+      // 2. Pré-carrega a query de relatórios recentes no cache do React Query
+      queryClient.prefetchQuery({
+        queryKey: ['weekly-reports', currentCell.id, currentCell.churchId],
+        queryFn: async () => {
+          const url = `/api/reports?cellId=${encodeURIComponent(currentCell.id)}${
+            currentCell.churchId ? `&churchId=${encodeURIComponent(currentCell.churchId)}` : ''
+          }&mode=recent`;
+          const res = await fetch(url);
+          if (!res.ok) throw new Error('Falha no prefetch');
+          return res.json();
+        },
+        staleTime: 1000 * 60 * 3,
+      }).catch(() => {});
+    }
+  };
 
   const [isPushHelpModalOpen, setIsPushHelpModalOpen] = useState(false);
   const [pushFeedbackMessage, setPushFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -380,6 +403,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   key={item.id}
                   id={`nav-item-${item.id}`}
                   type="button"
+                  onMouseEnter={() => handlePrefetchItem(item.id)}
+                  onTouchStart={() => handlePrefetchItem(item.id)}
+                  onFocus={() => handlePrefetchItem(item.id)}
                   onClick={() => {
                     onNavigate(item.id);
                     onClose();
