@@ -120,7 +120,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
   const queryClient = useQueryClient();
 
   // Estados de Filtros e Busca com Debounce
-  const [activeTab, setActiveTab] = useState<'unlinked' | 'all' | 'linked'>('unlinked');
+  const [activeTab, setActiveTab] = useState<'unlinked' | 'linked' | 'all'>('unlinked');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [debouncedSearch, setDebouncedSearch] = useState<string>('');
   const [actionSuccessBanner, setActionSuccessBanner] = useState<string>('');
@@ -700,11 +700,11 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         {/* Barra de Filtros e Busca */}
         <div className="bg-white rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           {/* Abas de Filtro */}
-          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
+          <div className="grid grid-cols-3 gap-1 bg-slate-100 p-1 rounded-xl w-full sm:flex sm:w-auto sm:gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => setActiveTab('unlinked')}
-              className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`flex-1 sm:flex-none px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'unlinked'
                   ? 'bg-white text-amber-950 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -719,7 +719,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('linked')}
-              className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`flex-1 sm:flex-none px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'linked'
                   ? 'bg-white text-emerald-950 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -734,7 +734,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab('all')}
-              className={`flex-1 sm:flex-none px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+              className={`flex-1 sm:flex-none px-2 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeTab === 'all'
                   ? 'bg-white text-slate-900 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'

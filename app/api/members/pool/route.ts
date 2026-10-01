@@ -37,11 +37,20 @@ async function getCachedUnits(supabase: any, churchId: string) {
   if (cached && cached.expiry > now) {
     return { data: cached.data, error: null };
   }
-  const res = await supabase
+  let res = await supabase
     .from('unidades')
     .select('id, nome')
     .eq('igreja_id', churchId)
     .eq('ativo', true);
+  if (res.error && (res.error.code === '42P01' || res.error.message?.includes('does not exist'))) {
+    const fallbackCells = await supabase
+      .from('cells')
+      .select('id, name')
+      .eq('church_id', churchId);
+    if (!fallbackCells.error && fallbackCells.data) {
+      res = { data: fallbackCells.data.map((c: any) => ({ id: c.id, nome: c.name })), error: null };
+    }
+  }
   if (!res.error && res.data) {
     serverUnitsCache.set(churchId, { data: res.data, expiry: now + 2 * 60 * 1000 });
   }
@@ -54,7 +63,7 @@ async function getCachedUnits(supabase: any, churchId: string) {
  * Implementa:
  * 1. Paginação por cursor / limit (25 itens por página com cursor baseado em (nome, id))
  * 2. SELECT APENAS das colunas estritamente necessárias (id, nome, funcao, papel_id, unidade_id, bairro, telefone, url_avatar). Sem email, status_frequencia, percentual_frequencia ou senha_hash.
- * 3. Busca e filtros no servidor (search, filter: all|unlinked|linked)
+ * 3. Busca e filtros no servidor (search por nome, bairro, telefone ou nome da célula; filter: all|unlinked|linked)
  * 4. Consulta direta das tabelas novas (membros, unidades) em join ou lote único sem cascata N+1
  */
 export async function GET(req: NextRequest) {
@@ -80,11 +89,33 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
+    // Busca unidades primeiro para resolver os IDs de células na busca textual
+    const unitsRes = await getCachedUnits(supabase, churchId);
+    const unitList: any[] = unitsRes.data || [];
+
+    // Se houver termo de busca, verifica se coincide com o nome de alguma célula/unidade
+    let matchingUnitIds: string[] = [];
+    if (search) {
+      const s = search.toLowerCase().trim();
+      const searchWords = s
+        .split(/\s+/)
+        .filter((w) => w.length >= 3 && w !== 'celula' && w !== 'célula');
+
+      matchingUnitIds = unitList
+        .filter((u: any) => {
+          const uName = (u.nome || u.name || '').toLowerCase();
+          if (!uName) return false;
+          if (uName.includes(s) || s.includes(uName)) return true;
+          return searchWords.some((word) => uName.includes(word));
+        })
+        .map((u: any) => u.id);
+    }
+
     // 1. Consulta em lote único e paralelo:
-    // Query de membros com projeção restrita (sem senha_hash, email, status_frequencia, percentual_frequencia) + contadores + unidades
+    // Query de membros com projeção restrita + contadores exatos via HEAD
     const isFirstPage = !cursorName && !cursorId;
 
-    const [membersRes, unitsRes, countsRes] = await Promise.all([
+    const [membersRes, countsRes] = await Promise.all([
       (() => {
         // SELECT estrito sem senha_hash, email, status_frequencia ou percentual_frequencia
         let q = supabase
@@ -99,8 +130,18 @@ export async function GET(req: NextRequest) {
         }
 
         if (search) {
-          // Busca trigram / ilike no servidor
-          q = q.or(`nome.ilike.%${search}%,bairro.ilike.%${search}%,telefone.ilike.%${search}%`);
+          // Busca por nome, bairro, telefone ou célula vinculada
+          const orConditions = [
+            `nome.ilike.%${search}%`,
+            `bairro.ilike.%${search}%`,
+            `telefone.ilike.%${search}%`,
+          ];
+          if (matchingUnitIds.length > 0) {
+            matchingUnitIds.forEach((uid) => {
+              orConditions.push(`unidade_id.eq.${uid}`);
+            });
+          }
+          q = q.or(orConditions.join(','));
         }
 
         // Paginação por cursor: (nome > cursorName) ou (nome = cursorName e id > cursorId)
@@ -112,7 +153,6 @@ export async function GET(req: NextRequest) {
 
         return q;
       })(),
-      getCachedUnits(supabase, churchId),
       isFirstPage && !search
         ? Promise.all([
             supabase.from('membros').select('id', { count: 'exact', head: true }).eq('igreja_id', churchId),
@@ -139,7 +179,17 @@ export async function GET(req: NextRequest) {
       }
 
       if (search) {
-        fallbackQuery = fallbackQuery.ilike('nome', `%${search}%`);
+        const fallbackOrConditions = [
+          `nome.ilike.%${search}%`,
+          `bairro.ilike.%${search}%`,
+          `telefone.ilike.%${search}%`,
+        ];
+        if (matchingUnitIds.length > 0) {
+          matchingUnitIds.forEach((uid) => {
+            fallbackOrConditions.push(`celula_id.eq.${uid}`);
+          });
+        }
+        fallbackQuery = fallbackQuery.or(fallbackOrConditions.join(','));
       }
 
       if (cursorName && cursorId) {

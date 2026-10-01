@@ -23,8 +23,10 @@ import {
   Square,
   Check,
   Loader2,
+  FileText,
 } from 'lucide-react';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
+import { LeadershipReportModal } from './LeadershipReportModal';
 
 interface LeadershipOverviewViewProps {
   members: CellMember[];
@@ -51,6 +53,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'completed' | 'pending'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showStagesGuide, setShowStagesGuide] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [memberStepsStatusMap, setMemberStepsStatusMap] = useState<
     Record<string, Record<string, { completed: boolean; completedAt?: string }>>
   >({});
@@ -568,21 +571,35 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
               </div>
             </div>
 
-            {/* Botão Guia de Etapas do Trilho */}
-            <button
-              type="button"
-              onClick={() => setShowStagesGuide((prev) => !prev)}
-              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer self-start sm:self-auto shrink-0"
-            >
-              <BookOpen size={14} className="text-sky-800" />
-              <span>{showStagesGuide ? 'Ocultar Guia' : 'Ver Guia de Etapas'}</span>
-              <ChevronDown
-                size={14}
-                className={`transition-transform duration-200 ${
-                  showStagesGuide ? 'rotate-180' : ''
-                }`}
-              />
-            </button>
+            {/* Ações do Topo: Guia de Etapas e Gerar Relatório PDF */}
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+              {/* Botão Guia de Etapas do Trilho */}
+              <button
+                type="button"
+                onClick={() => setShowStagesGuide((prev) => !prev)}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer shrink-0 whitespace-nowrap"
+              >
+                <BookOpen size={14} className="text-sky-800 shrink-0" />
+                <span>{showStagesGuide ? 'Ocultar Etapas' : 'Ver Etapas'}</span>
+                <ChevronDown
+                  size={14}
+                  className={`transition-transform duration-200 shrink-0 ${
+                    showStagesGuide ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
+              {/* Botão Gerar Relatório */}
+              <button
+                type="button"
+                onClick={() => setIsReportModalOpen(true)}
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-[#052447] hover:bg-[#073366] text-white text-xs font-bold rounded-xl transition cursor-pointer shrink-0 shadow-2xs active:scale-95 whitespace-nowrap"
+                title="Gerar relatório em PDF com Nome do Membro, Célula, Etapa do Trilho e Status"
+              >
+                <FileText size={14} className="text-sky-300 shrink-0" />
+                <span>Gerar Relatório</span>
+              </button>
+            </div>
           </div>
 
           {/* Guia Expansível das Etapas Cadastradas */}
@@ -620,28 +637,18 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                 <Network size={16} />
               </div>
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="text-xs font-bold text-slate-800">
-                    {isCellLeaderRole
-                      ? 'Suas Células sob Liderança'
-                      : isSectorLeaderRole
-                      ? 'Seu Setor de Células'
-                      : 'Navegação Hierárquica'}
-                  </span>
-                  <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-1.5 py-0.5 rounded-md">
-                    {currentUser?.role || 'Liderança'}
-                  </span>
-                  {isSectorLeaderRole && currentUser?.sector && (
-                    <span className="text-[10px] bg-sky-50 text-sky-800 font-bold px-1.5 py-0.5 rounded-md border border-sky-200/60 truncate max-w-[130px]">
-                      {currentUser.sector}
-                    </span>
-                  )}
-                </div>
-                <p className="text-[10px] sm:text-[11px] text-slate-500 truncate">
+                <h4 className="text-xs font-bold text-slate-800">
+                  {isCellLeaderRole
+                    ? 'Suas Células sob Liderança'
+                    : isSectorLeaderRole
+                    ? 'Seu Setor de Células'
+                    : 'Navegação Hierárquica'}
+                </h4>
+                <p className="text-[10px] sm:text-[11px] text-slate-500 truncate mt-0.5">
                   {isCellLeaderRole
                     ? `Você lidera ${userLedCells.length} células. Selecione para alternar o trilho.`
                     : isSectorLeaderRole
-                    ? `Células sob sua coordenação (${accessibleCells.length} disponíveis)`
+                    ? 'Células sob sua coordenação'
                     : 'Filtre por setor ou célula para visualizar o trilho dos discípulos'}
                 </p>
               </div>
@@ -1174,6 +1181,23 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Modal para Gerar Relatório em PDF do Trilho */}
+      <LeadershipReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        filteredMembers={filteredMembers}
+        levelMembers={levelMembers}
+        stages={stages}
+        cells={cells}
+        currentCellName={currentCellName}
+        selectedSectorFilter={selectedSectorFilter}
+        selectedStageFilter={selectedStageFilter}
+        selectedStatusFilter={selectedStatusFilter}
+        currentUser={currentUser}
+        isStepCompleted={isStepCompleted}
+        getStepCompletedDate={getStepCompletedDate}
+      />
     </div>
   );
 };
