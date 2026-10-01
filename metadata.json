@@ -1,6 +1,6 @@
 {
   "name": "AppChurch",
-  "description": "Plataforma multi-igreja para gestão de células e lifegroups, feed de notícias, avisos gerais, controle de membros, frequência e trilho de liderança integrado ao Supabase.",
+  "description": "Aplicativo para gestão de igrejas em Célula, com feed de notícias, controle de membros, realatórios, frequência e acompanhamento de toda a trajetória de Membro a liderança.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
