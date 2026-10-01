@@ -769,8 +769,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                   alt={currentUser.name}
                   width={40}
                   height={40}
-                  loading="lazy"
-                  decoding="async"
+                  priority
                   className="w-full h-full object-cover"
                   unoptimized
                   referrerPolicy="no-referrer"
@@ -1020,7 +1019,8 @@ export const FeedView: React.FC<FeedViewProps> = ({
                             alt={post.authorName}
                             width={40}
                             height={40}
-                            loading="lazy"
+                            priority={postIndex === 0}
+                            {...(postIndex > 0 ? { loading: 'lazy' as const } : {})}
                             decoding="async"
                             className="w-full h-full object-cover"
                             unoptimized

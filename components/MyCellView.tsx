@@ -37,6 +37,9 @@ import {
   Sparkles,
   Check,
   CheckCircle2,
+  Mail,
+  ArrowRightLeft,
+  Phone,
 } from 'lucide-react';
 
 interface MyCellViewProps {
@@ -53,6 +56,7 @@ interface MyCellViewProps {
     newStatus: AttendanceStatus,
     newPercentage: number
   ) => void;
+  onUpdateMember?: (updatedMember: CellMember, previousCellId?: string) => Promise<void> | void;
   onUpdateCell?: (updatedCell: CellGroup) => Promise<void> | void;
 }
 
@@ -125,6 +129,37 @@ const calculateAge = (dateStr: string): number | null => {
   return age >= 0 && age <= 130 ? age : null;
 };
 
+/**
+ * Formata o aniversário para exibição estritamente em 'dd/MM',
+ * mesmo que no banco ou cadastro esteja armazenado com ano (ex: 'dd/MM/aaaa' ou 'aaaa-MM-dd').
+ */
+export const formatBirthdayDisplay = (dateStr?: string): string => {
+  if (!dateStr || !dateStr.trim() || dateStr === '—') return '—';
+  const clean = dateStr.trim();
+
+  // Caso esteja no formato YYYY-MM-DD
+  if (clean.includes('-')) {
+    const parts = clean.split('-');
+    if (parts.length >= 3) {
+      const d = parts[2].padStart(2, '0').slice(0, 2);
+      const m = parts[1].padStart(2, '0').slice(0, 2);
+      return `${d}/${m}`;
+    }
+  }
+
+  // Caso esteja no formato dd/MM ou dd/MM/yyyy
+  if (clean.includes('/')) {
+    const parts = clean.split('/');
+    if (parts.length >= 2) {
+      const d = parts[0].padStart(2, '0').slice(0, 2);
+      const m = parts[1].padStart(2, '0').slice(0, 2);
+      return `${d}/${m}`;
+    }
+  }
+
+  return clean;
+};
+
 export const MyCellView: React.FC<MyCellViewProps> = ({
   members,
   cell,
@@ -135,6 +170,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   onOpenLeadershipTrack,
   onAddMember,
   onUpdateAttendance,
+  onUpdateMember,
   onUpdateCell,
 }) => {
   const queryClient = useQueryClient();
@@ -163,6 +199,22 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [selectedMemberForAttendance, setSelectedMemberForAttendance] = useState<CellMember | null>(
     null
   );
+
+  // Estados para Modal de Edição de Membro
+  const [editingMember, setEditingMember] = useState<CellMember | null>(null);
+  const [editMemberName, setEditMemberName] = useState('');
+  const [editMemberBirthday, setEditMemberBirthday] = useState('');
+  const [editMemberBirthdayError, setEditMemberBirthdayError] = useState('');
+  const [editMemberPhone, setEditMemberPhone] = useState('');
+  const [editMemberNeighborhood, setEditMemberNeighborhood] = useState('');
+  const [editMemberEmail, setEditMemberEmail] = useState('');
+  const [editMemberRole, setEditMemberRole] = useState<UserRole>('Membro');
+  const [editMemberRoleId, setEditMemberRoleId] = useState<string | undefined>(undefined);
+  const [editMemberCellId, setEditMemberCellId] = useState('');
+  const [isChangingCell, setIsChangingCell] = useState(false);
+  const [editMemberFormError, setEditMemberFormError] = useState('');
+  const [isSubmittingEditMember, setIsSubmittingEditMember] = useState(false);
+  const [memberEditSuccessToast, setMemberEditSuccessToast] = useState('');
 
   // Edit Cell form state
   const [isEditCellModalOpen, setIsEditCellModalOpen] = useState(false);
@@ -977,7 +1029,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setLoginDuplicateError('');
   };
 
-  // Combina os membros carregados diretamente da célula com a lista recebida via props
+  // Combina os membros carregados diretamente da célula com a lista recebida via props, priorizando dados recentes
   const allCellMembers = useMemo(() => {
     const isSameCell = (mCellId?: string, targetCellId?: string) =>
       Boolean(
@@ -987,20 +1039,28 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       );
 
     const fromProps = members.filter((m) => isSameCell(m.cellId, cell.id));
+    const mergedMap = new Map<string, CellMember>();
 
+    // 1. Carrega os membros diretos da consulta da célula
     if (directCellMembers && directCellMembers.length > 0) {
-      const mergedMap = new Map<string, CellMember>();
-      directCellMembers.forEach((m) => mergedMap.set(m.id, m));
-      // Preserva adições otimistas feitas localmente nas props
-      fromProps.forEach((m) => {
-        if (!mergedMap.has(m.id)) {
+      directCellMembers.forEach((m) => {
+        if (isSameCell(m.cellId, cell.id)) {
           mergedMap.set(m.id, m);
         }
       });
-      return Array.from(mergedMap.values());
     }
 
-    return fromProps;
+    // 2. Mescla e sobrepõe com as atualizações mais recentes locais passadas pelas props
+    fromProps.forEach((m) => {
+      const existing = mergedMap.get(m.id);
+      if (existing) {
+        mergedMap.set(m.id, { ...existing, ...m });
+      } else {
+        mergedMap.set(m.id, m);
+      }
+    });
+
+    return Array.from(mergedMap.values());
   }, [directCellMembers, members, cell.id]);
 
   // Filtra membros da célula ativa por busca, papel e frequência
@@ -1135,6 +1195,231 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       }
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // --- MÉTODOS E ESTADOS DERIVADOS PARA O MODAL DE EDIÇÃO DE MEMBRO ---
+
+  // Nível hierárquico do membro selecionado para edição
+  const editingMemberLevel = useMemo(() => {
+    if (!editingMember) return 1;
+    const matched = availableRoles.find(
+      (r) =>
+        r.id === editingMember.roleId ||
+        r.name?.toLowerCase() === editingMember.role?.toLowerCase()
+    );
+    if (matched) return matched.hierarchyLevel;
+    const roleLower = (editingMember.role || '').toLowerCase();
+    if (roleLower.includes('pastor')) return 7;
+    if (roleLower.includes('distrito')) return 6;
+    if (roleLower.includes('rede')) return 5;
+    if (roleLower.includes('área') || roleLower.includes('area')) return 4;
+    if (roleLower.includes('setor')) return 3;
+    if (roleLower.includes('célula') || roleLower.includes('celula')) return 2;
+    return 1;
+  }, [editingMember, availableRoles]);
+
+  // Se o membro tiver nível hierárquico estritamente maior que o usuário logado (usuário não pode mexer na função)
+  const isEditingMemberSuperior = useMemo(() => {
+    if (!currentUser) return false;
+    if (isPastorOrAdmin) return false;
+    return editingMemberLevel > userHierarchyLevel;
+  }, [currentUser, isPastorOrAdmin, editingMemberLevel, userHierarchyLevel]);
+
+  // Células da igreja disponíveis para transferência (ordenadas A-Z)
+  const availableTransferCells = useMemo(() => {
+    const list = cells && cells.length > 0 ? cells : [cell];
+    return [...list].sort((a, b) =>
+      a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' })
+    );
+  }, [cells, cell]);
+
+  const handleOpenEditMemberModal = (member: CellMember) => {
+    setEditingMember(member);
+    setEditMemberName(member.name || '');
+    setEditMemberEmail(member.email || '');
+    setEditMemberPhone(member.phone || '');
+    setEditMemberNeighborhood(member.neighborhood || '');
+
+    // Formata o aniversário para exibição estritamente em 'dd/MM' (apenas traz o dado já cadastrado)
+    const rawBirth = member.birthday || '';
+    const formattedShort = formatBirthdayDisplay(rawBirth);
+    setEditMemberBirthday(formattedShort === '—' ? '' : formattedShort);
+    setEditMemberBirthdayError('');
+
+    // Papel atual do membro
+    const matchedRole = availableRoles.find(
+      (r) =>
+        r.id === member.roleId ||
+        r.name?.toLowerCase() === member.role?.toLowerCase()
+    );
+    if (matchedRole) {
+      setEditMemberRole(matchedRole.name as UserRole);
+      setEditMemberRoleId(matchedRole.id);
+    } else {
+      setEditMemberRole(member.role || 'Membro');
+      setEditMemberRoleId(member.roleId);
+    }
+
+    setEditMemberCellId(member.cellId || cell.id);
+    setIsChangingCell(false);
+    setEditMemberFormError('');
+  };
+
+  const handleCloseEditMemberModal = () => {
+    setEditingMember(null);
+    setEditMemberName('');
+    setEditMemberBirthday('');
+    setEditMemberBirthdayError('');
+    setEditMemberEmail('');
+    setEditMemberPhone('');
+    setEditMemberNeighborhood('');
+    setEditMemberFormError('');
+    setIsChangingCell(false);
+  };
+
+  const handleEditMemberBirthdayTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    const digits = raw.replace(/\D/g, '').slice(0, 8);
+
+    let formatted = '';
+    if (!digits) {
+      formatted = '';
+    } else if (digits.length <= 2) {
+      formatted = digits;
+    } else if (digits.length <= 4) {
+      formatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}`;
+    } else {
+      formatted = `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4, 8)}`;
+    }
+
+    setEditMemberBirthday(formatted);
+
+    if (digits.length === 8) {
+      const result = validateBirthday(formatted);
+      if (!result.valid) {
+        setEditMemberBirthdayError(result.error || 'Data de aniversário inexistente.');
+      } else {
+        setEditMemberBirthdayError('');
+      }
+    } else if (digits.length === 4) {
+      const result = validateBirthday(formatted);
+      if (!result.valid) {
+        setEditMemberBirthdayError(result.error || 'Data inexistente.');
+      } else {
+        setEditMemberBirthdayError('');
+      }
+    } else {
+      setEditMemberBirthdayError('');
+    }
+  };
+
+  const handleSaveMemberEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMember) return;
+
+    const trimmedName = editMemberName.trim();
+    if (!trimmedName) {
+      setEditMemberFormError('Por favor, informe o nome do membro.');
+      return;
+    }
+
+    if (editMemberBirthday.trim()) {
+      const res = validateBirthday(editMemberBirthday.trim());
+      if (!res.valid) {
+        setEditMemberFormError(res.error || 'Data de aniversário inexistente. Formato: dd/MM ou dd/MM/aaaa.');
+        return;
+      }
+    }
+
+    if (editMemberEmail.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(editMemberEmail.trim())) {
+        setEditMemberFormError('Por favor, informe um endereço de e-mail válido.');
+        return;
+      }
+    }
+
+    // Validação estrita de nível hierárquico: usuário não pode colocar função com nível > dele próprio
+    let finalRoleToSave = editMemberRole;
+    let finalRoleIdToSave = editMemberRoleId;
+
+    if (!isEditingMemberSuperior) {
+      const targetRoleObj = assignableRoles.find(
+        (r) => r.name === editMemberRole || r.id === editMemberRoleId
+      );
+      if (targetRoleObj) {
+        if (!isPastorOrAdmin && targetRoleObj.hierarchyLevel > userHierarchyLevel) {
+          setEditMemberFormError('Você não possui permissão para atribuir uma função superior ao seu nível.');
+          return;
+        }
+        finalRoleToSave = targetRoleObj.name as UserRole;
+        finalRoleIdToSave = targetRoleObj.id;
+      }
+    } else {
+      // Preserva a função original intocada caso o membro tenha cargo superior
+      finalRoleToSave = editingMember.role;
+      finalRoleIdToSave = editingMember.roleId;
+    }
+
+    setIsSubmittingEditMember(true);
+    setEditMemberFormError('');
+
+    try {
+      const updated = await AppChurchService.updateMember(
+        editingMember.id,
+        {
+          name: trimmedName,
+          birthday: editMemberBirthday.trim(),
+          email: editMemberEmail.trim(),
+          phone: editMemberPhone.trim(),
+          neighborhood: editMemberNeighborhood.trim(),
+          role: finalRoleToSave,
+          roleId: finalRoleIdToSave,
+          cellId: editMemberCellId,
+        },
+        { forceRoleOverride: true }
+      );
+
+      // 1. Atualização Otimista Imediata no cache do React Query da célula de origem (sem latência de rede)
+      queryClient.setQueryData(['cell-members', cell.id], (old: CellMember[] | undefined) => {
+        if (!old) return old;
+        if (editMemberCellId !== cell.id) {
+          return old.filter((m) => m.id !== updated.id);
+        }
+        return old.map((m) => (m.id === updated.id ? { ...m, ...updated } : m));
+      });
+
+      // 2. Se foi transferido para outra célula, atualiza o cache da célula de destino
+      if (editMemberCellId !== cell.id) {
+        queryClient.setQueryData(['cell-members', editMemberCellId], (old: CellMember[] | undefined) => {
+          if (!old) return [updated];
+          return [...old.filter((m) => m.id !== updated.id), updated];
+        });
+      }
+
+      // 3. Notifica o estado geral da aplicação
+      if (onUpdateMember) {
+        await onUpdateMember(updated, cell.id);
+      }
+
+      const destCell = availableTransferCells.find((c) => c.id === editMemberCellId);
+      const isCellChanged = editMemberCellId !== cell.id;
+      const toastText = isCellChanged
+        ? `${trimmedName} transferido(a) para a Célula ${destCell?.name || 'selecionada'}!`
+        : `Informações de ${trimmedName} atualizadas com sucesso!`;
+
+      setMemberEditSuccessToast(toastText);
+      setTimeout(() => {
+        setMemberEditSuccessToast('');
+      }, 4000);
+
+      setEditingMember(null);
+    } catch (err: any) {
+      console.error('Erro ao atualizar membro:', err);
+      setEditMemberFormError(err?.message || 'Erro ao salvar alterações do membro.');
+    } finally {
+      setIsSubmittingEditMember(false);
     }
   };
 
@@ -1515,15 +1800,18 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       </button>
                     </div>
 
-                    {/* Nome do Membro */}
+                    {/* Nome do Membro (Clique para abrir modal de edição) */}
                     <div className="flex-1 min-w-0 pl-1.5 sm:pl-3 pr-1 text-left">
-                      <span
-                        onClick={() => onOpenLeadershipTrack(member)}
-                        className="text-xs sm:text-base font-semibold text-[#0a2540] hover:text-sky-700 cursor-pointer truncate block"
-                        title={member.name}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditMemberModal(member)}
+                        className="text-xs sm:text-base font-semibold text-[#0a2540] hover:text-sky-700 cursor-pointer truncate block text-left group/name w-full focus:outline-none"
+                        title={`Editar informações de ${member.name}`}
                       >
-                        {member.name}
-                      </span>
+                        <span className="group-hover/name:underline underline-offset-2">
+                          {member.name}
+                        </span>
+                      </button>
                       {member.neighborhood && (
                         <span className="text-[10px] text-slate-400 md:hidden truncate block">
                           {member.neighborhood}
@@ -1549,7 +1837,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
                     {/* Aniversário (dd/MM) */}
                     <div className="w-12 sm:w-20 text-center shrink-0 text-[11px] sm:text-sm font-medium text-[#0a2540]">
-                      {member.birthday || '—'}
+                      {formatBirthdayDisplay(member.birthday)}
                     </div>
 
                     {/* Trilho Button (Notebook contact icon matching Screenshot) */}
@@ -1613,7 +1901,14 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   key={option.id}
                   onClick={() => {
                     onUpdateAttendance(selectedMemberForAttendance.id, option.id, option.pct);
-                    queryClient.invalidateQueries({ queryKey: ['cell-members', cell?.id] });
+                    queryClient.setQueryData(['cell-members', cell?.id], (old: CellMember[] | undefined) => {
+                      if (!old) return old;
+                      return old.map((m) =>
+                        m.id === selectedMemberForAttendance.id
+                          ? { ...m, attendanceStatus: option.id, attendancePercentage: option.pct }
+                          : m
+                      );
+                    });
                     setSelectedMemberForAttendance(null);
                   }}
                   className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-left text-xs font-semibold transition cursor-pointer ${
@@ -2146,6 +2441,309 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* Modal Compacto de Edição de Informações do Membro */}
+      {editingMember && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in select-none"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-edit-member-title"
+        >
+          <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+            {/* Cabeçalho */}
+            <div className="px-4 py-3 sm:px-5 sm:py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-[#052447] text-white flex items-center justify-center font-bold text-xs sm:text-sm shrink-0 shadow-2xs">
+                  {editingMember.name ? editingMember.name.slice(0, 2).toUpperCase() : <User size={16} />}
+                </div>
+                <div className="min-w-0">
+                  <h3 id="modal-edit-member-title" className="text-sm sm:text-base font-bold text-slate-800 truncate">
+                    Editar Membro
+                  </h3>
+                  <p className="text-[11px] text-slate-500 truncate">
+                    Célula {cell.name} · <span className="font-semibold text-slate-700">{editingMember.role}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEditMemberModal}
+                className="text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 p-1.5 rounded-full transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Formulário */}
+            <form onSubmit={handleSaveMemberEdit} className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5">
+              {/* Nome */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Nome Completo:
+                </label>
+                <input
+                  type="text"
+                  required
+                  id="input-edit-member-name"
+                  value={editMemberName}
+                  onChange={(e) => setEditMemberName(e.target.value)}
+                  placeholder="Ex: João da Silva"
+                  className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                />
+              </div>
+
+              {/* Grid 2 colunas: Aniversário + Telefone */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Data de Aniversário (mostra o dado cadastrado, sem abrir datepicker) */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                      <Calendar className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                      <span>Aniversário:</span>
+                    </label>
+                    {calculateAge(editMemberBirthday) !== null && (
+                      <span className="text-[10px] font-bold text-sky-800 bg-sky-100 px-1.5 py-0.2 rounded">
+                        {calculateAge(editMemberBirthday)} anos
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    id="input-edit-member-birthday"
+                    value={editMemberBirthday}
+                    onChange={handleEditMemberBirthdayTextChange}
+                    placeholder="dd/MM ou aaaa"
+                    maxLength={10}
+                    className={`w-full text-xs sm:text-sm px-3 py-2 rounded-xl border ${
+                      editMemberBirthdayError
+                        ? 'border-rose-400 bg-rose-50/40 text-rose-950 focus:border-rose-500'
+                        : 'border-slate-300 focus:border-[#052447]'
+                    } focus:outline-none font-medium text-slate-800`}
+                  />
+                  {editMemberBirthdayError && (
+                    <p className="mt-1 text-[10px] font-semibold text-rose-600 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      {editMemberBirthdayError}
+                    </p>
+                  )}
+                </div>
+
+                {/* Telefone */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                    <Phone className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                    <span>Telefone:</span>
+                  </label>
+                  <input
+                    type="tel"
+                    id="input-edit-member-phone"
+                    value={editMemberPhone}
+                    onChange={(e) => setEditMemberPhone(e.target.value)}
+                    placeholder="(XX) XXXXX-XXXX"
+                    className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Grid 2 colunas: E-mail + Bairro */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* E-mail */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                    <Mail className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                    <span>E-mail:</span>
+                  </label>
+                  <input
+                    type="email"
+                    id="input-edit-member-email"
+                    value={editMemberEmail}
+                    onChange={(e) => setEditMemberEmail(e.target.value)}
+                    placeholder="membro@email.com"
+                    className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                  />
+                </div>
+
+                {/* Bairro */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                    <span>Bairro:</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="input-edit-member-neighborhood"
+                    value={editMemberNeighborhood}
+                    onChange={(e) => setEditMemberNeighborhood(e.target.value)}
+                    placeholder="Ex: Centro"
+                    className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Função na Igreja (apenas os nomes das funções, sem descrever nível ao lado) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                  <Layers className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                  <span>Função na Igreja:</span>
+                </label>
+
+                {isEditingMemberSuperior ? (
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50/70 border border-amber-200 text-amber-900 text-xs">
+                    <Lock className="w-4 h-4 text-amber-700 shrink-0" />
+                    <span className="leading-tight">
+                      Função atual: <strong>{editingMember.role}</strong>. Nível superior ao seu acesso — a função está protegida.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <select
+                      id="select-edit-member-role"
+                      value={editMemberRole}
+                      onChange={(e) => {
+                        const newR = e.target.value as UserRole;
+                        setEditMemberRole(newR);
+                        const matched = availableRoles.find((r) => r.name === newR);
+                        if (matched) {
+                          setEditMemberRoleId(matched.id);
+                        }
+                      }}
+                      className="w-full text-xs sm:text-sm py-2 px-3 pr-8 rounded-xl border border-slate-300 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#052447] cursor-pointer appearance-none"
+                    >
+                      {assignableRoles.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500">
+                      <ChevronDown size={15} />
+                    </div>
+                  </div>
+                )}
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {isEditingMemberSuperior
+                    ? 'Função de nível superior preservada conforme regras de autoridade.'
+                    : 'Funções disponíveis para este membro.'}
+                </p>
+              </div>
+
+              {/* Botão para Alterar Célula (caso o membro esteja mudando de célula) */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+                      Célula de Lotação
+                    </span>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <Users className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                      <span className="text-xs sm:text-sm font-bold text-slate-800 truncate">
+                        {availableTransferCells.find((c) => c.id === editMemberCellId)?.name
+                          ? `Célula ${availableTransferCells.find((c) => c.id === editMemberCellId)?.name}`
+                          : `Célula ${cell.name}`}
+                      </span>
+                      {editMemberCellId !== cell.id && (
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-1.5 py-0.2 rounded shrink-0">
+                          Transferência
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsChangingCell(!isChangingCell)}
+                    className="shrink-0 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-[#052447] transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <ArrowRightLeft size={13} className="text-[#052447]" />
+                    <span>{isChangingCell ? 'Cancelar Mudança' : 'Alterar Célula'}</span>
+                  </button>
+                </div>
+
+                {/* Seletor compacto quando o usuário clica em Alterar Célula */}
+                {isChangingCell && (
+                  <div className="mt-3 pt-3 border-t border-slate-200 animate-in fade-in space-y-2">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Selecione a nova célula para este membro:
+                    </label>
+                    <div className="relative">
+                      <select
+                        id="select-transfer-cell"
+                        value={editMemberCellId}
+                        onChange={(e) => setEditMemberCellId(e.target.value)}
+                        className="w-full text-xs sm:text-sm py-2 px-3 pr-8 rounded-xl border border-slate-300 bg-white font-medium text-slate-800 focus:outline-none focus:border-[#052447] cursor-pointer appearance-none"
+                      >
+                        {availableTransferCells.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.id === cell.id ? `✓ Célula ${c.name} (Atual)` : `Célula ${c.name}`}
+                            {c.leaderName ? ` — Líder: ${c.leaderName}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500">
+                        <ChevronDown size={15} />
+                      </div>
+                    </div>
+
+                    {editMemberCellId !== cell.id && (
+                      <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200/80 rounded-lg p-2 leading-relaxed">
+                        ⚠️ Ao salvar, <strong>{editingMember.name}</strong> deixará a <strong>Célula {cell.name}</strong> e será transferido(a) para a <strong>Célula {availableTransferCells.find((c) => c.id === editMemberCellId)?.name || ''}</strong>.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Mensagem de Erro de Validação */}
+              {editMemberFormError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0 text-rose-600" />
+                  <span>{editMemberFormError}</span>
+                </div>
+              )}
+
+              {/* Rodapé / Ações */}
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleCloseEditMemberModal}
+                  disabled={isSubmittingEditMember}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  id="btn-confirm-save-member-edit"
+                  disabled={isSubmittingEditMember || !editMemberName.trim()}
+                  className="px-4 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#093563] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isSubmittingEditMember ? (
+                    <>
+                      <Loader2 size={13} className="animate-spin" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check size={14} />
+                      <span>Salvar Alterações</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Toast flutuante de sucesso ao editar ou transferir membro */}
+      {memberEditSuccessToast && (
+        <div className="fixed bottom-5 right-5 z-50 bg-[#052447] text-white px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2.5 border border-slate-700 animate-in fade-in slide-in-from-bottom-2 select-none">
+          <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+          <span className="text-xs sm:text-sm font-semibold">{memberEditSuccessToast}</span>
         </div>
       )}
     </div>

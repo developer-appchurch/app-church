@@ -428,6 +428,34 @@ export default function Home() {
     );
   };
 
+  const handleUpdateMember = async (updatedMember: CellMember, previousCellId?: string) => {
+    // 1. Atualização imediata no estado local de members
+    setMembers((prev) =>
+      prev.map((m) => (m.id === updatedMember.id ? { ...m, ...updatedMember } : m))
+    );
+
+    // 2. Atualização direta no cache do React Query (sem requisição extra à rede)
+    if (previousCellId && previousCellId !== updatedMember.cellId) {
+      queryClient.setQueryData(['cell-members', previousCellId], (old: CellMember[] | undefined) => {
+        if (!old) return old;
+        return old.filter((m) => m.id !== updatedMember.id);
+      });
+      queryClient.setQueryData(['cell-members', updatedMember.cellId], (old: CellMember[] | undefined) => {
+        if (!old) return [updatedMember];
+        return [...old.filter((m) => m.id !== updatedMember.id), updatedMember];
+      });
+    } else if (updatedMember.cellId) {
+      queryClient.setQueryData(['cell-members', updatedMember.cellId], (old: CellMember[] | undefined) => {
+        if (!old) return old;
+        return old.map((m) => (m.id === updatedMember.id ? { ...m, ...updatedMember } : m));
+      });
+    }
+
+    if (user?.churchId) {
+      queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] });
+    }
+  };
+
   const handleUpdateCell = async (updatedCell: CellGroup) => {
     // 1. Atualização no estado local
     setCells((prev) =>
@@ -748,6 +776,7 @@ export default function Home() {
               onOpenLeadershipTrack={(member) => setSelectedMemberForTrack(member)}
               onAddMember={handleAddMember}
               onUpdateAttendance={handleUpdateAttendance}
+              onUpdateMember={handleUpdateMember}
               onUpdateCell={handleUpdateCell}
             />
           )}

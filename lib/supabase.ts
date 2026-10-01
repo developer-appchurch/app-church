@@ -4114,6 +4114,9 @@ export const AppChurchService = {
       roleId: finalRoleId || existing.roleId,
       neighborhood: updates.neighborhood !== undefined ? updates.neighborhood : existing.neighborhood,
       birthday: updates.birthday !== undefined ? updates.birthday : existing.birthday,
+      phone: updates.phone !== undefined ? updates.phone : existing.phone,
+      email: updates.email !== undefined ? updates.email : existing.email,
+      cellId: updates.cellId !== undefined ? updates.cellId : existing.cellId,
       attendanceStatus: updates.attendanceStatus !== undefined ? updates.attendanceStatus : existing.attendanceStatus,
       attendancePercentage: updates.attendancePercentage !== undefined ? updates.attendancePercentage : existing.attendancePercentage,
     };
@@ -4123,6 +4126,7 @@ export const AppChurchService = {
       allMembers.map((m) => (m.id === memberId ? updatedItem : m))
     );
 
+    invalidateMemoryCache('members');
     return updatedItem;
   },
 

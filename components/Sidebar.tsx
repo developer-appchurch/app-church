@@ -363,6 +363,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 alt={user.name}
                 width={48}
                 height={48}
+                priority
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                 unoptimized
                 referrerPolicy="no-referrer"
