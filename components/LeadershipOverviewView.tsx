@@ -23,10 +23,8 @@ import {
   Square,
   Check,
   Loader2,
-  FileText,
 } from 'lucide-react';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
-import { generateLeadershipTrackPdf } from '../lib/trackPdfGenerator';
 
 interface LeadershipOverviewViewProps {
   members: CellMember[];
@@ -63,11 +61,6 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
   const [isBatchSaving, setIsBatchSaving] = useState(false);
   const [batchSuccessMessage, setBatchSuccessMessage] = useState<string | null>(null);
   const [batchErrorMessage, setBatchErrorMessage] = useState<string | null>(null);
-
-  // Exportação de Relatório PDF
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  const [pdfSuccessMessage, setPdfSuccessMessage] = useState<string | null>(null);
-  const [pdfErrorMessage, setPdfErrorMessage] = useState<string | null>(null);
 
   const isBatchModeActive = selectedStageFilter !== 'all' && selectedStatusFilter === 'pending';
 
@@ -539,55 +532,6 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
     }
   };
 
-  const handleGeneratePdf = async () => {
-    if (filteredMembers.length === 0 || isGeneratingPdf) return;
-
-    setIsGeneratingPdf(true);
-    setPdfSuccessMessage(null);
-    setPdfErrorMessage(null);
-
-    try {
-      // Pequeno yield para garantir renderização imediata do spinner no botão
-      await new Promise((resolve) => setTimeout(resolve, 80));
-
-      const stageTitle =
-        selectedStageFilter === 'all'
-          ? 'Todas as Etapas'
-          : selectedStageObject?.title || 'Etapa Selecionada';
-
-      const churchName =
-        currentUser?.churchName ||
-        currentCell?.churchName ||
-        'Igreja Local';
-
-      generateLeadershipTrackPdf({
-        members: filteredMembers,
-        cells,
-        stages,
-        currentCellName,
-        selectedStageTitle: stageTitle,
-        selectedStatusFilter,
-        churchName,
-        generatedByName: currentUser?.name,
-        isStepCompleted,
-      });
-
-      setPdfSuccessMessage(
-        `Relatório PDF gerado e baixado com sucesso! (${filteredMembers.length} discípulo(s) incluídos)`
-      );
-      setTimeout(() => {
-        setPdfSuccessMessage(null);
-      }, 5000);
-    } catch (err: any) {
-      console.error('Erro ao gerar relatório PDF:', err);
-      setPdfErrorMessage(
-        err?.message || 'Não foi possível gerar o arquivo PDF. Por favor, tente novamente.'
-      );
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
-
   const getAttendanceDot = (status: AttendanceStatus) => {
     switch (status) {
       case 'green':
@@ -624,75 +568,22 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
               </div>
             </div>
 
-            {/* Ações do Topo */}
-            <div className="flex items-center gap-2 flex-wrap self-start sm:self-auto shrink-0">
-              {/* Botão Gerar Relatório PDF */}
-              <button
-                type="button"
-                id="btn-generate-track-pdf"
-                onClick={handleGeneratePdf}
-                disabled={isGeneratingPdf || filteredMembers.length === 0}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-[#052447] hover:bg-[#073366] text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-xs active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
-                title="Gerar e baixar Relatório PDF com Nome, Célula, Etapa do Trilho e Status"
-              >
-                {isGeneratingPdf ? (
-                  <Loader2 size={14} className="animate-spin text-sky-300" />
-                ) : (
-                  <FileText size={14} className="text-sky-300" />
-                )}
-                <span>{isGeneratingPdf ? 'Gerando...' : 'Relatório PDF'}</span>
-              </button>
-
-              {/* Botão Guia de Etapas do Trilho */}
-              <button
-                type="button"
-                onClick={() => setShowStagesGuide((prev) => !prev)}
-                className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer shrink-0"
-              >
-                <BookOpen size={14} className="text-sky-800" />
-                <span>{showStagesGuide ? 'Ocultar Guia' : 'Ver Guia de Etapas'}</span>
-                <ChevronDown
-                  size={14}
-                  className={`transition-transform duration-200 ${
-                    showStagesGuide ? 'rotate-180' : ''
-                  }`}
-                />
-              </button>
-            </div>
+            {/* Botão Guia de Etapas do Trilho */}
+            <button
+              type="button"
+              onClick={() => setShowStagesGuide((prev) => !prev)}
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer self-start sm:self-auto shrink-0"
+            >
+              <BookOpen size={14} className="text-sky-800" />
+              <span>{showStagesGuide ? 'Ocultar Guia' : 'Ver Guia de Etapas'}</span>
+              <ChevronDown
+                size={14}
+                className={`transition-transform duration-200 ${
+                  showStagesGuide ? 'rotate-180' : ''
+                }`}
+              />
+            </button>
           </div>
-
-          {/* Feedback de sucesso ou erro na geração do PDF */}
-          {pdfSuccessMessage && (
-            <div className="mt-3 bg-sky-50 border border-sky-300 text-sky-950 rounded-xl p-3 flex items-center justify-between gap-2 shadow-2xs animate-in fade-in duration-200 text-xs font-bold">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 size={16} className="text-sky-700 shrink-0" />
-                <span>{pdfSuccessMessage}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPdfSuccessMessage(null)}
-                className="text-xs font-bold text-sky-700 hover:text-sky-950 px-2 py-0.5 rounded cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-          )}
-
-          {pdfErrorMessage && (
-            <div className="mt-3 bg-rose-50 border border-rose-300 text-rose-950 rounded-xl p-3 flex items-center justify-between gap-2 shadow-2xs animate-in fade-in duration-200 text-xs font-bold">
-              <div className="flex items-center gap-2">
-                <AlertCircle size={16} className="text-rose-600 shrink-0" />
-                <span>{pdfErrorMessage}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPdfErrorMessage(null)}
-                className="text-xs font-bold text-rose-700 hover:text-rose-950 px-2 py-0.5 rounded cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
-          )}
 
           {/* Guia Expansível das Etapas Cadastradas */}
           {showStagesGuide && (
