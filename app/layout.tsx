@@ -4,18 +4,18 @@ import { AppQueryProvider } from '@/components/AppQueryProvider';
 import './globals.css'; // Global styles
 
 export const metadata: Metadata = {
-  title: 'AppChurch - Gestão de Igrejas e Células',
-  description: 'Plataforma multi-igreja para gestão de células e lifegroups, feed de notícias, avisos gerais, controle de membros, frequência e trilho de liderança integrado ao Supabase.',
+  title: 'AppChurch - Gestão de Igrejas em Célula',
+  description: 'Aplicativo para gestão de igrejas em Célula, com feed de notícias, controle de membros, relatórios, frequência e acompanhamento de toda a trajetória de Membro a liderança.',
   manifest: "/site.webmanifest",
   openGraph: {
-    title: 'AppChurch - Gestão de Igrejas e Células',
-    description: 'Plataforma multi-igreja para gestão de células e lifegroups, feed de notícias, avisos gerais, controle de membros, frequência e trilho de liderança integrado ao Supabase.',
+    title: 'AppChurch - Gestão de Igrejas em Célula',
+    description: 'Aplicativo para gestão de igrejas em Célula, com feed de notícias, controle de membros, relatórios, frequência e acompanhamento de toda a trajetória de Membro a liderança.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'AppChurch - Gestão de Igrejas e Células',
-    description: 'Plataforma multi-igreja para gestão de células e lifegroups, feed de notícias, avisos gerais, controle de membros, frequência e trilho de liderança integrado ao Supabase.',
+    title: 'AppChurch - Gestão de Igrejas em Célula',
+    description: 'Aplicativo para gestão de igrejas em Célula, com feed de notícias, controle de membros, relatórios, frequência e acompanhamento de toda a trajetória de Membro a liderança.',
   },
 };
 
