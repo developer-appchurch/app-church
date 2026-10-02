@@ -1,3 +1,4 @@
+// SYNC-TEST-2026-10-02-001 (comentário temporário para validar sync GitHub <-> AI Studio — pode remover)
 import type {Metadata, Viewport} from 'next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import { AppQueryProvider } from '@/components/AppQueryProvider';
