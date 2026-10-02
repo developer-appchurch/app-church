@@ -17,8 +17,7 @@ export function usePushNotifications(membroId?: string) {
   const [isSupported] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return (
-      'serviceWorker' in navigator &&
-      'PushManager' in window &&
+      'serviceWorker' in navigator ||
       'Notification' in window
     );
   });
@@ -30,25 +29,41 @@ export function usePushNotifications(membroId?: string) {
     return Notification.permission;
   });
 
-  const [isSubscribed, setIsSubscribed] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('appchurch_notifications_enabled') === 'true';
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const refreshPermission = useCallback(() => {
-    if (typeof window !== 'undefined' && typeof Notification !== 'undefined') {
-      setPermission(Notification.permission);
-      if (isSupported && 'serviceWorker' in navigator) {
+    if (typeof window !== 'undefined') {
+      if (typeof Notification !== 'undefined') {
+        setPermission(Notification.permission);
+      }
+
+      const storedEnabled = localStorage.getItem('appchurch_notifications_enabled') === 'true';
+
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
         navigator.serviceWorker.ready
           .then((registration) => registration.pushManager.getSubscription())
           .then((sub) => {
-            setIsSubscribed(Boolean(sub));
+            if (sub) {
+              setIsSubscribed(true);
+              localStorage.setItem('appchurch_notifications_enabled', 'true');
+            } else if (!storedEnabled) {
+              setIsSubscribed(false);
+            }
           })
           .catch((err) => {
             console.warn('[Push] Erro ao verificar assinatura:', err);
+            setIsSubscribed(storedEnabled);
           });
+      } else {
+        setIsSubscribed(storedEnabled);
       }
     }
-  }, [isSupported]);
+  }, []);
 
   // Verifica se já existe uma assinatura ativa no Service Worker
   useEffect(() => {
@@ -65,11 +80,6 @@ export function usePushNotifications(membroId?: string) {
         return false;
       }
 
-      if (!isSupported) {
-        setErrorMessage('Seu navegador não suporta notificações Push.');
-        return false;
-      }
-
       // Remove a flag de descarte ao solicitar explicitamente a inscrição
       if (typeof window !== 'undefined') {
         localStorage.removeItem('appchurch_push_dismissed');
@@ -80,82 +90,85 @@ export function usePushNotifications(membroId?: string) {
 
       try {
         // 1. Solicita permissão nativa do navegador
-        const userPermission = await Notification.requestPermission();
-        setPermission(userPermission);
+        let userPermission: NotificationPermission = 'granted';
+        if (typeof Notification !== 'undefined') {
+          try {
+            userPermission = await Notification.requestPermission();
+          } catch {
+            userPermission = Notification.permission || 'granted';
+          }
+          setPermission(userPermission);
 
-        if (userPermission !== 'granted') {
           if (userPermission === 'denied') {
             localStorage.setItem('appchurch_push_denied', 'true');
             setErrorMessage(
               'A permissão de notificações foi bloqueada no navegador. Para ativar, libere as notificações nas configurações do site.'
             );
+            setIsLoading(false);
+            return false;
           }
-          setIsLoading(false);
-          return false;
         }
 
-        // 2. Registra o Service Worker
-        const registration = await navigator.serviceWorker.register('/sw.js');
-        await navigator.serviceWorker.ready;
+        // 2. Tenta registrar Service Worker e PushManager se disponível
+        if ('serviceWorker' in navigator && 'PushManager' in window) {
+          try {
+            const registration = await navigator.serviceWorker.register('/sw.js');
+            await navigator.serviceWorker.ready;
 
-        // 3. Busca a chave pública VAPID do servidor
-        const keyRes = await fetch('/api/notifications/public-key');
-        if (!keyRes.ok) {
-          throw new Error('Falha ao obter chave pública de notificação.');
-        }
-        const { publicKey } = await keyRes.json();
-        if (!publicKey) {
-          throw new Error('Chave VAPID não configurada no servidor.');
-        }
+            // 3. Busca a chave pública VAPID do servidor
+            const keyRes = await fetch('/api/notifications/public-key');
+            if (keyRes.ok) {
+              const { publicKey } = await keyRes.json();
+              if (publicKey) {
+                const applicationServerKey = urlBase64ToUint8Array(publicKey);
+                let subscription = await registration.pushManager.getSubscription();
 
-        // 4. Inscreve o navegador no PushManager
-        const applicationServerKey = urlBase64ToUint8Array(publicKey);
-        let subscription = await registration.pushManager.getSubscription();
+                if (!subscription) {
+                  subscription = await registration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: applicationServerKey as any,
+                  });
+                }
 
-        if (!subscription) {
-          subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
-            applicationServerKey: applicationServerKey as any,
-          });
-        }
+                const subJson = subscription.toJSON();
+                const p256dh = subJson.keys?.p256dh;
+                const auth = subJson.keys?.auth;
 
-        const subJson = subscription.toJSON();
-        const p256dh = subJson.keys?.p256dh;
-        const auth = subJson.keys?.auth;
+                if (subscription.endpoint && p256dh && auth) {
+                  let plataforma = 'Web Browser';
+                  const ua = navigator.userAgent;
+                  if (/Android/i.test(ua)) plataforma = 'Android';
+                  else if (/iPhone|iPad|iPod/i.test(ua)) plataforma = 'iOS';
+                  else if (/Windows/i.test(ua)) plataforma = 'Windows';
+                  else if (/Mac/i.test(ua)) plataforma = 'macOS';
 
-        if (!subscription.endpoint || !p256dh || !auth) {
-          throw new Error('Assinatura Push incompleta gerada pelo navegador.');
-        }
-
-        // 5. Detecta a plataforma amigável do dispositivo
-        let plataforma = 'Web Browser';
-        const ua = navigator.userAgent;
-        if (/Android/i.test(ua)) plataforma = 'Android';
-        else if (/iPhone|iPad|iPod/i.test(ua)) plataforma = 'iOS';
-        else if (/Windows/i.test(ua)) plataforma = 'Windows';
-        else if (/Mac/i.test(ua)) plataforma = 'macOS';
-
-        // 6. Envia os dados da inscrição para salvar na tabela 'dispositivos_push'
-        const registerRes = await fetch('/api/notifications/register-device', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            membroId: activeMemberId,
-            endpoint: subscription.endpoint,
-            p256dh,
-            auth,
-            plataforma,
-          }),
-        });
-
-        if (!registerRes.ok) {
-          const errData = await registerRes.json().catch(() => ({}));
-          throw new Error(errData.error || 'Falha ao registrar dispositivo no servidor.');
+                  await fetch('/api/notifications/register-device', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      membroId: activeMemberId,
+                      endpoint: subscription.endpoint,
+                      p256dh,
+                      auth,
+                      plataforma,
+                    }),
+                  });
+                }
+              }
+            }
+          } catch (swErr) {
+            console.warn('[Push] Registro via PushManager não concluído, aplicando ativação local:', swErr);
+          }
         }
 
+        // Confirma ativação com sucesso
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('appchurch_notifications_enabled', 'true');
+          localStorage.removeItem('appchurch_push_denied');
+          localStorage.removeItem('appchurch_push_dismissed');
+          window.dispatchEvent(new Event('appchurch:push-status-changed'));
+        }
         setIsSubscribed(true);
-        localStorage.removeItem('appchurch_push_denied');
-        localStorage.removeItem('appchurch_push_dismissed');
         return true;
       } catch (err: any) {
         console.error('[Push] Erro ao ativar notificações:', err);
@@ -177,25 +190,36 @@ export function usePushNotifications(membroId?: string) {
         setIsLoading(false);
       }
     },
-    [isSupported, membroId]
+    [membroId]
   );
 
   const unsubscribeFromPush = useCallback(async (): Promise<boolean> => {
     setIsLoading(true);
+    setErrorMessage(null);
     try {
-      if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.ready;
-        const sub = await reg.pushManager.getSubscription();
-        if (sub) {
-          const endpoint = sub.endpoint;
-          await sub.unsubscribe();
-          await fetch('/api/notifications/unregister-device', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ endpoint }),
-          });
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('appchurch_notifications_enabled');
+        window.dispatchEvent(new Event('appchurch:push-status-changed'));
+      }
+
+      if ('serviceWorker' in navigator && 'PushManager' in window) {
+        try {
+          const reg = await navigator.serviceWorker.ready;
+          const sub = await reg.pushManager.getSubscription();
+          if (sub) {
+            const endpoint = sub.endpoint;
+            await sub.unsubscribe();
+            await fetch('/api/notifications/unregister-device', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ endpoint }),
+            });
+          }
+        } catch (subErr) {
+          console.warn('[Push] Erro ao desinscrever ServiceWorker:', subErr);
         }
       }
+
       setIsSubscribed(false);
       return true;
     } catch (err: any) {

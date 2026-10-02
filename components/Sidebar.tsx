@@ -92,6 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     isLoading: isPushLoading,
     errorMessage: pushErrorMessage,
     subscribeToPush,
+    unsubscribeFromPush,
     refreshPermission: refreshPushPermission,
   } = usePushNotifications(user?.id);
 
@@ -120,11 +121,32 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isPushHelpModalOpen, setIsPushHelpModalOpen] = useState(false);
   const [pushFeedbackMessage, setPushFeedbackMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const handleReactivateNotifications = async () => {
+  const handleToggleNotifications = async () => {
     if (!user) return;
     setPushFeedbackMessage(null);
 
-    // 1. Remove qualquer flag de dismiss e denied do localStorage
+    // Se já estiver ativo, realiza a desativação
+    if (isPushSubscribed) {
+      const success = await unsubscribeFromPush();
+      if (success) {
+        setPushFeedbackMessage({
+          type: 'success',
+          text: 'Notificações desativadas para este dispositivo.',
+        });
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('appchurch:reset-push-banner'));
+        }
+        setTimeout(() => setPushFeedbackMessage(null), 3500);
+      } else {
+        setPushFeedbackMessage({
+          type: 'error',
+          text: 'Não foi possível desativar as notificações.',
+        });
+      }
+      return;
+    }
+
+    // Se estiver desativado, ativa
     if (typeof window !== 'undefined') {
       localStorage.removeItem('appchurch_push_dismissed');
       localStorage.removeItem('appchurch_push_denied');
@@ -133,27 +155,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     refreshPushPermission();
 
-    // 2. Verifica a permissão atual em tempo real
-    if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-      setIsPushHelpModalOpen(true);
-      return;
-    }
-
-    // 3. Se for 'default' ou 'granted', dispara o fluxo de inscrição
     const success = await subscribeToPush(user.id);
     if (success) {
       setPushFeedbackMessage({
         type: 'success',
-        text: 'Notificações ativadas com sucesso! Você receberá alertas de relatórios pendentes.',
+        text: 'Notificações ativadas com sucesso! Status atualizado para verde.',
       });
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new Event('appchurch:reset-push-banner'));
       }
-      setTimeout(() => setPushFeedbackMessage(null), 4000);
+      setTimeout(() => setPushFeedbackMessage(null), 3500);
     } else {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
-        setIsPushHelpModalOpen(true);
-      }
+      setPushFeedbackMessage({
+        type: 'error',
+        text: pushErrorMessage || 'Permissão bloqueada ou não concedida pelo navegador.',
+      });
     }
   };
 
@@ -865,21 +881,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <button
                 type="button"
+                id="btn-toggle-push-action"
                 onClick={async () => {
-                  await handleReactivateNotifications();
+                  await handleToggleNotifications();
                 }}
                 disabled={isPushLoading}
-                className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] active:scale-95 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                className={`px-4 py-2 text-xs font-bold active:scale-95 rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                  isPushSubscribed
+                    ? 'text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300'
+                    : 'text-white bg-[#04213d] hover:bg-[#073366]'
+                }`}
               >
                 {isPushLoading ? (
                   <>
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Verificando...</span>
+                    <Loader2 size={14} className={`animate-spin ${isPushSubscribed ? 'text-rose-600' : 'text-white'}`} />
+                    <span>{isPushSubscribed ? 'Desativando...' : 'Ativando...'}</span>
                   </>
                 ) : isPushSubscribed ? (
                   <>
-                    <RefreshCw size={14} />
-                    <span>Sincronizar Permissão</span>
+                    <BellOff size={14} className="text-rose-600" />
+                    <span>Desativar Notificações</span>
                   </>
                 ) : pushPermission === 'denied' ? (
                   <>
@@ -888,8 +909,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </>
                 ) : (
                   <>
-                    <Bell size={14} />
-                    <span>Liberar Notificações</span>
+                    <BellRing size={14} />
+                    <span>Ativar Notificações</span>
                   </>
                 )}
               </button>

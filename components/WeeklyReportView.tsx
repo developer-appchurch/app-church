@@ -172,10 +172,118 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     return members.filter((m) => m.cellId === currentCellId);
   }, [directMembers, members, currentCellId]);
 
-  // Células ordenadas alfabeticamente para o seletor
+  // Busca as células sob cobertura hierárquica do usuário
+  const { data: coveredCellsData } = useQuery({
+    queryKey: ['user-covered-cells', currentUser?.id, currentUser?.churchId],
+    queryFn: async () => {
+      if (!currentUser?.id || !currentUser?.churchId) return null;
+      const res = await fetch(
+        `/api/hierarchy/user-covered-cells?userId=${encodeURIComponent(currentUser.id)}&churchId=${encodeURIComponent(currentUser.churchId)}`
+      );
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: Boolean(currentUser?.id && currentUser?.churchId),
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // Filtra estritamente as células que o usuário tem autorização para lançar relatório
+  const allowedCells = useMemo(() => {
+    if (!currentUser) return cells;
+
+    const userRoleNorm = (currentUser.role || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const isSystemAdmin =
+      currentUser.isSystemAdmin === true ||
+      currentUser.role === 'Administrador' ||
+      currentUser.login === 'admin' ||
+      currentUser.email === 'developer.appchurch@gmail.com';
+    const isPastor = userRoleNorm.includes('pastor');
+
+    // 1. Pastores e Administradores possuem acesso total a todas as células da igreja
+    if (isSystemAdmin || isPastor) {
+      return cells;
+    }
+
+    // 2. Se a API de cobertura hierárquica retornou IDs específicos
+    if (coveredCellsData) {
+      if (coveredCellsData.isAllCells) return cells;
+      if (Array.isArray(coveredCellsData.cellIds) && coveredCellsData.cellIds.length > 0) {
+        const allowedSet = new Set(coveredCellsData.cellIds);
+        const filtered = cells.filter((c) => allowedSet.has(c.id));
+        if (filtered.length > 0) return filtered;
+      }
+    }
+
+    // 3. Fallback inteligente de cobertura baseado na hierarquia (Setor, Área, Célula)
+    const userCellId = currentUser.currentCellId || currentUser.cellId;
+    const isLeaderSector = userRoleNorm.includes('setor') || userRoleNorm.includes('supervisor');
+    const isLeaderArea = userRoleNorm.includes('area');
+
+    if (isLeaderSector && currentUser.sector) {
+      const sectorNorm = currentUser.sector.toLowerCase().trim();
+      const sectorCells = cells.filter(
+        (c) =>
+          (c.sectorName && c.sectorName.toLowerCase().trim() === sectorNorm) ||
+          (c.parentName && c.parentName.toLowerCase().trim() === sectorNorm) ||
+          c.id === userCellId ||
+          c.leaderMemberIds?.includes(currentUser.id)
+      );
+      if (sectorCells.length > 0) return sectorCells;
+    }
+
+    if (isLeaderArea) {
+      const areaCells = cells.filter(
+        (c) =>
+          (c.areaName && c.areaName.toLowerCase().trim() === (currentUser.sector || '').toLowerCase().trim()) ||
+          c.id === userCellId ||
+          c.leaderMemberIds?.includes(currentUser.id)
+      );
+      if (areaCells.length > 0) return areaCells;
+    }
+
+    // 4. Para Líder de Célula e membros comuns: APENAS a célula vinculada e células onde é líder
+    const directCells = cells.filter((c) => {
+      const isHomeCell = Boolean(userCellId && c.id === userCellId);
+      const isDirectLeader = Boolean(
+        currentUser.id &&
+        (c.leaderMemberIds?.includes(currentUser.id) ||
+         c.leaderNames?.some((n) => n.toLowerCase() === currentUser.name.toLowerCase()))
+      );
+      return isHomeCell || isDirectLeader;
+    });
+
+    if (directCells.length > 0) return directCells;
+
+    // Se nenhuma outra for encontrada, mantém apenas a célula atual vinculada
+    if (currentCell) return [currentCell];
+    return cells;
+  }, [cells, coveredCellsData, currentUser, currentCell]);
+
+  // Células autorizadas ordenadas alfabeticamente para o seletor
   const sortedCells = useMemo(() => {
-    return [...cells].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-  }, [cells]);
+    return [...allowedCells].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [allowedCells]);
+
+  // Regra de negócio: Sempre vir selecionada a célula vinculada do usuário e impedir seleção de células não autorizadas
+  useEffect(() => {
+    if (sortedCells.length > 0 && onSelectCell) {
+      const userCellId = currentUser?.currentCellId || currentUser?.cellId;
+      const isCurrentAllowed = sortedCells.some((c) => c.id === currentCell?.id);
+
+      if (!isCurrentAllowed) {
+        // Se a célula atualmente selecionada no estado global não é permitida para este usuário,
+        // força a seleção para a célula vinculada do usuário ou para a primeira célula autorizada
+        const target =
+          userCellId && sortedCells.some((c) => c.id === userCellId)
+            ? userCellId
+            : sortedCells[0].id;
+
+        if (target && target !== currentCell?.id) {
+          onSelectCell(target);
+        }
+      }
+    }
+  }, [sortedCells, currentCell?.id, currentUser?.currentCellId, currentUser?.cellId, onSelectCell]);
 
   // Função para formatar input de moeda (PIX / Espécie)
   const handleCurrencyChange = (
@@ -526,8 +634,8 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
 
           {/* Seletor de Célula (Estilo My Cell) & Botão Lançar Relatório Lado a Lado */}
           <div className="flex flex-row items-center gap-2 justify-start md:justify-end shrink-0 w-full md:w-auto">
-            {/* Seletor de Célula em Ordem Alfabética (A-Z) */}
-            {cells.length > 1 && onSelectCell && (
+            {/* Seletor de Célula em Ordem Alfabética (A-Z) para células sob cobertura */}
+            {sortedCells.length > 1 && onSelectCell ? (
               <div className="flex items-center gap-1.5 bg-white/10 hover:bg-white/15 border border-white/20 rounded-xl pl-2 pr-2.5 sm:px-2.5 py-2 min-w-0 shadow-2xs transition flex-1 sm:flex-initial">
                 <span className="text-[10px] sm:text-xs font-bold text-sky-200 shrink-0 hidden sm:inline">
                   Célula:
@@ -546,7 +654,16 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   ))}
                 </select>
               </div>
-            )}
+            ) : sortedCells.length === 1 ? (
+              <div className="flex items-center gap-1.5 bg-white/10 border border-white/20 rounded-xl px-2.5 py-2 min-w-0 shadow-2xs">
+                <span className="text-[10px] sm:text-xs font-bold text-sky-200 shrink-0 hidden sm:inline">
+                  Célula:
+                </span>
+                <span className="text-xs font-bold text-white truncate max-w-[160px]" title={sortedCells[0].name}>
+                  {sortedCells[0].name}
+                </span>
+              </div>
+            ) : null}
 
             <button
               type="button"
