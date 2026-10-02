@@ -248,6 +248,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   // Login uniqueness validation state
   const [loginDuplicateError, setLoginDuplicateError] = useState('');
   const [isCheckingLogin, setIsCheckingLogin] = useState(false);
+  const [suggestedLogin, setSuggestedLogin] = useState('');
+  const [isSuggestingLogin, setIsSuggestingLogin] = useState(false);
   const [formError, setFormError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -993,13 +995,26 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     const candidate = loginToTest.trim().toLowerCase();
     if (!candidate) {
       setLoginDuplicateError('');
+      setSuggestedLogin('');
       return;
     }
     setIsCheckingLogin(true);
+    setSuggestedLogin('');
     try {
       const check = await AppChurchService.isLoginAvailable(candidate);
       if (!check.available) {
         setLoginDuplicateError(check.error || 'Este login já está em uso. Por favor, escolha outro login.');
+        // Busca automaticamente uma variação disponível (ex: joao.silva -> joao.silva2)
+        // para não travar o cadastro quando duas igrejas usam nomes parecidos.
+        setIsSuggestingLogin(true);
+        try {
+          const suggestion = await AppChurchService.suggestAvailableLogin(candidate);
+          if (suggestion) setSuggestedLogin(suggestion);
+        } catch {
+          // ignore - sugestão é um extra, não bloqueia o fluxo
+        } finally {
+          setIsSuggestingLogin(false);
+        }
       } else {
         setLoginDuplicateError('');
       }
@@ -1008,6 +1023,17 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     } finally {
       setIsCheckingLogin(false);
     }
+  };
+
+  /**
+   * Aplica a sugestão de login disponível encontrada automaticamente.
+   */
+  const handleApplySuggestedLogin = async () => {
+    if (!suggestedLogin) return;
+    setNewLogin(suggestedLogin);
+    setIsLoginManuallyEdited(true);
+    setSuggestedLogin('');
+    await handleValidateLogin(suggestedLogin);
   };
 
   const handleOpenAddModal = () => {
@@ -1021,6 +1047,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setNewPhone('');
     setFormError('');
     setLoginDuplicateError('');
+    setSuggestedLogin('');
     if (assignableRoles.length > 0) {
       setNewRole(assignableRoles[0].name as UserRole);
     } else {
@@ -2054,10 +2081,27 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       } focus:outline-none focus:border-[#052447]`}
                     />
                     {loginDuplicateError ? (
-                      <p className="mt-1 text-[11px] font-semibold text-rose-600 flex items-center gap-1">
-                        <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                        {loginDuplicateError}
-                      </p>
+                      <div className="mt-1 space-y-1">
+                        <p className="text-[11px] font-semibold text-rose-600 flex items-center gap-1">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          {loginDuplicateError}
+                        </p>
+                        {isSuggestingLogin ? (
+                          <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            Procurando um login disponível...
+                          </p>
+                        ) : suggestedLogin ? (
+                          <button
+                            type="button"
+                            onClick={handleApplySuggestedLogin}
+                            className="text-[11px] font-bold text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 px-2 py-1 rounded-lg flex items-center gap-1.5 transition cursor-pointer"
+                          >
+                            <UserCheck className="w-3.5 h-3.5 shrink-0" />
+                            Usar sugestão disponível: <span className="underline">{suggestedLogin}</span>
+                          </button>
+                        ) : null}
+                      </div>
                     ) : newLogin.trim() ? (
                       <p className="mt-1 text-[11px] font-medium text-emerald-600 flex items-center gap-1">
                         <UserCheck className="w-3.5 h-3.5 shrink-0" />

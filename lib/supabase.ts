@@ -2200,6 +2200,35 @@ export const AppChurchService = {
   },
 
   /**
+   * Sugere um login alternativo disponível a partir de um login base já ocupado.
+   * Tenta variações sequenciais (base2, base3, ...) e retorna a primeira livre encontrada.
+   * Usado para resolver o atrito de "login já está em uso" sem bloquear o cadastro.
+   */
+  async suggestAvailableLogin(
+    baseLogin: string,
+    excludeMemberId?: string
+  ): Promise<string | null> {
+    const base = baseLogin.trim().toLowerCase().replace(/[^a-z0-9.]/g, '');
+    if (!base) return null;
+
+    // Tenta o próprio base primeiro (caso a disponibilidade tenha mudado)
+    const baseCheck = await this.isLoginAvailable(base, excludeMemberId);
+    if (baseCheck.available) return base;
+
+    // Tenta variações numéricas sequenciais: base2, base3, ... base30
+    for (let suffix = 2; suffix <= 30; suffix++) {
+      const candidate = `${base}${suffix}`;
+      const check = await this.isLoginAvailable(candidate, excludeMemberId);
+      if (check.available) return candidate;
+    }
+
+    // Último recurso: sufixo com timestamp, praticamente impossível de colidir
+    const fallback = `${base}.${Date.now().toString().slice(-4)}`;
+    const fallbackCheck = await this.isLoginAvailable(fallback, excludeMemberId);
+    return fallbackCheck.available ? fallback : null;
+  },
+
+  /**
    * Add Member to a Cell (persists to Supabase + local cache)
    * Guaranteed to assign a valid UUID, validate login uniqueness and explicitly store churchId (igreja_id) & senha_hash.
    */
