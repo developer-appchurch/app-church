@@ -1760,7 +1760,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
             {/* Member Name */}
             {/* mesma largura máxima da coluna de dados abaixo, pra cabeçalho e linhas ficarem alinhados */}
-            <div className="flex-1 min-w-0 max-w-[50%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
+            <div className="flex-1 min-w-0 max-w-[45%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
               Nome do Membro
             </div>
 
@@ -1781,7 +1781,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             </div>
 
             {/* Leadership Track Button */}
-            <div className="w-8 sm:w-14 text-center shrink-0">
+            <div className="w-9 sm:w-14 text-center shrink-0">
               Trilho
             </div>
           </div>
@@ -1838,7 +1838,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
                     {/* Nome do Membro (Clique para abrir modal de edição) */}
                     {/* max-w limitado no mobile para sobrar margem lateral antes da coluna Trilho */}
-                    <div className="flex-1 min-w-0 max-w-[50%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
+                    <div className="flex-1 min-w-0 max-w-[45%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
                       <button
                         type="button"
                         onClick={() => handleOpenEditMemberModal(member)}
@@ -1880,18 +1880,18 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     </div>
 
                     {/* Trilho Button (Notebook contact icon matching Screenshot) */}
-                    <div className="w-8 sm:w-14 text-center shrink-0 flex items-center justify-center">
+                    <div className="w-9 sm:w-14 text-center shrink-0 flex items-center justify-center">
                       <button
                         type="button"
                         onClick={() => onOpenLeadershipTrack(member)}
-                        className="p-1 rounded-lg text-[#0e3056] hover:bg-sky-50 hover:text-sky-700 active:scale-95 transition-all group cursor-pointer"
+                        className="p-0.5 sm:p-1 rounded-lg text-[#0e3056] hover:bg-sky-50 hover:text-sky-700 active:scale-95 transition-all group cursor-pointer"
                         title={`Ver Trilho de Liderança de ${member.name}`}
                         aria-label={`Trilho de liderança de ${member.name}`}
                       >
-                        {/* Tamanho +10% em relação ao original (24px/32px -> 26px/35px) */}
+                        {/* Ícone 28px no mobile / 35px no desktop */}
                         <LeadershipBadgeIcon
-                          className="w-[26px] h-[26px] sm:w-[35px] sm:h-[35px] group-hover:scale-105 transition-transform"
-                          size={26}
+                          className="w-[28px] h-[28px] sm:w-[35px] sm:h-[35px] group-hover:scale-105 transition-transform"
+                          size={28}
                         />
                       </button>
                     </div>
