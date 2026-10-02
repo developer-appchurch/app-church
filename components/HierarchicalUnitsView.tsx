@@ -252,7 +252,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         const [currentLvs, currentUnits, fetchedMembers, fetchedRoles] = await Promise.all([
           cachedLevels.length > 0 ? Promise.resolve(cachedLevels) : AppChurchService.getChurchLevels(effectiveChurchId),
           cachedUnits.length > 0 ? Promise.resolve(cachedUnits) : AppChurchService.getUnits(effectiveChurchId, undefined, 'flat'),
-          AppChurchService.getMembers(effectiveChurchId),
+          // Usada para busca/vínculo de líderes em toda a igreja (modal "vincular líder").
+          // Limite explícito evita consulta global irrestrita ao banco (ver aviso do getMembers).
+          AppChurchService.getMembers(effectiveChurchId, undefined, false, { limit: 2000 }),
           AppChurchService.getRoles(),
         ]);
 
