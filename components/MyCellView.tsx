@@ -1759,7 +1759,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             </div>
 
             {/* Member Name */}
-            <div className="flex-1 min-w-0 pl-1.5 sm:pl-3 text-left">
+            {/* mesma largura máxima da coluna de dados abaixo, pra cabeçalho e linhas ficarem alinhados */}
+            <div className="flex-1 min-w-0 max-w-[40%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
               Nome do Membro
             </div>
 
@@ -1815,7 +1816,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   <div
                     key={member.id}
                     id={`member-row-${member.id}`}
-                    className="bg-white hover:bg-slate-50 transition-colors rounded-xl pl-2 pr-3 sm:px-5 py-2.5 sm:py-3 flex items-center shadow-2xs border border-slate-200/70 w-full"
+                    className="bg-white hover:bg-slate-50 transition-colors rounded-xl px-2 sm:px-5 py-2.5 sm:py-3 flex items-center shadow-2xs border border-slate-200/70 w-full"
                   >
                     {/* Attendance Frequency Circle Dot (Interactive) */}
                     <div className="w-7 sm:w-10 shrink-0 flex items-center justify-center">
@@ -1858,7 +1859,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     {/* Função */}
                     {/* No mobile permite quebra em até 2 linhas (nomes de função maiores, ex: Líder de Setor);
                         no desktop mantém truncamento em 1 linha, já que a coluna é bem mais larga. */}
-                    <div className="w-20 sm:w-36 md:w-44 text-center sm:text-left shrink-0 px-0.5">
+                    <div className="w-20 sm:w-36 md:w-44 text-center sm:text-left shrink-0">
                       <span
                         className="text-[11px] sm:text-sm font-medium leading-tight block whitespace-normal break-words sm:truncate text-[#0a2540]"
                         title={member.role}
