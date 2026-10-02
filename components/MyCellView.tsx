@@ -1760,7 +1760,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
             {/* Member Name */}
             {/* mesma largura máxima da coluna de dados abaixo, pra cabeçalho e linhas ficarem alinhados */}
-            <div className="flex-1 min-w-0 max-w-[55%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
+            <div className="flex-1 min-w-0 max-w-[50%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
               Nome do Membro
             </div>
 
@@ -1838,7 +1838,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
                     {/* Nome do Membro (Clique para abrir modal de edição) */}
                     {/* max-w limitado no mobile para sobrar margem lateral antes da coluna Trilho */}
-                    <div className="flex-1 min-w-0 max-w-[55%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
+                    <div className="flex-1 min-w-0 max-w-[50%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
                       <button
                         type="button"
                         onClick={() => handleOpenEditMemberModal(member)}
