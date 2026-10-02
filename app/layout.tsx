@@ -1,4 +1,5 @@
 import type {Metadata, Viewport} from 'next';
+import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import { AppQueryProvider } from '@/components/AppQueryProvider';
 import './globals.css'; // Global styles
@@ -33,6 +34,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
         <AppQueryProvider>
           {children}
         </AppQueryProvider>
+        <Analytics />
         <SpeedInsights />
       </body>
     </html>
