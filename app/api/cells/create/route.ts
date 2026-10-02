@@ -139,13 +139,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Se houver líder especificado, vincula à célula em unidade_lideres e atualiza membro
+    // 3. Se houver líder especificado, vincula à célula em unidade_lideres e atualiza membro apenas se não possuir célula lar
     if (body.leaderMemberId) {
-      await Promise.all([
-        supabase
-          .from('membros')
-          .update({ unidade_id: unitId })
-          .eq('id', body.leaderMemberId),
+      const { data: memberData } = await supabase
+        .from('membros')
+        .select('id, unidade_id')
+        .eq('id', body.leaderMemberId)
+        .maybeSingle();
+
+      const memberAlreadyHasHomeCell = Boolean(memberData?.unidade_id);
+      const updateTasks: Promise<any>[] = [
         supabase.from('unidade_lideres').insert([
           {
             unidade_id: unitId,
@@ -154,7 +157,18 @@ export async function POST(req: NextRequest) {
             ativo: true,
           },
         ]),
-      ]);
+      ];
+
+      if (!memberAlreadyHasHomeCell) {
+        updateTasks.push(
+          supabase
+            .from('membros')
+            .update({ unidade_id: unitId })
+            .eq('id', body.leaderMemberId)
+        );
+      }
+
+      await Promise.all(updateTasks);
     }
 
     const createdCell: CellGroup = {

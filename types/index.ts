@@ -342,6 +342,7 @@ export interface CreateUnitInput {
   parentId: string | null;
   leaderMemberIds?: string[];
   leaderNames?: string[];
+  setAsHomeCell?: boolean;
   // Specific to leaf / cell level:
   neighborhood?: string;
   address?: string;
@@ -360,6 +361,7 @@ export interface UpdateUnitLeadersInput {
   unitId: string;
   churchId: string;
   leaderMemberIds: string[];
+  setAsHomeCell?: boolean;
 }
 
 export interface RegisterChurchInput {

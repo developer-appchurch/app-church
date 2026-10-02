@@ -72,6 +72,13 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     staleTime: 1000 * 60 * 5, // 5 minutos
   });
 
+  // Sincroniza o estado de unidades quando a query do React Query for atualizada
+  useEffect(() => {
+    if (cachedUnits && cachedUnits.length > 0) {
+      setUnits(cachedUnits);
+    }
+  }, [cachedUnits]);
+
   const [levels, setLevels] = useState<ChurchHierarchicalLevel[]>([]);
   const [activeLevelId, setActiveLevelId] = useState<string>('');
   const [units, setUnits] = useState<OrganizationalUnit[]>([]);
@@ -252,8 +259,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         const [currentLvs, currentUnits, fetchedMembers, fetchedRoles] = await Promise.all([
           cachedLevels.length > 0 ? Promise.resolve(cachedLevels) : AppChurchService.getChurchLevels(effectiveChurchId),
           cachedUnits.length > 0 ? Promise.resolve(cachedUnits) : AppChurchService.getUnits(effectiveChurchId, undefined, 'flat'),
-          // Usada para busca/vínculo de líderes em toda a igreja (modal "vincular líder").
-          // Limite explícito evita consulta global irrestrita ao banco (ver aviso do getMembers).
           AppChurchService.getMembers(effectiveChurchId, undefined, false, { limit: 2000 }),
           AppChurchService.getRoles(),
         ]);
@@ -437,6 +442,23 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         (m.cellName && m.cellName.toLowerCase().includes(term))
     );
   }, [filteredChurchMembers, bindLeaderSearchTerm]);
+
+  // Mapa de membro_id -> lista de nomes de unidades que o membro já lidera atualmente
+  const memberLedUnitsMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    units.forEach((u) => {
+      u.leaders?.forEach((ldr) => {
+        if (ldr.id) {
+          const list = map.get(ldr.id) || [];
+          if (!list.includes(u.name)) {
+            list.push(u.name);
+          }
+          map.set(ldr.id, list);
+        }
+      });
+    });
+    return map;
+  }, [units]);
 
   // Verifica se o nível ativo atual pode ser editado/gerenciado pelo usuário
   const isCurrentActiveLevelAllowed = useMemo(() => {
@@ -870,8 +892,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
       setSuccessBanner(
         result.leaders.length > 0
-          ? `${result.leaders.length} líder(es) vinculado(s) com sucesso a "${unitToBindLeaders.name}"!`
-          : `Líderes atualizados para "${unitToBindLeaders.name}".`
+          ? `Liderança de "${unitToBindLeaders.name}" atualizada com sucesso (${result.leaders.map((l) => l.name).join(', ')}).`
+          : `Liderança atualizada: todos os líderes foram desvinculados de "${unitToBindLeaders.name}".`
       );
 
       setIsBindLeaderModalOpen(false);
@@ -1359,6 +1381,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   ) : (
                     filteredChurchMembers.map((member) => {
                       const isSelected = selectedLeaderIds.includes(member.id);
+                      const ledUnits = memberLedUnitsMap.get(member.id) || [];
+                      const isLeaderElsewhere = ledUnits.length > 0;
                       return (
                         <div
                           key={member.id}
@@ -1369,9 +1393,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                               : 'hover:bg-white text-slate-700 border border-transparent'
                           }`}
                         >
-                          <div className="flex items-center gap-2.5">
+                          <div className="flex items-center gap-2.5 min-w-0">
                             <div
-                              className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] transition ${
+                              className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] shrink-0 transition ${
                                 isSelected
                                   ? 'bg-[#052447] text-white border-[#052447]'
                                   : 'border-slate-300 bg-white'
@@ -1379,16 +1403,24 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                             >
                               {isSelected && <Check size={12} strokeWidth={3} />}
                             </div>
-                            <div className="flex flex-col">
-                              <span className="font-semibold text-slate-800">{member.name}</span>
-                              {member.phone && (
-                                <span className="text-[10px] text-slate-400 font-normal">
-                                  {member.phone}
-                                </span>
-                              )}
+                            <div className="flex flex-col min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-semibold text-slate-800">{member.name}</span>
+                                {isLeaderElsewhere && (
+                                  <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-md">
+                                    Já lidera: {ledUnits.join(', ')}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 text-[10px] text-slate-400 font-normal">
+                                {member.phone && <span>{member.phone}</span>}
+                                {member.cellName && (
+                                  <span className="truncate">• Célula lar: {member.cellName}</span>
+                                )}
+                              </div>
                             </div>
                           </div>
-                          <span className="text-[10px] text-slate-500 font-medium px-2 py-0.5 rounded-md bg-slate-100">
+                          <span className="text-[10px] text-slate-500 font-medium px-2 py-0.5 rounded-md bg-slate-100 shrink-0">
                             {member.role || 'Membro'}
                           </span>
                         </div>
@@ -1397,7 +1429,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   )}
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  Permite duplas de liderança (ex: casal de líderes, vice-líder). Apenas membros desta igreja são listados.
+                  Permite duplas de liderança ou líderes em múltiplas células. O vínculo pessoal da célula lar é preservado.
                 </p>
               </div>
 
@@ -1985,7 +2017,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                     Selecione um ou mais líderes
                   </p>
                   <p className="text-[11px] text-sky-800">
-                    Permite liderança individual, em dupla ou equipe de co-líderes.
+                    Líderes podem liderar múltiplas células simultaneamente. A célula de pertencimento pessoal (lar) é sempre preservada.
                   </p>
                 </div>
                 <button
@@ -2033,6 +2065,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   {bindLeaderSelectedIds.map((id) => {
                     const mem = churchMembers.find((m) => m.id === id);
                     if (!mem) return null;
+                    const otherLedUnits = (memberLedUnitsMap.get(id) || []).filter(
+                      (name) => name !== unitToBindLeaders?.name
+                    );
                     return (
                       <span
                         key={id}
@@ -2040,6 +2075,11 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                       >
                         <UserCheck size={12} className="text-sky-700" />
                         <span>{mem.name}</span>
+                        {otherLedUnits.length > 0 && (
+                          <span className="text-[9px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1 py-0.2 rounded">
+                            +{otherLedUnits.length} célula(s)
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleToggleBindLeader(id)}
@@ -2075,6 +2115,10 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                 ) : (
                   modalFilteredMembers.map((member) => {
                     const isSelected = bindLeaderSelectedIds.includes(member.id);
+                    const ledUnits = (memberLedUnitsMap.get(member.id) || []).filter(
+                      (name) => name !== unitToBindLeaders?.name
+                    );
+                    const isLeaderElsewhere = ledUnits.length > 0;
                     return (
                       <div
                         key={member.id}
@@ -2096,13 +2140,20 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                             {isSelected && <Check size={12} strokeWidth={3} />}
                           </div>
                           <div className="flex flex-col min-w-0">
-                            <span className="font-semibold text-slate-800 truncate">
-                              {member.name}
-                            </span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-semibold text-slate-800 truncate">
+                                {member.name}
+                              </span>
+                              {isLeaderElsewhere && (
+                                <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-md">
+                                  Já lidera: {ledUnits.join(', ')}
+                                </span>
+                              )}
+                            </div>
                             <div className="flex items-center gap-2 text-[10px] text-slate-400 font-normal">
                               {member.phone && <span>{member.phone}</span>}
                               {member.cellName && (
-                                <span className="truncate">• {member.cellName}</span>
+                                <span className="truncate">• Célula lar: {member.cellName}</span>
                               )}
                             </div>
                           </div>

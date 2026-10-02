@@ -196,16 +196,17 @@ export default function Home() {
   const effectiveCells = (queriedCells && queriedCells.length > 0) ? queriedCells : cells;
   const effectiveMembers = members;
 
-  // Garante que selectedCellId seja sincronizado com a célula do usuário logado de forma direta
+  // Garante que selectedCellId seja inicializado ou ajustado se a célula selecionada não existir mais
   useEffect(() => {
     if (effectiveCells.length > 0) {
       const userCellId = user?.currentCellId || user?.cellId;
-      if (userCellId && effectiveCells.some((c) => c.id === userCellId)) {
-        if (selectedCellId !== userCellId) {
+      // Só inicializa ou altera se ainda não houver selectedCellId ou se a célula selecionada não existir na lista
+      if (!selectedCellId || !effectiveCells.some((c) => c.id === selectedCellId)) {
+        if (userCellId && effectiveCells.some((c) => c.id === userCellId)) {
           setSelectedCellId(userCellId);
+        } else {
+          setSelectedCellId(effectiveCells[0].id);
         }
-      } else if (!selectedCellId || !effectiveCells.some((c) => c.id === selectedCellId)) {
-        setSelectedCellId(effectiveCells[0].id);
       }
     }
   }, [effectiveCells, selectedCellId, user?.currentCellId, user?.cellId]);

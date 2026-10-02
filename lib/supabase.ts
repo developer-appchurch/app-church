@@ -1223,25 +1223,34 @@ export const AppChurchService = {
   async updateUnitLeaders(
     unitId: string,
     churchId: string,
-    leaderMemberIds: string[]
+    leaderMemberIds: string[],
+    setAsHomeCell?: boolean
   ): Promise<{ success: boolean; leaders: UnitLeader[]; updatedMembers?: any[] }> {
     if (typeof window !== 'undefined') {
       try {
         const res = await fetch('/api/hierarchy/units', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ unitId, churchId, leaderMemberIds }),
+          body: JSON.stringify({ unitId, churchId, leaderMemberIds, setAsHomeCell }),
         });
         const data = await res.json();
         if (res.ok && data?.success) {
+          // Invalida caches em memória para garantir consistência instantânea nas próximas consultas
+          invalidateMemoryCache('units:');
+          invalidateMemoryCache('cells:');
+          invalidateMemoryCache(`cells:${churchId}`);
+          invalidateMemoryCache(`members:${churchId}`);
+          invalidateMemoryCache(`member_pool_${churchId}`);
+
           // Atualiza também no cache local de cells se houver célula correspondente
           const cachedCells = loadFromStorage<CellGroup[]>(`${STORAGE_KEYS.CELLS}_${churchId}`, []);
           if (cachedCells.length > 0) {
             const updated = cachedCells.map((c) => {
               if (c.id === unitId) {
-                const leaderName =
-                  (data.leaders || []).map((l: any) => l.name).join(' & ') || 'Sem Líder';
-                return { ...c, leaderName };
+                const leaderNames = (data.leaders || []).map((l: any) => l.name);
+                const leaderMemberIds = (data.leaders || []).map((l: any) => l.id);
+                const leaderName = leaderNames.join(' & ') || 'Sem Líder';
+                return { ...c, leaderName, leaderNames, leaderMemberIds };
               }
               return c;
             });

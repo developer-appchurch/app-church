@@ -527,19 +527,34 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
     // 4. Líder de Célula: Apenas as células que lidera ou está vinculado
     if (isCellLeader) {
+      const uNameNorm = (currentUser?.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      const uId = (currentUser?.id || '').toLowerCase().trim();
+      const uCurrentCellId = (currentUser?.currentCellId || currentUser?.cellId || '').toLowerCase().trim();
+
       const matched = cells.filter((c) => {
-        if (currentUser?.currentCellId && c.id === currentUser.currentCellId) return true;
-        if (
-          currentUser?.name &&
-          (c.leaderName?.toLowerCase().includes(currentUser.name.toLowerCase()) ||
-            c.leaderNames?.some((n) => n.toLowerCase().includes(currentUser.name.toLowerCase())))
-        ) {
-          return true;
+        if (c.id === cell.id) return true;
+        if (uCurrentCellId && c.id.toLowerCase() === uCurrentCellId) return true;
+        if (uId && c.leaderMemberIds?.some((id) => id.toLowerCase() === uId)) return true;
+
+        const cLeaderNorm = (c.leaderName || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+        if (uNameNorm && (cLeaderNorm.includes(uNameNorm) || uNameNorm.includes(cLeaderNorm))) return true;
+
+        if (c.leaderNames && uNameNorm) {
+          if (c.leaderNames.some((n) => {
+            const nNorm = n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            return nNorm.includes(uNameNorm) || uNameNorm.includes(nNorm);
+          })) {
+            return true;
+          }
         }
-        if (currentUser?.id && c.leaderMemberIds?.includes(currentUser.id)) return true;
+
         if (units && units.length > 0) {
           const u = units.find((unit) => unit.id === c.id);
-          if (u?.leaders?.some((l) => l.id === currentUser?.id || l.name?.toLowerCase() === currentUser?.name?.toLowerCase())) {
+          if (u?.leaders?.some((l) => {
+            const lId = (l.id || '').toLowerCase().trim();
+            const lNameNorm = (l.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            return (uId && lId === uId) || (uNameNorm && (lNameNorm.includes(uNameNorm) || uNameNorm.includes(lNameNorm)));
+          })) {
             return true;
           }
         }

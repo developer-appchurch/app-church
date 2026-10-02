@@ -782,10 +782,12 @@ export async function POST(req: NextRequest) {
       }
 
       if (currentMembers && currentMembers.length > 0) {
+        const forceSetAsHomeCell = Boolean(input.setAsHomeCell);
         for (const m of currentMembers) {
           const currentRoleInfo = resolveMemberCurrentRole(m, roles || []);
           const shouldUpgradeRole = currentRoleInfo.hierarchyLevel < assumedHierarchyLevel && Boolean(assumedRoleId);
-          const shouldUpdateCellId = Boolean(isLeafLevel);
+          const memberAlreadyHasHomeCell = Boolean(m.unidade_id);
+          const shouldUpdateCellId = Boolean(isLeafLevel) && (!memberAlreadyHasHomeCell || forceSetAsHomeCell);
 
           const finalRoleId = shouldUpgradeRole ? assumedRoleId : currentRoleInfo.roleId;
           const finalRoleName = shouldUpgradeRole ? assumedRoleName : currentRoleInfo.roleName;
@@ -896,7 +898,7 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { unitId, churchId, leaderMemberIds } = body;
+    const { unitId, churchId, leaderMemberIds, setAsHomeCell } = body;
 
     if (!unitId || !churchId) {
       return NextResponse.json(
@@ -945,7 +947,17 @@ export async function PATCH(req: NextRequest) {
       roles || []
     );
 
-    // 3. Remover vínculos antigos na tabela unidade_lideres para esta unidade
+    // 3. Obter líderes anteriores para reconciliação caso algum seja desvinculado
+    const { data: previousLeaders } = await supabase
+      .from('unidade_lideres')
+      .select('pessoa_id')
+      .eq('unidade_id', unitId);
+
+    const prevLeaderIds = (previousLeaders || [])
+      .map((l: any) => l.pessoa_id)
+      .filter(Boolean);
+
+    // Remover vínculos antigos na tabela unidade_lideres para esta unidade
     const { error: deleteErr } = await supabase
       .from('unidade_lideres')
       .delete()
@@ -961,6 +973,56 @@ export async function PATCH(req: NextRequest) {
       : [];
 
     const updatedMembersList: any[] = [];
+
+    // Reconciliação dos líderes que foram removidos desta unidade
+    const removedLeaderIds = prevLeaderIds.filter((id) => !safeLeaderIds.includes(id));
+    if (removedLeaderIds.length > 0) {
+      const defaultMembro = (roles || []).find(
+        (r: any) => r.slug === 'membro' || (r.nome && r.nome.toLowerCase().includes('membro')) || r.nivel_hierarquia === 1
+      );
+      const membroRoleId = defaultMembro?.id || 'b2000000-0000-0000-0000-000000000003';
+      const membroRoleName = defaultMembro?.nome || 'Membro';
+
+      for (const remId of removedLeaderIds) {
+        // Verifica se o membro ainda lidera alguma outra unidade ativa na igreja
+        const { data: otherUnitsLed } = await supabase
+          .from('unidade_lideres')
+          .select('unidade_id, papel')
+          .eq('pessoa_id', remId)
+          .eq('ativo', true);
+
+        if (!otherUnitsLed || otherUnitsLed.length === 0) {
+          // Se não lidera mais nenhuma unidade, rebaixa seu papel para Membro (a menos que seja Pastor/Admin)
+          const { data: memData } = await supabase
+            .from('membros')
+            .select('id, nome, papel_id, funcao')
+            .eq('id', remId)
+            .maybeSingle();
+
+          if (memData) {
+            const currentFuncao = (memData.funcao || '').toLowerCase();
+            const isProtected = currentFuncao.includes('pastor') || currentFuncao.includes('administrador');
+            if (!isProtected) {
+              await supabase
+                .from('membros')
+                .update({
+                  papel_id: membroRoleId,
+                  funcao: membroRoleName,
+                  atualizado_em: new Date().toISOString(),
+                })
+                .eq('id', remId);
+
+              updatedMembersList.push({
+                id: remId,
+                nome: memData.nome,
+                papel_id: membroRoleId,
+                funcao: membroRoleName,
+              });
+            }
+          }
+        }
+      }
+    }
 
     if (safeLeaderIds.length > 0) {
       const leaderRows = safeLeaderIds.map((mId) => ({
@@ -993,10 +1055,12 @@ export async function PATCH(req: NextRequest) {
       }
 
       if (currentMembers && currentMembers.length > 0) {
+        const forceSetAsHomeCell = Boolean(setAsHomeCell);
         for (const m of currentMembers) {
           const currentRoleInfo = resolveMemberCurrentRole(m, roles || []);
           const shouldUpgradeRole = currentRoleInfo.hierarchyLevel < assumedHierarchyLevel && Boolean(assumedRoleId);
-          const shouldUpdateCellId = Boolean(isLeafLevel);
+          const memberAlreadyHasHomeCell = Boolean(m.unidade_id);
+          const shouldUpdateCellId = Boolean(isLeafLevel) && (!memberAlreadyHasHomeCell || forceSetAsHomeCell);
 
           const finalRoleId = shouldUpgradeRole ? assumedRoleId : currentRoleInfo.roleId;
           const finalRoleName = shouldUpgradeRole ? assumedRoleName : currentRoleInfo.roleName;
