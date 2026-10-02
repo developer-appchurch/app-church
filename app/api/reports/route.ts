@@ -693,3 +693,92 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message || 'Erro interno' }, { status: 500 });
   }
 }
+
+/**
+ * DELETE /api/reports
+ * Exclui um relatório semanal e suas presenças caso ainda não tenha sido validado pela tesouraria
+ */
+export async function DELETE(req: NextRequest) {
+  try {
+    const supabase = getSupabaseAdminClient() || getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Banco de dados não configurado' }, { status: 500 });
+    }
+
+    const { searchParams } = new URL(req.url);
+    let reportId = searchParams.get('id') || searchParams.get('reportId');
+    let cellId = searchParams.get('cellId');
+
+    if (!reportId) {
+      try {
+        const body = await req.json();
+        reportId = body.id || body.reportId;
+        cellId = body.cellId || cellId;
+      } catch {
+        // Sem body JSON
+      }
+    }
+
+    if (!reportId) {
+      return NextResponse.json({ error: 'ID do relatório é obrigatório' }, { status: 400 });
+    }
+
+    // Busca o relatório para checar tesouraria_recebido e obter unidade_id
+    const { data: existingReport, error: fetchError } = await supabase
+      .from('relatorios_semanais')
+      .select('id, unidade_id, tesouraria_recebido')
+      .eq('id', reportId)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.error('[DELETE /api/reports] Erro ao buscar relatório:', fetchError);
+      return NextResponse.json({ error: fetchError.message }, { status: 500 });
+    }
+
+    if (!existingReport) {
+      return NextResponse.json({ error: 'Relatório não encontrado' }, { status: 404 });
+    }
+
+    if (existingReport.tesouraria_recebido) {
+      return NextResponse.json(
+        { error: 'Este relatório já foi validado pela tesouraria e não pode ser excluído.' },
+        { status: 400 }
+      );
+    }
+
+    const targetCellId = cellId || existingReport.unidade_id;
+
+    // 1. Remove presenças associadas
+    const { error: deletePresError } = await supabase
+      .from('relatorio_presencas')
+      .delete()
+      .eq('relatorio_id', reportId);
+
+    if (deletePresError) {
+      console.warn('[DELETE /api/reports] Aviso ao remover presenças:', deletePresError.message);
+    }
+
+    // 2. Remove o relatório
+    const { error: deleteReportError } = await supabase
+      .from('relatorios_semanais')
+      .delete()
+      .eq('id', reportId);
+
+    if (deleteReportError) {
+      console.error('[DELETE /api/reports] Erro ao remover relatório:', deleteReportError);
+      return NextResponse.json({ error: deleteReportError.message }, { status: 500 });
+    }
+
+    // Invalida o cache
+    invalidateServerReportsCache(targetCellId);
+
+    return NextResponse.json({
+      success: true,
+      message: 'Relatório excluído com sucesso.',
+      reportId,
+    });
+  } catch (err: any) {
+    console.error('[DELETE /api/reports] Exceção:', err);
+    return NextResponse.json({ error: err.message || 'Erro interno' }, { status: 500 });
+  }
+}

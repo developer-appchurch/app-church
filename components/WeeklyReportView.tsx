@@ -23,6 +23,7 @@ import {
   Eye,
   History,
   Clock,
+  Trash2,
 } from 'lucide-react';
 
 interface WeeklyReportViewProps {
@@ -115,6 +116,10 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
 
   // Toast feedback
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Estados para exclusão de relatório
+  const [isDeletingReport, setIsDeletingReport] = useState(false);
+  const [reportToDelete, setReportToDelete] = useState<WeeklyReport | null>(null);
 
   // Duplicate report warning modal state
   const [duplicateWarning, setDuplicateWarning] = useState<{
@@ -258,6 +263,35 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     if (currentCell) return [currentCell];
     return cells;
   }, [cells, coveredCellsData, currentUser, currentCell]);
+
+  // Permissão para excluir relatório: Líder da célula ou liderança superior (setor, área, pastor, admin)
+  const canDeleteReport = useMemo(() => {
+    if (!currentUser) return false;
+    const userRoleNorm = (currentUser.role || '').toLowerCase().trim();
+    const isSystemAdmin =
+      userRoleNorm.includes('admin') ||
+      userRoleNorm.includes('super') ||
+      currentUser.role === 'admin';
+    const isPastor = userRoleNorm.includes('pastor');
+    const isSectorOrArea =
+      userRoleNorm.includes('setor') ||
+      userRoleNorm.includes('area') ||
+      userRoleNorm.includes('área') ||
+      userRoleNorm.includes('supervisor') ||
+      userRoleNorm.includes('discipulador') ||
+      userRoleNorm.includes('coordenador') ||
+      userRoleNorm.includes('diretoria');
+
+    const isCellLeader = Boolean(
+      userRoleNorm.includes('lider') ||
+      userRoleNorm.includes('líder') ||
+      (currentUser.id &&
+        (currentCell.leaderMemberIds?.includes(currentUser.id) ||
+         currentCell.leaderNames?.some((n) => n.toLowerCase() === currentUser.name.toLowerCase())))
+    );
+
+    return isSystemAdmin || isPastor || isSectorOrArea || isCellLeader;
+  }, [currentUser, currentCell]);
 
   // Células autorizadas ordenadas alfabeticamente para o seletor
   const sortedCells = useMemo(() => {
@@ -467,6 +501,63 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
     setIsModalOpen(false);
     setEditingReportId(null);
     setDuplicateWarning(null);
+  };
+
+  // Exclui relatório semanal caso não tenha sido validado pela tesouraria
+  const handleDeleteReport = async (rep: WeeklyReport) => {
+    if (rep.tesouraria_recebido) {
+      setToastMessage('Este relatório já foi validado pela tesouraria e não pode ser excluído.');
+      setTimeout(() => setToastMessage(null), 3500);
+      return;
+    }
+
+    if (!canDeleteReport) {
+      setToastMessage('Apenas líderes de célula ou lideranças superiores podem excluir relatórios.');
+      setTimeout(() => setToastMessage(null), 3500);
+      return;
+    }
+
+    setIsDeletingReport(true);
+    try {
+      const res = await fetch(
+        `/api/reports?id=${encodeURIComponent(rep.id)}&cellId=${encodeURIComponent(currentCell.id)}`,
+        {
+          method: 'DELETE',
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erro ao excluir relatório');
+      }
+
+      // 1. Remove o relatório excluído instantaneamente do cache do React Query
+      queryClient.setQueriesData(
+        { queryKey: ['weekly-reports', currentCell.id] },
+        (old: any) => {
+          if (!old) return old;
+          const oldReports: WeeklyReport[] = old.reports || [];
+          return {
+            ...old,
+            reports: oldReports.filter((r) => r.id !== rep.id),
+          };
+        }
+      );
+
+      // 2. Remove também de relatórios antigos carregados sob demanda
+      setOlderReports((prev) => prev.filter((r) => r.id !== rep.id));
+
+      // 3. Fecha os modais e exibe o feedback
+      setSelectedReportForDetail(null);
+      setReportToDelete(null);
+
+      setToastMessage('Relatório excluído com sucesso!');
+      setTimeout(() => setToastMessage(null), 3000);
+    } catch (err: any) {
+      console.error('[WeeklyReportView] Erro ao excluir relatório:', err);
+      alert(`Não foi possível excluir o relatório: ${err.message || 'Erro inesperado'}`);
+    } finally {
+      setIsDeletingReport(false);
+    }
   };
 
   const executeSaveReport = async (allowOverwrite: boolean) => {
@@ -1025,29 +1116,33 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   </div>
                 </div>
 
-                {/* Resumo Financeiro */}
+                {/* Resumo Financeiro - Linha única: PIX: Valor | Espécie: Valor | Total: Valor Somado */}
                 <div>
                   <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">
                     Ofertas Arrecadadas
                   </span>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 flex items-center justify-between">
-                      <span className="text-slate-600 font-medium">PIX:</span>
+                  <div className="bg-slate-50 border border-slate-200/90 rounded-xl p-2.5 sm:px-4 flex items-center justify-between text-[11px] sm:text-xs shadow-2xs">
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-500 font-semibold">PIX:</span>
                       <span className="font-extrabold text-slate-900">
                         {formatMoney(selectedReportForDetail.valor_pix)}
                       </span>
                     </div>
 
-                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 flex items-center justify-between">
-                      <span className="text-slate-600 font-medium">Espécie:</span>
+                    <span className="text-slate-300 font-medium select-none px-1">|</span>
+
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-500 font-semibold">Espécie:</span>
                       <span className="font-extrabold text-slate-900">
                         {formatMoney(selectedReportForDetail.valor_especie)}
                       </span>
                     </div>
 
-                    <div className="col-span-2 bg-emerald-50/70 border border-emerald-200/80 rounded-xl p-2.5 flex items-center justify-between">
-                      <span className="text-emerald-900 font-bold">Total Arrecadado:</span>
-                      <span className="font-extrabold text-emerald-950 text-sm">
+                    <span className="text-slate-300 font-medium select-none px-1">|</span>
+
+                    <div className="flex items-center gap-1">
+                      <span className="text-emerald-800 font-bold">Total:</span>
+                      <span className="font-extrabold text-emerald-950">
                         {formatMoney(
                           Number(selectedReportForDetail.valor_pix || 0) +
                             Number(selectedReportForDetail.valor_especie || 0)
@@ -1110,8 +1205,8 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                 )}
               </div>
 
-              {/* Rodapé com Botões de Fechar e Editar (oculta Editar se validado pela tesouraria) */}
-              <div className="bg-slate-50 border-t border-slate-200 p-3 sm:px-5 flex items-center justify-between gap-2 shrink-0">
+              {/* Rodapé com Botões de Fechar, Excluir e Editar (oculta Excluir/Editar se validado pela tesouraria) */}
+              <div className="bg-slate-50 border-t border-slate-200 p-3 sm:px-5 flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setSelectedReportForDetail(null)}
@@ -1120,16 +1215,74 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   Fechar
                 </button>
 
-                {!selectedReportForDetail.tesouraria_recebido && (
-                  <button
-                    type="button"
-                    onClick={() => handleOpenEditModal(selectedReportForDetail)}
-                    className="px-4 py-2 rounded-xl bg-[#052447] hover:bg-[#073366] text-white font-bold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Pencil size={14} className="text-sky-300" />
-                    <span>Editar Relatório</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {!selectedReportForDetail.tesouraria_recebido && canDeleteReport && (
+                    <button
+                      type="button"
+                      onClick={() => setReportToDelete(selectedReportForDetail)}
+                      disabled={isDeletingReport}
+                      className="px-3.5 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      title="Excluir Relatório Semanal"
+                    >
+                      <Trash2 size={14} className="text-rose-600 shrink-0" />
+                      <span className="hidden sm:inline">Excluir Relatório</span>
+                      <span className="sm:hidden">Excluir</span>
+                    </button>
+                  )}
+
+                  {!selectedReportForDetail.tesouraria_recebido && (
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditModal(selectedReportForDetail)}
+                      className="px-4 py-2 rounded-xl bg-[#052447] hover:bg-[#073366] text-white font-bold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Pencil size={14} className="text-sky-300 shrink-0" />
+                      <span>Editar Relatório</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL DE CONFIRMAÇÃO DE EXCLUSÃO */}
+        {reportToDelete && (
+          <div className="fixed inset-0 z-60 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-base font-bold text-slate-800 text-center mb-1">
+                Excluir Relatório Semanal?
+              </h3>
+              <p className="text-xs text-slate-600 text-center mb-4 leading-relaxed">
+                Tem certeza que deseja excluir o relatório de{' '}
+                <strong>{formatDateBR(reportToDelete.data_relatorio)}</strong> da célula{' '}
+                <strong>{currentCell.name}</strong>? Esta ação não pode ser desfeita.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setReportToDelete(null)}
+                  disabled={isDeletingReport}
+                  className="flex-1 py-2 rounded-xl border border-slate-300 text-slate-700 font-bold text-xs hover:bg-slate-100 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteReport(reportToDelete)}
+                  disabled={isDeletingReport}
+                  className="flex-1 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingReport ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
+                  <span>{isDeletingReport ? 'Excluindo...' : 'Sim, Excluir'}</span>
+                </button>
               </div>
             </div>
           </div>
