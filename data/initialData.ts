@@ -35,18 +35,24 @@ export const ROLE_UUIDS = {
 };
 
 export const PERMISSION_UUIDS = {
+  CHURCH_ADMIN: 'c3000000-0000-0000-0000-000000000020',
+  PERMISSIONS_MANAGE: 'c3000000-0000-0000-0000-000000000025',
+  UNIT_TRANSFER_DELETE: 'c3000000-0000-0000-0000-000000000021',
+  MEMBER_DELETE: 'c3000000-0000-0000-0000-000000000005',
+  MEMBER_EDIT_ANY: 'c3000000-0000-0000-0000-000000000022',
+  LEADER_ASSIGN: 'c3000000-0000-0000-0000-000000000023',
+  REPORT_EXPORT: 'c3000000-0000-0000-0000-000000000024',
+  ANNOUNCEMENTS_MANAGE: 'c3000000-0000-0000-0000-000000000012',
   CELL_VIEW: 'c3000000-0000-0000-0000-000000000001',
   CELL_MANAGE: 'c3000000-0000-0000-0000-000000000002',
   MEMBER_CREATE: 'c3000000-0000-0000-0000-000000000003',
   MEMBER_EDIT: 'c3000000-0000-0000-0000-000000000004',
-  MEMBER_DELETE: 'c3000000-0000-0000-0000-000000000005',
   ATTENDANCE_VIEW: 'c3000000-0000-0000-0000-000000000006',
   ATTENDANCE_EDIT: 'c3000000-0000-0000-0000-000000000007',
   TRACK_VIEW: 'c3000000-0000-0000-0000-000000000008',
   TRACK_UPDATE: 'c3000000-0000-0000-0000-000000000009',
   REPORTS_VIEW: 'c3000000-0000-0000-0000-000000000010',
   FEED_POST: 'c3000000-0000-0000-0000-000000000011',
-  ANNOUNCEMENTS_MANAGE: 'c3000000-0000-0000-0000-000000000012',
 };
 
 export const CELL_UUIDS = {
@@ -142,21 +148,53 @@ export const INITIAL_ROLES: Role[] = [
 ];
 
 export const INITIAL_PERMISSIONS: Permission[] = [
+  { id: PERMISSION_UUIDS.CHURCH_ADMIN, code: 'church:admin', name: 'Administrador na igreja', module: 'Administração', description: 'Acesso total de gestão e configuração, equivalente ao Pastor Titular.' },
+  { id: PERMISSION_UUIDS.PERMISSIONS_MANAGE, code: 'permissions:manage', name: 'Gerenciar permissões especiais', module: 'Segurança', description: 'Acesso para conceder ou revogar permissões especiais de qualquer membro.' },
+  { id: PERMISSION_UUIDS.UNIT_TRANSFER_DELETE, code: 'unit:transfer_delete', name: 'Transferência/Exclusão de Unidade/Célula', module: 'Estrutura', description: 'Permite transferir ou excluir unidades organizacionais e células.' },
+  { id: PERMISSION_UUIDS.ANNOUNCEMENTS_MANAGE, code: 'announcement:manage', name: 'Gerenciar avisos globais', module: 'Comunicação', description: 'Publicar, editar e fixar comunicados oficiais para toda a congregação.' },
+  { id: PERMISSION_UUIDS.REPORT_EXPORT, code: 'report:export', name: 'Exportar relatórios/dados', module: 'Relatórios', description: 'Exportar dados analíticos de crescimento, relatórios de células e frequências.' },
+  { id: PERMISSION_UUIDS.MEMBER_DELETE, code: 'member:delete', name: 'Excluir membros', module: 'Membros', description: 'Permite remover ou arquivar registros de membros da igreja.' },
+  { id: PERMISSION_UUIDS.MEMBER_EDIT_ANY, code: 'member:edit_any', name: 'Editar qualquer membro', module: 'Membros', description: 'Permite editar dados de qualquer membro da congregação (não apenas da sua célula).' },
+  { id: PERMISSION_UUIDS.MEMBER_CREATE, code: 'member:create', name: 'Adicionar Membros', module: 'Membros', description: 'Cadastrar novos membros na célula ou no pool geral da igreja.' },
+  { id: PERMISSION_UUIDS.MEMBER_EDIT, code: 'member:edit', name: 'Editar Membros da Célula', module: 'Membros', description: 'Alterar dados de membros pertencentes à sua própria célula.' },
+  { id: PERMISSION_UUIDS.LEADER_ASSIGN, code: 'leader:assign', name: 'Designar líderes de célula/setor', module: 'Liderança', description: 'Vincular ou desvincular líderes em células e unidades organizacionais.' },
   { id: PERMISSION_UUIDS.CELL_VIEW, code: 'cell:view', name: 'Visualizar Célula', module: 'Célula', description: 'Visualizar informações da própria célula.' },
   { id: PERMISSION_UUIDS.CELL_MANAGE, code: 'cell:manage', name: 'Gerenciar Célula', module: 'Célula', description: 'Editar horários, endereço e dados da célula.' },
-  { id: PERMISSION_UUIDS.MEMBER_CREATE, code: 'member:create', name: 'Adicionar Membros', module: 'Membros', description: 'Cadastrar novos membros na célula.' },
-  { id: PERMISSION_UUIDS.MEMBER_EDIT, code: 'member:edit', name: 'Editar Membros', module: 'Membros', description: 'Alterar dados de membros da célula.' },
-  { id: PERMISSION_UUIDS.MEMBER_DELETE, code: 'member:delete', name: 'Remover Membros', module: 'Membros', description: 'Arquivar ou excluir membros da célula.' },
   { id: PERMISSION_UUIDS.ATTENDANCE_VIEW, code: 'attendance:view', name: 'Ver Frequência', module: 'Frequência', description: 'Visualizar histórico de frequência dos membros.' },
   { id: PERMISSION_UUIDS.ATTENDANCE_EDIT, code: 'attendance:edit', name: 'Lançar Frequência', module: 'Frequência', description: 'Alterar status e percentual de frequência semanal.' },
   { id: PERMISSION_UUIDS.TRACK_VIEW, code: 'track:view', name: 'Visualizar Trilho', module: 'Trilho', description: 'Ver etapas do trilho de liderança dos membros.' },
   { id: PERMISSION_UUIDS.TRACK_UPDATE, code: 'track:update', name: 'Avançar Etapas do Trilho', module: 'Trilho', description: 'Marcar etapas do trilho como concluídas.' },
   { id: PERMISSION_UUIDS.REPORTS_VIEW, code: 'reports:view', name: 'Visualizar Relatórios', module: 'Relatórios', description: 'Acessar relatórios de multiplicação e frequência.' },
-  { id: PERMISSION_UUIDS.FEED_POST, code: 'feed:post', name: 'Publicar no Feed', module: 'Feed', description: 'Compartilhar fotos e testemunhos no feed da igreja.' },
-  { id: PERMISSION_UUIDS.ANNOUNCEMENTS_MANAGE, code: 'announcements:manage', name: 'Publicar Avisos Gerais', module: 'Admin', description: 'Postar comunicados oficiais para toda a congregação.' },
+  { id: PERMISSION_UUIDS.FEED_POST, code: 'feed:post', name: 'Publicar no Feed', module: 'Comunidade', description: 'Compartilhar fotos e testemunhos no feed da igreja.' },
 ];
 
 export const INITIAL_ROLE_PERMISSIONS: RolePermission[] = [
+  // Administrador - Todas as permissões
+  ...Object.values(PERMISSION_UUIDS).map((pId) => ({ roleId: ROLE_UUIDS.ADMINISTRADOR, permissionId: pId })),
+
+  // Pastor - Todas as permissões
+  ...Object.values(PERMISSION_UUIDS).map((pId) => ({ roleId: ROLE_UUIDS.PASTOR, permissionId: pId })),
+
+  // Supervisor
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.ANNOUNCEMENTS_MANAGE },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.LEADER_ASSIGN },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.REPORT_EXPORT },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.MEMBER_EDIT_ANY },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.REPORTS_VIEW },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.CELL_MANAGE },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.CELL_VIEW },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.MEMBER_CREATE },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.MEMBER_EDIT },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.ATTENDANCE_VIEW },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.ATTENDANCE_EDIT },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.TRACK_VIEW },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.TRACK_UPDATE },
+  { roleId: ROLE_UUIDS.SUPERVISOR, permissionId: PERMISSION_UUIDS.FEED_POST },
+
+  // Líder de Setor
+  { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.LEADER_ASSIGN },
+  { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.ANNOUNCEMENTS_MANAGE },
+  { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.REPORT_EXPORT },
   { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.CELL_VIEW },
   { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.CELL_MANAGE },
   { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.MEMBER_CREATE },
@@ -168,8 +206,8 @@ export const INITIAL_ROLE_PERMISSIONS: RolePermission[] = [
   { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.TRACK_UPDATE },
   { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.REPORTS_VIEW },
   { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.FEED_POST },
-  { roleId: ROLE_UUIDS.LIDER_SETOR, permissionId: PERMISSION_UUIDS.ANNOUNCEMENTS_MANAGE },
 
+  // Líder de Célula
   { roleId: ROLE_UUIDS.LIDER_CELULA, permissionId: PERMISSION_UUIDS.CELL_VIEW },
   { roleId: ROLE_UUIDS.LIDER_CELULA, permissionId: PERMISSION_UUIDS.CELL_MANAGE },
   { roleId: ROLE_UUIDS.LIDER_CELULA, permissionId: PERMISSION_UUIDS.MEMBER_CREATE },
@@ -181,6 +219,7 @@ export const INITIAL_ROLE_PERMISSIONS: RolePermission[] = [
   { roleId: ROLE_UUIDS.LIDER_CELULA, permissionId: PERMISSION_UUIDS.REPORTS_VIEW },
   { roleId: ROLE_UUIDS.LIDER_CELULA, permissionId: PERMISSION_UUIDS.FEED_POST },
 
+  // Líder em Treinamento
   { roleId: ROLE_UUIDS.LIDER_TREINAMENTO, permissionId: PERMISSION_UUIDS.CELL_VIEW },
   { roleId: ROLE_UUIDS.LIDER_TREINAMENTO, permissionId: PERMISSION_UUIDS.MEMBER_CREATE },
   { roleId: ROLE_UUIDS.LIDER_TREINAMENTO, permissionId: PERMISSION_UUIDS.ATTENDANCE_VIEW },
@@ -188,6 +227,7 @@ export const INITIAL_ROLE_PERMISSIONS: RolePermission[] = [
   { roleId: ROLE_UUIDS.LIDER_TREINAMENTO, permissionId: PERMISSION_UUIDS.TRACK_VIEW },
   { roleId: ROLE_UUIDS.LIDER_TREINAMENTO, permissionId: PERMISSION_UUIDS.FEED_POST },
 
+  // Membro comum
   { roleId: ROLE_UUIDS.MEMBRO, permissionId: PERMISSION_UUIDS.CELL_VIEW },
   { roleId: ROLE_UUIDS.MEMBRO, permissionId: PERMISSION_UUIDS.TRACK_VIEW },
   { roleId: ROLE_UUIDS.MEMBRO, permissionId: PERMISSION_UUIDS.FEED_POST },

@@ -6,11 +6,21 @@ export interface MonthlyGrowthStat {
   monthLabel: string; // 'Set/26'
   year: number;
   month: number; // 1-12
-  newMembers: number; // Membros com criado_em neste mês
+  newMembers: number; // Novos no mês
   totalMembers: number; // Acumulado até este mês
   linkedMembers: number;
   unlinkedMembers: number;
   growthRatePct: number;
+}
+
+export interface BatchImportInfo {
+  monthKey: string;
+  monthLabel: string;
+  year: number;
+  month: number;
+  count: number;
+  percentage: number;
+  explanation: string;
 }
 
 const MONTH_NAMES_SHORT = [
@@ -18,7 +28,7 @@ const MONTH_NAMES_SHORT = [
   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',
 ];
 
-// Cache de crescimento por igreja (5 minutos)
+// Cache em memória de 5 minutos por igreja
 const growthCache = new Map<string, { data: any; expiry: number }>();
 
 export async function GET(req: NextRequest) {
@@ -41,97 +51,117 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    // 1. Busca todos os membros da igreja com suas datas de criação (criado_em / created_at) e unidade_id
-    let dbMembers: any[] = [];
+    // Mapa de mês 'YYYY-MM' -> contagens agregadas
+    const monthCounts: Record<string, { newMembers: number; linked: number; unlinked: number }> = {};
+    let isRpcUsed = false;
 
-    // Tenta primeiro na tabela `membros` com `criado_em`
-    let { data: membrosData, error: membrosError } = await supabase
-      .from('membros')
-      .select('id, criado_em, unidade_id')
-      .eq('igreja_id', churchId);
+    // 1. Tenta executar a agregação direta no Postgres via RPC get_monthly_member_growth
+    const { data: rpcData, error: rpcError } = await supabase
+      .rpc('get_monthly_member_growth', { p_church_id: churchId });
 
-    if (membrosError) {
-      // Tenta com `created_at`
-      const fallbackTry = await supabase
-        .from('membros')
-        .select('id, created_at, unidade_id')
-        .eq('igreja_id', churchId);
-      
-      if (!fallbackTry.error && fallbackTry.data) {
-        dbMembers = fallbackTry.data.map((m: any) => ({
-          id: m.id,
-          criado_em: m.created_at,
-          unidade_id: m.unidade_id,
-        }));
-      } else {
-        // Tenta na tabela legada `members`
-        const legTry = await supabase
-          .from('members')
-          .select('id, criado_em, created_at, unidade_id')
-          .eq('igreja_id', churchId);
-        
-        if (legTry.data) {
-          dbMembers = legTry.data.map((m: any) => ({
-            id: m.id,
-            criado_em: m.criado_em || m.created_at,
-            unidade_id: m.unidade_id,
-          }));
+    if (!rpcError && Array.isArray(rpcData)) {
+      isRpcUsed = true;
+      rpcData.forEach((row: any) => {
+        if (row.mes) {
+          const d = new Date(row.mes);
+          if (!isNaN(d.getTime())) {
+            const y = d.getUTCFullYear();
+            const m = d.getUTCMonth() + 1;
+            const key = `${y}-${String(m).padStart(2, '0')}`;
+            monthCounts[key] = {
+              newMembers: Number(row.novos || 0),
+              linked: Number(row.vinculados || 0),
+              unlinked: Number(row.sem_vinculo || 0),
+            };
+          }
         }
+      });
+    } else {
+      if (rpcError) {
+        console.warn('[Growth Route] RPC get_monthly_member_growth não disponível, acionando fallback:', rpcError.message);
       }
-    } else if (membrosData) {
-      dbMembers = membrosData;
+
+      // Fallback otimizado com query agregada / select mínimo
+      let { data: fallbackMembers, error: fbErr } = await supabase
+        .from('membros')
+        .select('criado_em, unidade_id')
+        .eq('igreja_id', churchId);
+
+      if (fbErr || !fallbackMembers) {
+        const { data: legMembers } = await supabase
+          .from('members')
+          .select('criado_em, created_at, unidade_id')
+          .eq('igreja_id', churchId);
+        fallbackMembers = legMembers || [];
+      }
+
+      (fallbackMembers || []).forEach((m: any) => {
+        const rawDate = m.criado_em || m.created_at;
+        const d = rawDate ? new Date(rawDate) : new Date();
+        const y = isNaN(d.getTime()) ? new Date().getFullYear() : d.getFullYear();
+        const mon = isNaN(d.getTime()) ? new Date().getMonth() + 1 : d.getMonth() + 1;
+        const key = `${y}-${String(mon).padStart(2, '0')}`;
+
+        if (!monthCounts[key]) {
+          monthCounts[key] = { newMembers: 0, linked: 0, unlinked: 0 };
+        }
+        monthCounts[key].newMembers += 1;
+        if (m.unidade_id) {
+          monthCounts[key].linked += 1;
+        } else {
+          monthCounts[key].unlinked += 1;
+        }
+      });
     }
 
-    const totalCurrentMembers = dbMembers.length;
+    // Calcula total de membros a partir dos dados agregados
+    let totalCurrentMembers = 0;
+    Object.values(monthCounts).forEach((val) => {
+      totalCurrentMembers += val.newMembers;
+    });
+
+    // 2. Detecção de Importação em Lote:
+    // Se um único mês concentrar mais de 70% dos membros totais (ex: migração em massa)
+    let isBatchImportDetected = false;
+    let batchImportInfo: BatchImportInfo | undefined = undefined;
+
+    if (totalCurrentMembers > 0) {
+      for (const [key, val] of Object.entries(monthCounts)) {
+        const ratio = val.newMembers / totalCurrentMembers;
+        if (ratio >= 0.70 && val.newMembers >= 10) {
+          const [yStr, mStr] = key.split('-');
+          const y = parseInt(yStr, 10);
+          const m = parseInt(mStr, 10);
+          const monthLabel = `${MONTH_NAMES_SHORT[m - 1]}/${String(y).slice(-2)}`;
+          const fullLabel = `${MONTH_NAMES_SHORT[m - 1]}/${y}`;
+          const pct = Number((ratio * 100).toFixed(1));
+
+          isBatchImportDetected = true;
+          batchImportInfo = {
+            monthKey: key,
+            monthLabel,
+            year: y,
+            month: m,
+            count: val.newMembers,
+            percentage: pct,
+            explanation: `Importação em lote detectada em ${fullLabel} (${pct}% da base de membros) — histórico anterior indisponível.`,
+          };
+          break;
+        }
+      }
+    }
+
+    // Determina o primeiro mês real com dados
+    const sortedMonthKeys = Object.keys(monthCounts).sort();
+    const firstRealDataMonth = sortedMonthKeys.length > 0 ? sortedMonthKeys[0] : undefined;
+
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth(); // 0-11
 
-    // Agrupamento por chave 'YYYY-MM'
-    const monthCounts: Record<string, { newMembers: number; linked: number; unlinked: number }> = {};
-
-    let earliestDate: Date = now;
-    let hasValidDates = false;
-
-    dbMembers.forEach((m) => {
-      const rawDate = m.criado_em || m.created_at;
-      let dateObj: Date | null = null;
-
-      if (rawDate) {
-        const parsed = new Date(rawDate);
-        if (!isNaN(parsed.getTime())) {
-          dateObj = parsed;
-          hasValidDates = true;
-          if (dateObj < earliestDate) {
-            earliestDate = dateObj;
-          }
-        }
-      }
-
-      // Se não houver data, assume o mês corrente (ou marco de entrada em lote)
-      const targetDate = dateObj || now;
-      const key = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}`;
-
-      if (!monthCounts[key]) {
-        monthCounts[key] = { newMembers: 0, linked: 0, unlinked: 0 };
-      }
-      monthCounts[key].newMembers += 1;
-      if (m.unidade_id) {
-        monthCounts[key].linked += 1;
-      } else {
-        monthCounts[key].unlinked += 1;
-      }
-    });
-
-    // Determina a lista de meses a exibir (pelo menos os últimos 12 meses, ou desde o mês mais antigo até o atual)
-    const startYear = hasValidDates ? Math.min(earliestDate.getFullYear(), currentYear - 1) : currentYear - 1;
-    const startMonth = hasValidDates && startYear === earliestDate.getFullYear() ? earliestDate.getMonth() : 0;
-
-    // Gera lista contínua de meses
-    const monthsList: { year: number; month: number; key: string; label: string }[] = [];
-    
-    // Gerar pelo menos os últimos 12 meses
+    // Gera lista contínua dos últimos 12 meses até o mês atual
     const totalMonthsSpan = 12;
+    const monthsList: { year: number; month: number; key: string; label: string }[] = [];
     for (let i = totalMonthsSpan - 1; i >= 0; i--) {
       const d = new Date(currentYear, currentMonth - i, 1);
       const y = d.getFullYear();
@@ -150,7 +180,7 @@ export async function GET(req: NextRequest) {
     let cumulativeLinked = 0;
     let cumulativeUnlinked = 0;
 
-    // Soma qualquer membro criado antes do primeiro mês da lista
+    // Soma membros de meses anteriores ao primeiro mês da janela de 12 meses
     const firstListedKey = monthsList[0].key;
     Object.entries(monthCounts).forEach(([key, val]) => {
       if (key < firstListedKey) {
@@ -163,7 +193,7 @@ export async function GET(req: NextRequest) {
     const growthSeries: MonthlyGrowthStat[] = monthsList.map((mObj) => {
       const monthData = monthCounts[mObj.key] || { newMembers: 0, linked: 0, unlinked: 0 };
       const prevTotal = cumulative;
-      
+
       cumulative += monthData.newMembers;
       cumulativeLinked += monthData.linked;
       cumulativeUnlinked += monthData.unlinked;
@@ -183,7 +213,7 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Se todos os membros caíram no mesmo mês (ex: setembro/2026), ajustamos para que o acumulado final coincida com o total atual
+    // Se todos caíram no último mês e cumulative estava zerada
     if (growthSeries.length > 0 && cumulative === 0 && totalCurrentMembers > 0) {
       const lastIdx = growthSeries.length - 1;
       growthSeries[lastIdx].newMembers = totalCurrentMembers;
@@ -193,16 +223,21 @@ export async function GET(req: NextRequest) {
     const resultPayload = {
       churchId,
       totalCurrentMembers,
-      basedOnColumn: 'criado_em',
+      isBatchImportDetected,
+      batchImportInfo,
+      firstRealDataMonth,
+      source: isRpcUsed ? 'postgres_rpc' : 'fallback_query',
       growthSeries,
     };
+
+    // Atualiza cache em memória de 5 minutos
     growthCache.set(churchId, { data: resultPayload, expiry: Date.now() + 5 * 60 * 1000 });
 
     return NextResponse.json(resultPayload);
-  } catch (error: any) {
-    console.error('Erro em GET /api/members/growth:', error);
+  } catch (err: any) {
+    console.error('[Growth API Error]:', err);
     return NextResponse.json(
-      { error: error?.message || 'Erro ao calcular curva de crescimento de membros.' },
+      { error: err?.message || 'Erro interno ao obter crescimento de membros.' },
       { status: 500 }
     );
   }

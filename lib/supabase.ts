@@ -4411,4 +4411,138 @@ export const AppChurchService = {
 
     return { success: true };
   },
+
+  /**
+   * Obtém as permissões efetivas do usuário autenticado aplicando a regra de prioridade:
+   * 1. isSystemAdmin ou login === 'admin' -> sempre true
+   * 2. Override em membro_permissoes -> vence concedida (true/false)
+   * 3. Senão -> herda do papel_permissoes (Pastor e Administrador herdam church:admin por padrão)
+   */
+  async getUserEffectivePermissions(user: UserProfile, force: boolean = false): Promise<Record<string, boolean>> {
+    if (!user || !user.id) return {};
+
+    if (user.isSystemAdmin || user.login === 'admin') {
+      const allPerms = await this.getPermissions();
+      const map: Record<string, boolean> = {};
+      allPerms.forEach((p) => {
+        map[p.code] = true;
+      });
+      map['church:admin'] = true;
+      map['permissions:manage'] = true;
+      map['unit:transfer_delete'] = true;
+      map['announcement:manage'] = true;
+      map['report:export'] = true;
+      map['member:delete'] = true;
+      map['member:edit_any'] = true;
+      map['leader:assign'] = true;
+      return map;
+    }
+
+    const cacheKey = `user_effective_permissions_${user.id}`;
+    return getCachedOrExecute(cacheKey, 5 * 60 * 1000, async () => {
+      try {
+        if (typeof window !== 'undefined' && typeof fetch === 'function') {
+          const res = await fetch(`/api/permissions/member?memberId=${user.id}&churchId=${user.churchId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.success && Array.isArray(data.permissions)) {
+              const map: Record<string, boolean> = {};
+              data.permissions.forEach((p: any) => {
+                map[p.code] = Boolean(p.effective);
+              });
+
+              const isPastor = user.role === 'Pastor' || (user.role && user.role.toLowerCase().includes('pastor'));
+              if (isPastor) {
+                if (map['church:admin'] === undefined) map['church:admin'] = true;
+                if (map['permissions:manage'] === undefined) map['permissions:manage'] = true;
+              }
+
+              return map;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao consultar permissões via API:', err);
+      }
+
+      // Fallback
+      const map: Record<string, boolean> = {};
+      const isPastor = user.role === 'Pastor' || (user.role && user.role.toLowerCase().includes('pastor'));
+      if (isPastor) {
+        map['church:admin'] = true;
+        map['permissions:manage'] = true;
+        map['unit:transfer_delete'] = true;
+        map['announcement:manage'] = true;
+        map['report:export'] = true;
+        map['member:delete'] = true;
+        map['member:edit_any'] = true;
+        map['leader:assign'] = true;
+      }
+      return map;
+    }, force);
+  },
+
+  /**
+   * Checagem central de permissão (hasPermission)
+   */
+  hasPermission(
+    user: UserProfile | null | undefined,
+    permissionCode: string,
+    permissionsMap?: Record<string, boolean>
+  ): boolean {
+    if (!user) return false;
+    if (user.isSystemAdmin || user.login === 'admin') return true;
+
+    const isPastor = user.role === 'Pastor' || (user.role && user.role.toLowerCase().includes('pastor'));
+
+    if (permissionsMap && permissionsMap[permissionCode] !== undefined) {
+      return Boolean(permissionsMap[permissionCode]);
+    }
+
+    if (isPastor && (permissionCode === 'church:admin' || permissionCode === 'permissions:manage')) {
+      return true;
+    }
+
+    return false;
+  },
+
+  /**
+   * Busca lista de permissões e overrides para um membro específico (usado na tela de Gestão de Permissões)
+   */
+  async getMemberPermissions(memberId: string, churchId: string) {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch(`/api/permissions/member?memberId=${memberId}&churchId=${churchId}`);
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao buscar permissões do membro.');
+      }
+      return data;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  /**
+   * Define ou remove override de permissão para um membro
+   */
+  async updateMemberPermissionOverride(payload: {
+    memberId: string;
+    permissionId?: string;
+    permissionCode?: string;
+    concedida: boolean | null;
+  }) {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/permissions/member', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao atualizar permissão do membro.');
+      }
+      invalidateMemoryCache(`user_effective_permissions_${payload.memberId}`);
+      return data;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
 };

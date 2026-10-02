@@ -86,6 +86,11 @@ const MultiplyCellView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const MemberPermissionsView = dynamic(
+  () => import('../components/MemberPermissionsView').then((m) => m.MemberPermissionsView),
+  { loading: ViewLoading, ssr: false }
+);
+
 const NotificationPermissionBanner = dynamic(
   () => import('../components/NotificationPermissionBanner').then((m) => m.NotificationPermissionBanner),
   { ssr: false }
@@ -880,6 +885,13 @@ export default function Home() {
                 }}
               />
             )}
+
+          {activeScreen === 'permissions_manage' && user && (
+            <MemberPermissionsView
+              currentUser={user}
+              onBack={() => setActiveScreen('feed')}
+            />
+          )}
         </main>
       </PullToRefresh>
 

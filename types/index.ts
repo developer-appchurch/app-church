@@ -40,7 +40,21 @@ export interface Permission {
   id: string;
   code: string; // e.g. 'cell:view', 'cell:manage', 'track:update'
   name: string;
-  module: 'Célula' | 'Membros' | 'Frequência' | 'Trilho' | 'Relatórios' | 'Feed' | 'Admin';
+  module:
+    | 'Célula'
+    | 'Membros'
+    | 'Frequência'
+    | 'Trilho'
+    | 'Relatórios'
+    | 'Feed'
+    | 'Admin'
+    | 'Administração'
+    | 'Segurança'
+    | 'Estrutura'
+    | 'Comunicação'
+    | 'Liderança'
+    | 'Comunidade'
+    | (string & {});
   description: string;
 }
 
@@ -50,6 +64,30 @@ export interface Permission {
 export interface RolePermission {
   roleId: string;
   permissionId: string;
+}
+
+/**
+ * Override individual de permissão por membro (membro_permissoes)
+ */
+export interface MemberPermissionRecord {
+  memberId: string;
+  permissionId: string;
+  concedida: boolean;
+  concedidaEm?: string;
+}
+
+/**
+ * Permissão avaliada com regra de prioridade para a tela de permissões
+ */
+export interface MemberEffectivePermission {
+  id: string;
+  code: string;
+  name: string;
+  module: string;
+  description: string;
+  inherited: boolean;
+  override: boolean | null; // null = padrão do papel, true = concedida explicitamente, false = revogada explicitamente
+  effective: boolean;
 }
 
 /**
@@ -247,7 +285,8 @@ export type ActiveScreen =
   | 'register_church'
   | 'hierarchy_units'
   | 'member_pool'
-  | 'church_overview';
+  | 'church_overview'
+  | 'permissions_manage';
 
 export interface CelulaCardItem {
   id: string;

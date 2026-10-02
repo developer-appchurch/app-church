@@ -309,6 +309,31 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
     return treeRoots.map(filterNode).filter(Boolean) as TreeNode[];
   }, [treeRoots, searchTerm]);
 
+  // Limpa o nome da unidade para não duplicar com a tarja do nível
+  // Exemplo: se o nome estiver salvo como "Distrito: Transmissão" ou "Distrito Transmissão", retorna apenas "Transmissão"
+  const getCleanUnitName = (unitName: string, levelName?: string) => {
+    const rawName = (unitName || '').trim();
+    if (!rawName) return 'Sem nome';
+    if (!levelName) return rawName;
+
+    const rawLvl = levelName.trim();
+    const escapedLvl = rawLvl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Remove "Nivel: " ou "Nivel :"
+    const prefixColonRegex = new RegExp(`^${escapedLvl}\\s*:\\s*`, 'i');
+    if (prefixColonRegex.test(rawName)) {
+      return rawName.replace(prefixColonRegex, '').trim() || rawName;
+    }
+
+    // Remove "Nivel "
+    const prefixSpaceRegex = new RegExp(`^${escapedLvl}\\s+`, 'i');
+    if (prefixSpaceRegex.test(rawName)) {
+      return rawName.replace(prefixSpaceRegex, '').trim() || rawName;
+    }
+
+    return rawName;
+  };
+
   // Renderizador recursivo de nó da árvore
   const renderTreeNode = (node: TreeNode, depth: number = 0) => {
     const isLeaf =
@@ -321,12 +346,15 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
 
     // Encontrar índice do nível atual e do próximo nível para o botão "+ Filho"
     const currentLevelIdx = levels.findIndex((l) => l.id === node.unit.levelTypeId);
+    const currentLevelObj = currentLevelIdx >= 0 ? levels[currentLevelIdx] : levels.find((l) => l.id === node.unit.levelTypeId);
     const nextLevel = currentLevelIdx >= 0 && currentLevelIdx < levels.length - 1 ? levels[currentLevelIdx + 1] : null;
 
     const effectiveLevelIdx = currentLevelIdx >= 0 ? currentLevelIdx : depth;
     const isRoot = !isLeaf && (depth === 0 || node.unit.levelTypeId === rootLevel?.id || node.unit.levelOrder === 10);
     const isLevel2 = !isRoot && !isLeaf && (effectiveLevelIdx === 1 || node.unit.levelOrder === 20);
     const isLevel3 = !isRoot && !isLeaf && (effectiveLevelIdx === 2 || node.unit.levelOrder === 30);
+
+    const levelName = node.unit.levelTypeName || currentLevelObj?.name || (isLeaf ? 'Célula' : isRoot ? 'Distrito' : isLevel2 ? 'Área' : isLevel3 ? 'Setor' : 'Nível');
 
     // Definição de paleta visual por nível
     let cardClasses = 'bg-white border-2 border-slate-300 text-slate-900 shadow-xs';
@@ -407,11 +435,11 @@ export const ChurchHierarchyOverviewView: React.FC<ChurchHierarchyOverviewViewPr
                   <span
                     className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md ${levelBadgeClasses}`}
                   >
-                    {node.unit.levelTypeName}
+                    {levelName}
                   </span>
 
                   <h3 className={`text-xs sm:text-sm font-bold ${titleClasses}`}>
-                    {node.unit.name}
+                    {getCleanUnitName(node.unit.name, levelName)}
                   </h3>
 
                   {isLeaf && (

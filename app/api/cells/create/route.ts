@@ -148,27 +148,22 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       const memberAlreadyHasHomeCell = Boolean(memberData?.unidade_id);
-      const updateTasks: Promise<any>[] = [
-        supabase.from('unidade_lideres').insert([
-          {
-            unidade_id: unitId,
-            pessoa_id: body.leaderMemberId,
-            papel: 'Líder de Célula',
-            ativo: true,
-          },
-        ]),
-      ];
+
+      await supabase.from('unidade_lideres').insert([
+        {
+          unidade_id: unitId,
+          pessoa_id: body.leaderMemberId,
+          papel: 'Líder de Célula',
+          ativo: true,
+        },
+      ]);
 
       if (!memberAlreadyHasHomeCell) {
-        updateTasks.push(
-          supabase
-            .from('membros')
-            .update({ unidade_id: unitId })
-            .eq('id', body.leaderMemberId)
-        );
+        await supabase
+          .from('membros')
+          .update({ unidade_id: unitId })
+          .eq('id', body.leaderMemberId);
       }
-
-      await Promise.all(updateTasks);
     }
 
     const createdCell: CellGroup = {

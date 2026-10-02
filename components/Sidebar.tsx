@@ -28,6 +28,7 @@ import {
   ExternalLink,
   RefreshCw,
   CheckCircle2,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   optimizeImageToWebP,
@@ -40,7 +41,7 @@ import { ActiveScreen, UserProfile, CellGroup } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService } from '../lib/supabase';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -228,6 +229,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isMemberOnly = userRoleNorm === 'membro' || userRoleNorm === 'visitante' || userRoleNorm === '';
   const canAccessLeadershipFeatures = !isMemberOnly;
 
+  // Consulta as permissões efetivas do usuário para checagem com hasPermission
+  const { data: userPermissions } = useQuery({
+    queryKey: ['user-effective-permissions', user?.id],
+    queryFn: () => (user ? AppChurchService.getUserEffectivePermissions(user) : Promise.resolve({})),
+    enabled: !!user?.id,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  const canManagePermissions =
+    isSystemAdmin ||
+    userRoleNorm.includes('pastor') ||
+    AppChurchService.hasPermission(user, 'church:admin', userPermissions) ||
+    AppChurchService.hasPermission(user, 'permissions:manage', userPermissions);
+
   const menuItems = [
     {
       id: 'feed' as ActiveScreen,
@@ -255,16 +270,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             sublabel: 'Visão Geral do Discipulado',
             icon: Award,
           },
-        ]
-      : []),
-    {
-      id: 'our_cells' as ActiveScreen,
-      label: 'Nossas Células',
-      sublabel: 'Galeria & busca de todas as células',
-      icon: Compass,
-    },
-    ...(canAccessLeadershipFeatures
-      ? [
           {
             id: 'multiply_cell' as ActiveScreen,
             label: 'Multiplicar Célula',
@@ -278,6 +283,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             icon: Users,
           },
           {
+            id: 'our_cells' as ActiveScreen,
+            label: 'Nossas Células',
+            sublabel: 'Galeria & busca de todas as células',
+            icon: Compass,
+          },
+          {
             id: 'hierarchy_units' as ActiveScreen,
             label: 'Níveis Organizacionais',
             sublabel: 'Cadastro por nível (Área, Setor, Célula)',
@@ -288,6 +299,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
             label: 'Visão Geral da Igreja',
             sublabel: 'Organograma & árvore hierárquica',
             icon: Network,
+          },
+        ]
+      : [
+          {
+            id: 'our_cells' as ActiveScreen,
+            label: 'Nossas Células',
+            sublabel: 'Galeria & busca de todas as células',
+            icon: Compass,
+          },
+        ]),
+    ...(canManagePermissions
+      ? [
+          {
+            id: 'permissions_manage' as ActiveScreen,
+            label: 'Gestão de Permissões',
+            sublabel: 'Permissões especiais por membro',
+            icon: ShieldCheck,
           },
         ]
       : []),

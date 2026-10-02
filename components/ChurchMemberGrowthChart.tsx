@@ -2,9 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  AreaChart,
   Area,
-  BarChart,
   Bar,
   XAxis,
   YAxis,
@@ -24,6 +22,9 @@ import {
   Award,
   Database,
   RefreshCw,
+  AlertTriangle,
+  Info,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { OrganizationalUnit, CellMember } from '../types';
 
@@ -44,11 +45,22 @@ interface MonthlyGrowthPoint {
   monthKey: string;
   monthLabel: string;
   year: number;
+  month: number;
   totalMembers: number;
   newMembers: number;
   linkedMembers: number;
   unlinkedMembers: number;
   growthRatePct: number;
+}
+
+interface BatchImportInfo {
+  monthKey: string;
+  monthLabel: string;
+  year: number;
+  month: number;
+  count: number;
+  percentage: number;
+  explanation: string;
 }
 
 const MONTH_NAMES_SHORT = [
@@ -69,7 +81,12 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
   const [period, setPeriod] = useState<PeriodFilter>('12m');
   const [viewMode, setViewMode] = useState<ViewMode>('combined');
   const [apiSeries, setApiSeries] = useState<MonthlyGrowthPoint[] | null>(null);
+  const [isBatchImportDetected, setIsBatchImportDetected] = useState<boolean>(false);
+  const [batchImportInfo, setBatchImportInfo] = useState<BatchImportInfo | null>(null);
+  const [firstRealDataMonth, setFirstRealDataMonth] = useState<string | null>(null);
+  const [hidePreMigrationMonths, setHidePreMigrationMonths] = useState<boolean>(true);
   const [isLoadingApi, setIsLoadingApi] = useState<boolean>(false);
+  const [isRpcUsed, setIsRpcUsed] = useState<boolean>(true);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -77,7 +94,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
     });
   }, []);
 
-  // Busca dados agregados reais direto da coluna criado_em no banco de dados
+  // Busca dados agregados reais direto da rota /api/members/growth (Postgres RPC)
   useEffect(() => {
     if (!churchId) return;
 
@@ -88,8 +105,18 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
         const res = await fetch(`/api/members/growth?churchId=${encodeURIComponent(churchId)}`);
         if (!res.ok) throw new Error('Falha ao carregar curva de crescimento');
         const json = await res.json();
-        if (isSubscribed && json.growthSeries && Array.isArray(json.growthSeries)) {
-          setApiSeries(json.growthSeries);
+        if (isSubscribed) {
+          if (json.growthSeries && Array.isArray(json.growthSeries)) {
+            setApiSeries(json.growthSeries);
+          }
+          setIsBatchImportDetected(Boolean(json.isBatchImportDetected));
+          if (json.batchImportInfo) {
+            setBatchImportInfo(json.batchImportInfo);
+          }
+          if (json.firstRealDataMonth) {
+            setFirstRealDataMonth(json.firstRealDataMonth);
+          }
+          setIsRpcUsed(json.source === 'postgres_rpc');
         }
       } catch (err) {
         console.warn('Usando processamento local para curva de crescimento:', err);
@@ -107,15 +134,15 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
     };
   }, [churchId]);
 
-  // Construção do histórico mensal com base na coluna criado_em
-  const growthData = useMemo<MonthlyGrowthPoint[]>(() => {
+  // Construção do histórico mensal com base na agregação vinda da API
+  const rawGrowthData = useMemo<MonthlyGrowthPoint[]>(() => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth(); // 0 a 11
 
     const numMonths = period === '6m' ? 6 : period === '12m' ? 12 : currentMonth + 1;
 
-    // Se temos dados vindos diretamente da API baseados em `criado_em`
+    // Se temos dados vindos diretamente da API agregados pelo Postgres
     if (apiSeries && apiSeries.length > 0) {
       if (period === 'ytd') {
         return apiSeries.filter((p) => p.year === currentYear);
@@ -123,7 +150,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
       return apiSeries.slice(-numMonths);
     }
 
-    // Fallback: cálculo baseado nos membros passados por props ou marco zero em setembro
+    // Fallback: cálculo baseado nos membros passados por props caso a rota falhe
     const rawMonths: { month: number; year: number; label: string; key: string }[] = [];
     for (let i = numMonths - 1; i >= 0; i--) {
       const d = new Date(currentYear, currentMonth - i, 1);
@@ -162,7 +189,6 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
           (d) => d.getFullYear() === mObj.year && d.getMonth() === mObj.month
         ).length;
       } else {
-        // Se a base foi toda inserida neste mês corrente (marco de entrada)
         if (idx === rawMonths.length - 1) {
           monthNew = safeTotal;
         } else {
@@ -181,6 +207,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
         monthKey: mObj.key,
         monthLabel: mObj.label,
         year: mObj.year,
+        month: mObj.month + 1,
         totalMembers: runningTotal,
         newMembers: actualNew,
         linkedMembers: currentLinked,
@@ -189,6 +216,17 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
       };
     });
   }, [apiSeries, period, totalMembers, linkedCount, members]);
+
+  // Se a importação em lote foi detectada e o usuário optou por ocultar meses anteriores vazios
+  const growthData = useMemo<MonthlyGrowthPoint[]>(() => {
+    if (!hidePreMigrationMonths || !isBatchImportDetected || !firstRealDataMonth) {
+      return rawGrowthData;
+    }
+
+    const filtered = rawGrowthData.filter((p) => p.monthKey >= firstRealDataMonth);
+    // Garante pelo menos o ponto do mês de importação
+    return filtered.length > 0 ? filtered : rawGrowthData;
+  }, [rawGrowthData, hidePreMigrationMonths, isBatchImportDetected, firstRealDataMonth]);
 
   // Indicadores calculados no período selecionado
   const stats = useMemo(() => {
@@ -244,7 +282,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
             <div className="flex items-center justify-between">
               <span className="text-slate-300 flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-sky-400 inline-block" />
-                Total de Membros:
+                Total Acumulado:
               </span>
               <strong className="text-white text-sm font-black">{data.totalMembers}</strong>
             </div>
@@ -252,7 +290,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
             <div className="flex items-center justify-between">
               <span className="text-slate-300 flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" />
-                Novos no Mês (criado_em):
+                Novos no Mês:
               </span>
               <strong className="text-emerald-300 font-bold">+{data.newMembers}</strong>
             </div>
@@ -283,11 +321,11 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
               </h2>
               <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-200 flex items-center gap-1">
                 <Database size={10} />
-                Baseado em criado_em
+                {isRpcUsed ? 'Postgres RPC Agregado' : 'Baseado em criado_em'}
               </span>
             </div>
             <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
-              Evolução mensal calculada a partir da data de entrada de cada membro no sistema
+              Evolução mensal agregada no banco de dados pela data de registro de cada membro
             </p>
           </div>
         </div>
@@ -373,6 +411,38 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
         </div>
       </div>
 
+      {/* Alerta Transparente de Importação em Lote / Histórico Anterior Indisponível */}
+      {isBatchImportDetected && batchImportInfo && (
+        <div className="bg-amber-50/90 border border-amber-300/90 rounded-xl p-3 sm:p-3.5 text-xs text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs animate-in fade-in duration-200">
+          <div className="flex items-start gap-2.5 min-w-0">
+            <AlertTriangle size={17} className="text-amber-600 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="font-bold flex items-center gap-1.5 flex-wrap">
+                <span>Importação em lote detectada em {batchImportInfo.monthLabel} ({batchImportInfo.percentage}% da base de membros)</span>
+                <span className="text-[10px] font-bold bg-amber-200 text-amber-900 px-1.5 py-0.2 rounded-md">
+                  Histórico anterior indisponível
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800 mt-0.5">
+                Os meses anteriores não representam zero crescimento real, mas sim a ausência de registros prévios à migração em lote.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setHidePreMigrationMonths(!hidePreMigrationMonths)}
+            className="px-3 py-1.5 text-[11px] font-bold bg-white hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-lg shadow-2xs transition shrink-0 cursor-pointer self-start sm:self-center flex items-center gap-1.5 active:scale-95"
+          >
+            <SlidersHorizontal size={12} />
+            <span>
+              {hidePreMigrationMonths
+                ? 'Ver período completo (com zeros)'
+                : 'Ocultar meses pré-importação'}
+            </span>
+          </button>
+        </div>
+      )}
+
       {/* Mini KPIs de Performance no Período */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
         <div className="p-3 bg-slate-50 border border-slate-200/90 rounded-xl">
@@ -388,7 +458,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
               (+{stats.growthPercent}%)
             </span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">no período selecionado</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">no período exibido</p>
         </div>
 
         <div className="p-3 bg-slate-50 border border-slate-200/90 rounded-xl">
@@ -402,7 +472,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
             </span>
             <span className="text-[10px] text-slate-500 font-semibold">membros/mês</span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">ritmo de expansão</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">ritmo de adesões</p>
         </div>
 
         <div className="p-3 bg-slate-50 border border-slate-200/90 rounded-xl">
@@ -443,7 +513,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
         {!isMounted || isLoadingApi ? (
           <div className="h-full w-full flex items-center justify-center bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-400 font-semibold gap-2">
             <RefreshCw size={14} className="animate-spin text-sky-600" />
-            Carregando curva com base em criado_em...
+            Carregando curva de crescimento agregada...
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
@@ -532,19 +602,22 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
         )}
       </div>
 
-      {/* Rodapé Estratégico com Insight */}
+      {/* Rodapé Estratégico com Insight & Dica de Backfill */}
       <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100 flex-wrap gap-2">
         <div className="flex items-center gap-1.5 font-medium">
-          <Sparkles size={13} className="text-amber-500" />
+          <Sparkles size={13} className="text-amber-500 shrink-0" />
           <span>
             {stats.totalNetGrowth > 0
-              ? `Base atualizada com ${stats.totalNetGrowth} registros adicionados no período.`
+              ? `Base atualizada com ${stats.totalNetGrowth} novos registros no período.`
               : 'Base de membros estabilizada.'}
           </span>
         </div>
-        <span className="text-[10px] text-slate-400">
-          Dados extraídos diretamente da coluna <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600">criado_em</code>
-        </span>
+        <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+          <Info size={11} className="text-slate-400 shrink-0" />
+          <span>
+            Agregação nativa via SQL <code className="font-mono bg-slate-100 px-1 py-0.5 rounded text-slate-600">date_trunc(&apos;month&apos;, criado_em)</code>
+          </span>
+        </div>
       </div>
     </div>
   );

@@ -492,8 +492,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       const unitNameNorm = (unit.name || '').toLowerCase().trim();
       const levelNameNorm = (unit.levelTypeName || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-      // (b) Vinculação pelo campo de Setor do perfil do usuário (ex: SETOR MULTIVIEW)
-      if (uSector) {
+      // (b) Vinculação pelo campo de Setor do perfil do usuário — APENAS para Líder de Setor ou superior (nível >= 3)
+      if (uSector && userHierarchyLevel >= 3) {
         const isSector = levelNameNorm.includes('setor') || unit.levelOrder === 30;
         if (isSector && (unitNameNorm === uSector || unitNameNorm.includes(uSector) || uSector.includes(unitNameNorm))) {
           return true;
@@ -521,14 +521,14 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
       return false;
     });
-  }, [units, user, userCreatedCellIds]);
+  }, [units, user, userHierarchyLevel, userCreatedCellIds]);
 
   // 2. Calcula o conjunto de IDs de TODAS as unidades sob a cobertura / guarda-chuva de liderança do usuário
   // - Administrador / Pastor Titular / Nível >= 6: Cobertura ampla sobre toda a igreja
   // - Líder de Distrito (Nível 5): Cobre o Distrito e todas as Áreas, Setores e Células subordinados a ele
   // - Líder de Área (Nível 4): Cobre a Área e todos os Setores e Células subordinados a ela
-  // - Líder de Setor (Nível 3): Cobre o Setor e todas as Células subordinadas a este setor (ex: SETOR MULTIVIEW)
-  // - Líder de Célula (Nível 2): Cobre sua própria Célula e células geradas/multiplicadas por ela
+  // - Líder de Setor (Nível 3): Cobre o Setor e todas as Células subordinadas a este setor
+  // - Líder de Célula (Nível 2): Cobre ESTRITAMENTE sua própria Célula e células geradas/multiplicadas por ela
   const userCoveredUnitIds = useMemo(() => {
     if (!user) return new Set<string>();
 
@@ -543,7 +543,51 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     }
 
     const covered = new Set<string>();
+    const uId = (user.id || '').toLowerCase().trim();
+    const uLogin = (user.login || '').toLowerCase().trim();
+    const uCellId = (user.cellId || user.currentCellId || '').toLowerCase().trim();
+    const uCellName = (user.cellName || '').toLowerCase().trim();
 
+    // REGRA PARA LÍDER DE CÉLULA (Nível <= 2):
+    // Cobre apenas a própria célula e células filhas (multiplicadas da sua célula ou criadas por ela)
+    if (userHierarchyLevel <= 2) {
+      units.forEach((unit) => {
+        // Própria célula
+        const isDirect =
+          (uCellId && unit.id.toLowerCase() === uCellId) ||
+          (uCellName && unit.name.toLowerCase().trim() === uCellName) ||
+          unit.leaders?.some((l) => (l.id && l.id.toLowerCase() === uId) || (l.name && l.name.toLowerCase() === user.name?.toLowerCase()));
+
+        if (isDirect) {
+          covered.add(unit.id);
+          return;
+        }
+
+        // Criada diretamente pelo usuário
+        const isCreatedByMe =
+          (unit.createdByMemberId && (unit.createdByMemberId.toLowerCase() === uId || unit.createdByMemberId.toLowerCase() === uLogin)) ||
+          userCreatedCellIds.includes(unit.id);
+
+        if (isCreatedByMe) {
+          covered.add(unit.id);
+          return;
+        }
+
+        // Célula filha (multiplicada a partir da célula vinculada do líder)
+        const motherId = (unit.unidade_criadora_id || unit.motherCellId || userCellLineageMap[unit.id] || '').toLowerCase().trim();
+        const isMotherFromMe =
+          Boolean(uCellId && motherId && motherId === uCellId) ||
+          Boolean(uCellName && unit.motherCellName && unit.motherCellName.toLowerCase().trim() === uCellName);
+
+        if (isMotherFromMe) {
+          covered.add(unit.id);
+        }
+      });
+
+      return covered;
+    }
+
+    // REGRA PARA LÍDERES SUPERIORES (Setor, Área, Distrito, Rede):
     // Adiciona as unidades lideradas diretamente
     userDirectLedUnits.forEach((u) => covered.add(u.id));
 
@@ -571,11 +615,12 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     }
 
     return covered;
-  }, [user, userHierarchyLevel, units, userDirectLedUnits, userCellLineageMap]);
+  }, [user, userHierarchyLevel, units, userDirectLedUnits, userCreatedCellIds, userCellLineageMap]);
 
   // Regra de Permissão por Unidade:
-  // Um líder de setor só pode fazer alteração de líderes das unidades sob a cobertura do setor que ele lidera.
-  // Essa regra vale para líderes superiores (Área, Distrito) e líderes de célula.
+  // - Líder de Célula: SÓ PODE alterar liderança da própria célula ou de célula filha (multiplicada pela sua célula).
+  // - Líder de Setor: Só pode alterar líderes das unidades sob a cobertura do setor que ele lidera.
+  // - Líder de Área / Distrito / Pastor: Cobertura de suas respectivas áreas e unidades descendentes.
   const canUserManageUnit = React.useCallback(
     (unit: OrganizationalUnit): boolean => {
       if (!unit) return false;
@@ -591,31 +636,74 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         return true;
       }
 
-      // 2. Unidade está dentro do guarda-chuva / cobertura de liderança do usuário
+      const uId = (user.id || '').toLowerCase().trim();
+      const uLogin = (user.login || '').toLowerCase().trim();
+      const uName = (user.name || '').toLowerCase().trim();
+      const uCellId = (user.cellId || user.currentCellId || '').toLowerCase().trim();
+      const uCellName = (user.cellName || '').toLowerCase().trim();
+
+      // 2. LÍDER DE CÉLULA (Nível <= 2):
+      // Permissão ESTRITA: Apenas a própria célula ou célula filha (multiplicada da sua célula)
+      if (userHierarchyLevel <= 2) {
+        // (a) É a própria célula do líder
+        const isMyDirectCell =
+          (uCellId && unit.id.toLowerCase() === uCellId) ||
+          (uCellName && unit.name.toLowerCase().trim() === uCellName) ||
+          unit.leaders?.some((l) => {
+            const lId = (l.id || '').toLowerCase().trim();
+            const lName = (l.name || '').toLowerCase().trim();
+            return (uId && lId === uId) || (uLogin && lId === uLogin) || (uName && lName === uName);
+          });
+
+        if (isMyDirectCell) return true;
+
+        // (b) É célula filha (criada pelo líder ou multiplicada a partir da célula do líder)
+        const isCreatedByMe =
+          (unit.createdByMemberId && (unit.createdByMemberId.toLowerCase() === uId || unit.createdByMemberId.toLowerCase() === uLogin)) ||
+          userCreatedCellIds.includes(unit.id);
+
+        const motherId = (unit.unidade_criadora_id || unit.motherCellId || userCellLineageMap[unit.id] || '').toLowerCase().trim();
+        const isMotherFromMyCell =
+          Boolean(uCellId && motherId && motherId === uCellId) ||
+          Boolean(uCellName && unit.motherCellName && unit.motherCellName.toLowerCase().trim() === uCellName);
+
+        if (isCreatedByMe || isMotherFromMyCell) return true;
+
+        // Rejeita qualquer outra célula do setor/igreja para líder de célula
+        return false;
+      }
+
+      // 3. LÍDER DE SETOR (Nível 3):
+      if (userHierarchyLevel === 3) {
+        const userSectorNorm = (user.sector || '').toLowerCase().trim();
+        const unitNameNorm = (unit.name || '').toLowerCase().trim();
+        const parentNameNorm = (unit.parentName || '').toLowerCase().trim();
+
+        const isMySector = unitNameNorm === userSectorNorm;
+        const isCellInMySector = parentNameNorm === userSectorNorm;
+        const isDirectLeader = unit.leaders?.some((l) => {
+          const lId = (l.id || '').toLowerCase().trim();
+          const lName = (l.name || '').toLowerCase().trim();
+          return (uId && lId === uId) || (uLogin && lId === uLogin) || (uName && lName === uName);
+        });
+
+        if (isMySector || isCellInMySector || isDirectLeader || userCoveredUnitIds.has(unit.id)) {
+          return true;
+        }
+        return false;
+      }
+
+      // 4. LÍDER DE ÁREA (Nível 4) / DISTRITO (Nível 5):
       if (userCoveredUnitIds.has(unit.id)) {
         return true;
       }
 
-      // 3. Fallback de liderança direta na unidade
-      const uId = (user.id || '').toLowerCase().trim();
-      const uLogin = (user.login || '').toLowerCase().trim();
-      const uName = (user.name || '').toLowerCase().trim();
       const isDirectLeader = unit.leaders?.some((l) => {
         const lId = (l.id || '').toLowerCase().trim();
         const lName = (l.name || '').toLowerCase().trim();
         return (uId && lId === uId) || (uLogin && lId === uLogin) || (uName && lName === uName);
       });
       if (isDirectLeader) return true;
-
-      // 4. Fallback por nome do setor para Líder de Setor
-      if (user.sector) {
-        const userSectorNorm = user.sector.toLowerCase().trim();
-        const unitNameNorm = (unit.name || '').toLowerCase().trim();
-        const parentNameNorm = (unit.parentName || '').toLowerCase().trim();
-        if (unitNameNorm === userSectorNorm || parentNameNorm === userSectorNorm) {
-          return true;
-        }
-      }
 
       return false;
     },
@@ -624,6 +712,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       userHierarchyLevel,
       user,
       userCoveredUnitIds,
+      userCreatedCellIds,
+      userCellLineageMap,
     ]
   );
 
@@ -653,7 +743,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       }) ||
       (uCellId && unit.id.toLowerCase() === uCellId) ||
       (uCellName && unitNameNorm === uCellName) ||
-      (uSector && unitNameNorm === uSector);
+      (userHierarchyLevel >= 3 && uSector && unitNameNorm === uSector);
 
     if (isDirectLeader) {
       const label =
@@ -679,10 +769,10 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       (unit.createdByMemberId && (unit.createdByMemberId.toLowerCase() === uId || unit.createdByMemberId.toLowerCase() === uLogin)) ||
       userCreatedCellIds.includes(unit.id);
 
-    const motherId = unit.unidade_criadora_id || unit.motherCellId || userCellLineageMap[unit.id];
+    const motherId = (unit.unidade_criadora_id || unit.motherCellId || userCellLineageMap[unit.id] || '').toLowerCase().trim();
     const isMotherFromMe =
-      (uCellId && motherId && (motherId.toLowerCase() === uCellId)) ||
-      (uCellName && unit.motherCellName && unit.motherCellName.toLowerCase().trim() === uCellName);
+      Boolean(uCellId && motherId && (motherId === uCellId)) ||
+      Boolean(uCellName && unit.motherCellName && unit.motherCellName.toLowerCase().trim() === uCellName);
 
     if (isMotherFromMe) {
       return (
@@ -702,8 +792,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       );
     }
 
-    // Distintivo de cobertura hierárquica (Setor, Área, Distrito)
-    if (userCoveredUnitIds.has(unit.id)) {
+    // Distintivo de cobertura hierárquica (Setor, Área, Distrito) — Apenas para líderes de nível >= 3
+    if (userHierarchyLevel >= 3 && userCoveredUnitIds.has(unit.id)) {
       const coverageLabel =
         userHierarchyLevel === 3
           ? 'Cobertura do Seu Setor'
