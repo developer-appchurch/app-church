@@ -1760,7 +1760,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
             {/* Member Name */}
             {/* mesma largura máxima da coluna de dados abaixo, pra cabeçalho e linhas ficarem alinhados */}
-            <div className="flex-1 min-w-0 max-w-[40%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
+            <div className="flex-1 min-w-0 max-w-[55%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
               Nome do Membro
             </div>
 
@@ -1838,7 +1838,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
                     {/* Nome do Membro (Clique para abrir modal de edição) */}
                     {/* max-w limitado no mobile para sobrar margem lateral antes da coluna Trilho */}
-                    <div className="flex-1 min-w-0 max-w-[40%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
+                    <div className="flex-1 min-w-0 max-w-[55%] sm:max-w-none pl-1.5 sm:pl-3 pr-1.5 sm:pr-1 text-left">
                       <button
                         type="button"
                         onClick={() => handleOpenEditMemberModal(member)}
@@ -1888,9 +1888,10 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                         title={`Ver Trilho de Liderança de ${member.name}`}
                         aria-label={`Trilho de liderança de ${member.name}`}
                       >
+                        {/* Tamanho +10% em relação ao original (24px/32px -> 26px/35px) */}
                         <LeadershipBadgeIcon
-                          className="w-6 h-6 sm:w-8 sm:h-8 group-hover:scale-105 transition-transform"
-                          size={24}
+                          className="w-[26px] h-[26px] sm:w-[35px] sm:h-[35px] group-hover:scale-105 transition-transform"
+                          size={26}
                         />
                       </button>
                     </div>
