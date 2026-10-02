@@ -451,6 +451,8 @@ export interface WeeklyReport {
   visitantes?: number;
   oferta?: string;
   presentes_ids?: string[];
+  presentes_nomes?: Record<string, string>;
+  presentes_membros?: { id: string; nome: string }[];
   observacao_texto?: string;
 }
 

@@ -443,6 +443,12 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
 
   // Abre formulário populado para edição a partir de um relatório existente
   const handleOpenEditModal = (rep: WeeklyReport) => {
+    if (rep.tesouraria_recebido) {
+      setToastMessage('Este relatório já foi validado pela tesouraria e não pode ser editado.');
+      setTimeout(() => setToastMessage(null), 3500);
+      return;
+    }
+
     setEditingReportId(rep.id);
     setReportDate(rep.data_relatorio);
     setSupervisaoPresente(Boolean(rep.supervisao));
@@ -717,17 +723,23 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
             <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
               {/* LEGENDA / CABEÇALHO DA TABELA (Estilo My Cell) */}
               <div className="bg-slate-100/90 border-b border-slate-200/90 px-3 sm:px-4 py-2.5 grid grid-cols-12 gap-1.5 sm:gap-2 text-[11px] font-extrabold text-slate-600 uppercase tracking-wider items-center select-none">
-                <div className="col-span-2 sm:col-span-1 text-center" title="Supervisão Presente">
+                <div className="col-span-1 sm:col-span-1 text-center" title="Supervisão Presente">
                   Sup.
                 </div>
                 <div className="col-span-2 sm:col-span-2 text-left">Data</div>
-                <div className="col-span-3 sm:col-span-2 text-center sm:text-left">Presentes</div>
+                <div className="col-span-2 sm:col-span-2 text-center sm:text-left">
+                  <span className="sm:hidden">Pessoas</span>
+                  <span className="hidden sm:inline">Presentes</span>
+                </div>
                 {/* Mobile: Coluna Oferta (Soma PIX + Espécie) */}
                 <div className="col-span-3 sm:hidden text-right">Oferta</div>
                 {/* Desktop: Colunas PIX e Espécie separadas */}
                 <div className="hidden sm:block sm:col-span-2 text-right">PIX</div>
                 <div className="hidden sm:block sm:col-span-2 text-right">Espécie</div>
-                <div className="col-span-2 sm:col-span-3 text-right">Ação</div>
+                <div className="col-span-2 sm:col-span-2 text-right">Ação</div>
+                <div className="col-span-2 sm:col-span-1 text-center" title="Status de Validação da Tesouraria">
+                  Status
+                </div>
               </div>
 
               {/* LINHAS COMPACTAS DOS RELATÓRIOS */}
@@ -744,7 +756,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                       className="px-3 sm:px-4 py-2.5 grid grid-cols-12 gap-1.5 sm:gap-2 items-center hover:bg-sky-50/50 transition cursor-pointer text-xs group"
                     >
                       {/* 1. Supervisão (Ícone Verde ou Vermelho) */}
-                      <div className="col-span-2 sm:col-span-1 flex justify-center">
+                      <div className="col-span-1 sm:col-span-1 flex justify-center">
                         <div
                           title={
                             rep.supervisao ? 'Supervisão presente (Sim)' : 'Sem supervisão (Não)'
@@ -768,7 +780,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                       </div>
 
                       {/* 3. Total Presentes */}
-                      <div className="col-span-3 sm:col-span-2 flex items-center justify-center sm:justify-start">
+                      <div className="col-span-2 sm:col-span-2 flex items-center justify-center sm:justify-start">
                         <span className="inline-flex items-center gap-1 font-extrabold text-slate-900 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/80 text-xs sm:text-sm">
                           <Users size={13} className="text-sky-700 shrink-0" />
                           <span>{totalPresentes}</span>
@@ -799,7 +811,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                       </div>
 
                       {/* 7. Ação / Ver detalhes */}
-                      <div className="col-span-2 sm:col-span-3 flex items-center justify-end">
+                      <div className="col-span-2 sm:col-span-2 flex items-center justify-end">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -812,6 +824,25 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                           <Eye size={14} />
                           <span className="hidden sm:inline">Ver detalhes</span>
                         </button>
+                      </div>
+
+                      {/* 8. Status da Tesouraria (Ícone Verde se validado pela tesouraria) */}
+                      <div className="col-span-2 sm:col-span-1 flex justify-center">
+                        {rep.tesouraria_recebido ? (
+                          <div
+                            title="Relatório validado pela Tesouraria"
+                            className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-emerald-100 text-emerald-600 border border-emerald-300 shadow-2xs"
+                          >
+                            <Check size={14} className="stroke-[2.5]" />
+                          </div>
+                        ) : (
+                          <div
+                            title="Aguardando validação da Tesouraria"
+                            className="w-6 h-6 rounded-full flex items-center justify-center shrink-0 bg-slate-100 text-slate-400 border border-slate-200"
+                          >
+                            <Clock size={12} />
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
@@ -932,23 +963,32 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                     )}
                   </div>
 
-                  <div
-                    className={`px-2.5 py-1 rounded-lg border font-bold text-xs flex items-center gap-1.5 shrink-0 ${
-                      selectedReportForDetail.supervisao
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
-                        : 'bg-rose-50 text-rose-800 border-rose-200'
-                    }`}
-                  >
-                    {selectedReportForDetail.supervisao ? (
-                      <ShieldCheck size={14} className="text-emerald-600" />
-                    ) : (
-                      <ShieldX size={14} className="text-rose-600" />
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <div
+                      className={`px-2.5 py-1 rounded-lg border font-bold text-xs flex items-center gap-1.5 shrink-0 ${
+                        selectedReportForDetail.supervisao
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-rose-50 text-rose-800 border-rose-200'
+                      }`}
+                    >
+                      {selectedReportForDetail.supervisao ? (
+                        <ShieldCheck size={14} className="text-emerald-600" />
+                      ) : (
+                        <ShieldX size={14} className="text-rose-600" />
+                      )}
+                      <span>
+                        {selectedReportForDetail.supervisao
+                          ? 'Supervisão Presente'
+                          : 'Sem Supervisão'}
+                      </span>
+                    </div>
+
+                    {selectedReportForDetail.tesouraria_recebido && (
+                      <div className="px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-100 text-emerald-900 font-bold text-xs flex items-center gap-1.5 shrink-0">
+                        <Check size={13} className="text-emerald-700 stroke-[2.5]" />
+                        <span>Validado pela Tesouraria</span>
+                      </div>
                     )}
-                    <span>
-                      {selectedReportForDetail.supervisao
-                        ? 'Supervisão Presente'
-                        : 'Sem Supervisão'}
-                    </span>
                   </div>
                 </div>
 
@@ -1020,22 +1060,29 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                 {/* Membros Presentes */}
                 {selectedReportForDetail.presentes_ids &&
                   selectedReportForDetail.presentes_ids.length > 0 && (
-                    <div className="bg-sky-50/60 rounded-xl p-3 border border-sky-200/80">
-                      <div className="text-[11px] font-bold text-sky-900 uppercase mb-2 flex items-center justify-between">
+                    <div className="bg-sky-50/50 rounded-xl p-2.5 sm:p-3 border border-sky-200/80">
+                      <div className="text-[10px] sm:text-[11px] font-bold text-sky-900 uppercase mb-1.5 flex items-center justify-between">
                         <span>
                           Membros Presentes ({selectedReportForDetail.presentes_ids.length})
                         </span>
                       </div>
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1">
                         {selectedReportForDetail.presentes_ids.map((mId) => {
-                          const m = members.find((x) => x.id === mId);
+                          const memberName =
+                            selectedReportForDetail.presentes_nomes?.[mId] ||
+                            selectedReportForDetail.presentes_membros?.find((x) => x.id === mId)?.nome ||
+                            cellMembers.find((x) => x.id === mId)?.name ||
+                            directMembers?.find((x) => x.id === mId)?.name ||
+                            members.find((x) => x.id === mId)?.name ||
+                            'Membro';
+
                           return (
                             <span
                               key={mId}
-                              className="bg-white border border-sky-200 text-sky-950 text-[11px] font-bold px-2 py-0.5 rounded-lg shadow-2xs flex items-center gap-1"
+                              className="bg-white border border-sky-200 text-slate-800 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md shadow-2xs flex items-center gap-1 leading-tight"
                             >
-                              <Check size={11} className="text-emerald-600 shrink-0" />
-                              <span>{m?.name || 'Membro'}</span>
+                              <Check size={10} className="text-emerald-600 shrink-0 stroke-[2.5]" />
+                              <span className="truncate max-w-[140px] sm:max-w-none">{memberName}</span>
                             </span>
                           );
                         })}
@@ -1063,7 +1110,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                 )}
               </div>
 
-              {/* Rodapé com Botões de Fechar e Editar */}
+              {/* Rodapé com Botões de Fechar e Editar (oculta Editar se validado pela tesouraria) */}
               <div className="bg-slate-50 border-t border-slate-200 p-3 sm:px-5 flex items-center justify-between gap-2 shrink-0">
                 <button
                   type="button"
@@ -1073,14 +1120,16 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   Fechar
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => handleOpenEditModal(selectedReportForDetail)}
-                  className="px-4 py-2 rounded-xl bg-[#052447] hover:bg-[#073366] text-white font-bold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Pencil size={14} className="text-sky-300" />
-                  <span>Editar Relatório</span>
-                </button>
+                {!selectedReportForDetail.tesouraria_recebido && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditModal(selectedReportForDetail)}
+                    className="px-4 py-2 rounded-xl bg-[#052447] hover:bg-[#073366] text-white font-bold text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Pencil size={14} className="text-sky-300" />
+                    <span>Editar Relatório</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

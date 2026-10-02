@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
 
     // Query otimizada com embedding direto (1 única ida ao PostgreSQL)
     const EMBEDDED_SELECT =
-      '*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome), presencas:relatorio_presencas(membro_id)';
+      '*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome), presencas:relatorio_presencas(membro_id, membro:membros(id, nome))';
 
     let query = supabase
       .from('relatorios_semanais')
@@ -188,6 +188,7 @@ export async function GET(req: NextRequest) {
 
     let lancadorMap = new Map<string, string>();
     let presencasByReport: Record<string, string[]> = {};
+    let memberNamesMap = new Map<string, string>();
 
     if (!usesEmbedding) {
       // Modo Fallback com consultas adicionais em paralelo
@@ -198,7 +199,7 @@ export async function GET(req: NextRequest) {
           ? supabase.from('membros').select('id, nome').in('id', lancadorIds)
           : Promise.resolve({ data: [] }),
         reportIds.length > 0
-          ? supabase.from('relatorio_presencas').select('relatorio_id, membro_id').in('relatorio_id', reportIds)
+          ? supabase.from('relatorio_presencas').select('relatorio_id, membro_id, membro:membros(id, nome)').in('relatorio_id', reportIds)
           : Promise.resolve({ data: [] }),
       ]);
 
@@ -215,6 +216,21 @@ export async function GET(req: NextRequest) {
               presencasByReport[row.relatorio_id] = [];
             }
             presencasByReport[row.relatorio_id].push(row.membro_id);
+            const membroObj: any = Array.isArray((row as any).membro) ? (row as any).membro[0] : (row as any).membro;
+            if (membroObj?.nome) {
+              memberNamesMap.set(row.membro_id, membroObj.nome);
+            }
+          }
+        }
+      }
+    } else {
+      for (const row of reportRows) {
+        if (Array.isArray(row.presencas)) {
+          for (const p of row.presencas) {
+            const membroObj: any = Array.isArray((p as any).membro) ? (p as any).membro[0] : (p as any).membro;
+            if (p.membro_id && membroObj?.nome) {
+              memberNamesMap.set(p.membro_id, membroObj.nome);
+            }
           }
         }
       }
@@ -236,14 +252,58 @@ export async function GET(req: NextRequest) {
         presentesIds = presencasByReport[row.id] || [];
       }
 
+      const presentesNomes: Record<string, string> = {};
+      const presentesMembros: { id: string; nome: string }[] = [];
+
+      for (const mId of presentesIds) {
+        const name = memberNamesMap.get(mId) || '';
+        if (name) {
+          presentesNomes[mId] = name;
+        }
+        presentesMembros.push({ id: mId, nome: name || 'Membro' });
+      }
+
       return {
         ...row,
         lancado_por_nome: lancadorNome,
         observacao: observacaoTexto,
         observacao_texto: observacaoTexto,
         presentes_ids: presentesIds,
+        presentes_nomes: presentesNomes,
+        presentes_membros: presentesMembros,
       };
     });
+
+    // Busca nomes faltantes em lote se houver IDs sem nome resolvido
+    const allPresentIds = Array.from(new Set(reports.flatMap((r: any) => r.presentes_ids)));
+    const missingIds = allPresentIds.filter((id) => !memberNamesMap.has(id));
+    if (missingIds.length > 0) {
+      try {
+        const { data: missingMems } = await supabase
+          .from('membros')
+          .select('id, nome')
+          .in('id', missingIds);
+
+        if (missingMems && missingMems.length > 0) {
+          const mapExtra = new Map<string, string>();
+          missingMems.forEach((m: any) => mapExtra.set(m.id, m.nome));
+
+          reports.forEach((r: any) => {
+            r.presentes_ids.forEach((id: string, idx: number) => {
+              if (mapExtra.has(id)) {
+                const name = mapExtra.get(id)!;
+                r.presentes_nomes[id] = name;
+                if (r.presentes_membros[idx]) {
+                  r.presentes_membros[idx].nome = name;
+                }
+              }
+            });
+          });
+        }
+      } catch (err) {
+        console.warn('Aviso ao resolver nomes extras de membros presentes:', err);
+      }
+    }
 
     const hasMore = mode === 'older' ? offset + reportRows.length < olderReportsCount : hasOlderReports;
     const nextOffset = offset + reportRows.length;
