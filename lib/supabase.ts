@@ -2274,8 +2274,12 @@ export const AppChurchService = {
   async addMember(newMember: Omit<CellMember, 'id'>): Promise<CellMember> {
     const newId = generateUUID();
 
-    // Normaliza login fornecido ou cria slug único a partir do nome
-    const cleanLogin = (
+    // A maioria dos membros não tem login/senha — o app é feito para líderes.
+    // Só provisiona login/auth.users quando assignLogin === true (flag do formulário).
+    const wantsLogin = newMember.assignLogin === true;
+
+    // Normaliza login fornecido ou cria slug único a partir do nome (só quando solicitado)
+    const cleanLoginRaw = (
       newMember.login ||
       newMember.name
         .toLowerCase()
@@ -2285,10 +2289,14 @@ export const AppChurchService = {
         .replace(/\s+/g, '.')
     ).trim().toLowerCase();
 
-    // 1. Regra de Negócio Estrita: NÃO PODE REPETIR LOGIN
-    const availability = await this.isLoginAvailable(cleanLogin);
-    if (!availability.available) {
-      throw new Error(availability.error || `O login "${cleanLogin}" já está em uso.`);
+    const cleanLogin = wantsLogin ? cleanLoginRaw : null;
+
+    // 1. Regra de Negócio Estrita: NÃO PODE REPETIR LOGIN (só se for atribuir login agora)
+    if (wantsLogin && cleanLogin) {
+      const availability = await this.isLoginAvailable(cleanLogin);
+      if (!availability.available) {
+        throw new Error(availability.error || `O login "${cleanLogin}" já está em uso.`);
+      }
     }
 
     // Normaliza celula_id / unidade_id para null se for string vazia ou inexistente (PostgreSQL uuid)
@@ -2330,7 +2338,7 @@ export const AppChurchService = {
       ...newMember,
       id: newId,
       cellId: validCellId || '',
-      login: cleanLogin,
+      login: cleanLogin || undefined,
       roleId: validRoleId,
     };
 
@@ -2345,7 +2353,8 @@ export const AppChurchService = {
             churchId: validChurchId,
             name: newMember.name,
             login: cleanLogin,
-            password: newMember.password || '123456',
+            password: wantsLogin ? (newMember.password || '123456') : null,
+            assignLogin: wantsLogin,
             role: newMember.role,
             roleId: validRoleId,
             cellId: validCellId,
@@ -2382,27 +2391,29 @@ export const AppChurchService = {
 
     if (!createdViaApi && supabase) {
       let fallbackAuthId: string | null = null;
-      try {
-        const synthEmail = `${cleanLogin.replace(/[^a-z0-9._-]/g, '_')}@membros.appchurch.local`;
-        const { data: signData } = await supabase.auth.signUp({
-          email: synthEmail,
-          password: newMember.password?.trim() || '123456',
-          options: {
-            data: {
-              nome: newMember.name,
-              login: cleanLogin,
-              igreja_id: validChurchId,
-              membro_id: newId,
-              role: newMember.role,
+      if (wantsLogin && cleanLogin) {
+        try {
+          const synthEmail = `${cleanLogin.replace(/[^a-z0-9._-]/g, '_')}@membros.appchurch.local`;
+          const { data: signData } = await supabase.auth.signUp({
+            email: synthEmail,
+            password: newMember.password?.trim() || '123456',
+            options: {
+              data: {
+                nome: newMember.name,
+                login: cleanLogin,
+                igreja_id: validChurchId,
+                membro_id: newId,
+                role: newMember.role,
+              },
             },
-          },
-        });
-        if (signData?.user?.id) {
-          fallbackAuthId = signData.user.id;
-          created.authUserId = fallbackAuthId;
+          });
+          if (signData?.user?.id) {
+            fallbackAuthId = signData.user.id;
+            created.authUserId = fallbackAuthId;
+          }
+        } catch (authErr) {
+          console.warn('Aviso no fallback direto de signUp:', authErr);
         }
-      } catch (authErr) {
-        console.warn('Aviso no fallback direto de signUp:', authErr);
       }
 
       const ptPayload: any = {
@@ -2412,8 +2423,8 @@ export const AppChurchService = {
         papel_id: validRoleId,
         funcao: newMember.role,
         nome: newMember.name,
-        login: cleanLogin,
-        senha_hash: newMember.password?.trim() || '123456',
+        login: wantsLogin ? cleanLogin : null,
+        senha_hash: wantsLogin ? (newMember.password?.trim() || '123456') : null,
         auth_user_id: fallbackAuthId,
         bairro: newMember.neighborhood || '',
         aniversario: newMember.birthday || '',
@@ -4853,6 +4864,28 @@ export const AppChurchService = {
         throw new Error(data?.error || 'Falha ao resetar senha.');
       }
       return data.temporaryPassword as string;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  async assignMemberLogin(payload: {
+    memberId: string;
+    churchId: string;
+    login: string;
+    password: string;
+  }): Promise<string> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/members/access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao atribuir login.');
+      }
+      invalidateMemoryCache(`members:${payload.churchId}`);
+      return data.assignedLogin as string;
     }
     throw new Error('Ambiente do cliente necessário.');
   },

@@ -193,6 +193,7 @@ export interface CellMember {
   name: string;
   login?: string; // Login exclusivo para autenticação na aplicação
   password?: string; // Senha para acesso à aplicação
+  assignLogin?: boolean; // Usado apenas no cadastro: true = provisionar login/senha agora; false/ausente = membro sem acesso ao app
   roleId?: string; // Tabela de Funções
   role: UserRole;
   permissions?: string[]; // Permissões herdadas e/ou customizadas

@@ -118,14 +118,18 @@ function generateTemporaryPassword(): string {
 
 /**
  * POST /api/members/access
- * Gera uma senha temporária aleatória para o membro, mostrada uma única vez
- * para o admin repassar manualmente (WhatsApp, pessoalmente etc.).
- * Body: { memberId, churchId }
+ * Dois usos, diferenciados pela presença de "login" no body:
+ *  - Sem "login": reseta a senha do membro (já tem acesso) para uma
+ *    temporária aleatória, mostrada uma única vez.
+ *  - Com "login": atribui login e senha pela primeira vez a um membro que
+ *    hoje não tem acesso ao app (membros.login ainda NULL) — usado na edição
+ *    de membro em "Minha Célula".
+ * Body: { memberId, churchId, login?, password? }
  */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { memberId, churchId } = body || {};
+    const { memberId, churchId, login, password } = body || {};
 
     if (!memberId) {
       return NextResponse.json({ error: 'memberId é obrigatório.' }, { status: 400 });
@@ -146,6 +150,58 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Membro não encontrado.' }, { status: 404 });
     }
 
+    // ===== Modo ATRIBUIR: membro ainda não tem login =====
+    if (login) {
+      const cleanLogin = String(login).trim().toLowerCase().replace(/[^a-z0-9.]/g, '');
+      if (!cleanLogin) {
+        return NextResponse.json({ error: 'Login inválido.' }, { status: 400 });
+      }
+      const cleanPass = (password || '123456').trim();
+      if (cleanPass.length < 6) {
+        return NextResponse.json({ error: 'A senha deve ter no mínimo 6 caracteres.' }, { status: 400 });
+      }
+
+      const { data: existingLogin } = await supabase
+        .from('membros')
+        .select('id')
+        .eq('login', cleanLogin)
+        .neq('id', memberId)
+        .limit(1);
+
+      if (existingLogin && existingLogin.length > 0) {
+        return NextResponse.json({ error: `O login "${cleanLogin}" já está em uso.` }, { status: 409 });
+      }
+
+      const hashAssign = bcrypt.hashSync(cleanPass, 10);
+      const { error: assignErr } = await supabase
+        .from('membros')
+        .update({ login: cleanLogin, senha_hash: hashAssign, senha_temporaria: false, acesso_ativo: true })
+        .eq('id', memberId);
+
+      if (assignErr) {
+        if (assignErr.code === '23505') {
+          return NextResponse.json({ error: `O login "${cleanLogin}" já está em uso.` }, { status: 409 });
+        }
+        return NextResponse.json({ error: assignErr.message }, { status: 500 });
+      }
+
+      try {
+        await createAuthUserForMember({
+          churchId: member.igreja_id || churchId,
+          memberId: member.id,
+          name: member.nome,
+          login: cleanLogin,
+          password: cleanPass,
+          role: member.funcao,
+        });
+      } catch (authErr) {
+        console.warn('[members/access POST assign] Falha ao sincronizar no Supabase Auth (seguindo com fallback legado):', authErr);
+      }
+
+      return NextResponse.json({ success: true, assignedLogin: cleanLogin });
+    }
+
+    // ===== Modo RESET: gera senha temporária aleatória =====
     const temporaryPassword = generateTemporaryPassword();
     const hash = bcrypt.hashSync(temporaryPassword, 10);
 

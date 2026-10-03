@@ -38,10 +38,115 @@ export async function POST(req: NextRequest) {
       attendancePercentage = 100,
       avatarUrl = null,
       notes = null,
+      assignLogin = true,
     } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: 'O nome do membro é obrigatório.' }, { status: 400 });
+    }
+
+    // Membro "sem acesso ao app" (a maioria): não provisiona login/senha/auth.users.
+    // A liderança pode atribuir login e senha depois, editando o membro.
+    if (!assignLogin) {
+      const supabaseAdminNoAuth = getSupabaseAdminClient();
+      const supabaseNoAuth = supabaseAdminNoAuth || getSupabaseServerClient();
+      if (!supabaseNoAuth) {
+        return NextResponse.json({ error: 'Servidor do banco de dados não configurado.' }, { status: 500 });
+      }
+
+      const memberIdNoAuth = generateUUID();
+      const validCellIdNoAuth = cellId && String(cellId).trim() !== '' ? String(cellId).trim() : null;
+      const validChurchIdNoAuth = churchId && String(churchId).trim() !== '' ? String(churchId).trim() : null;
+
+      const roleNormNoAuth = (role || 'Membro').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+      let resolvedRoleIdNoAuth = roleId && String(roleId).includes('-') ? roleId : null;
+      if (!resolvedRoleIdNoAuth) {
+        if (roleNormNoAuth.includes('admin')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000001';
+        else if (roleNormNoAuth.includes('pastor')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000002';
+        else if (roleNormNoAuth.includes('supervisor')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000008';
+        else if (roleNormNoAuth.includes('distrito')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000006';
+        else if (roleNormNoAuth.includes('rede')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000005';
+        else if (roleNormNoAuth.includes('area')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000004';
+        else if (roleNormNoAuth.includes('setor')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000009';
+        else if (roleNormNoAuth.includes('celula') || roleNormNoAuth.includes('lider')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000010';
+        else if (roleNormNoAuth.includes('treinamento')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000011';
+        else if (roleNormNoAuth.includes('anfitriao')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000012';
+        else if (roleNormNoAuth.includes('secretario')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000013';
+        else if (roleNormNoAuth.includes('intercessor')) resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000014';
+        else resolvedRoleIdNoAuth = 'b2000000-0000-0000-0000-000000000003';
+      }
+
+      const ptPayloadNoAuth: any = {
+        id: memberIdNoAuth,
+        igreja_id: validChurchIdNoAuth,
+        unidade_id: validCellIdNoAuth,
+        papel_id: resolvedRoleIdNoAuth,
+        funcao: role || 'Membro',
+        nome: name.trim(),
+        login: null,
+        senha_hash: null,
+        auth_user_id: null,
+        bairro: neighborhood?.trim() || 'Centro',
+        aniversario: birthday?.trim() || '01/01',
+        telefone: phone?.trim() || null,
+        email: email?.trim() || null,
+        status_frequencia: attendanceStatus || 'green',
+        percentual_frequencia: attendancePercentage ?? 100,
+        url_avatar: avatarUrl?.trim() || null,
+        observacoes: notes?.trim() || (validCellIdNoAuth ? 'Cadastrado e vinculado à célula' : 'Cadastrado no Pool Geral'),
+      };
+
+      let { error: insertErrNoAuth } = await supabaseNoAuth.from('membros').insert([ptPayloadNoAuth]);
+
+      if (insertErrNoAuth && (insertErrNoAuth.code === '42P01' || insertErrNoAuth.message?.includes('does not exist') || insertErrNoAuth.message?.includes('unidade_id'))) {
+        const payloadLegacyNoAuth: any = { ...ptPayloadNoAuth, celula_id: validCellIdNoAuth };
+        delete payloadLegacyNoAuth.unidade_id;
+        const resLegacyNoAuth = await supabaseNoAuth.from('members').insert([payloadLegacyNoAuth]);
+        insertErrNoAuth = resLegacyNoAuth.error;
+      }
+
+      if (insertErrNoAuth) {
+        console.error('[POST /api/members/create] Erro ao cadastrar membro sem login:', insertErrNoAuth);
+        return NextResponse.json(
+          { error: `Falha ao cadastrar membro no banco: ${insertErrNoAuth.message}` },
+          { status: 500 }
+        );
+      }
+
+      if (validCellIdNoAuth) {
+        const { count: cellCountNoAuth } = await supabaseNoAuth
+          .from('membros')
+          .select('*', { count: 'exact', head: true })
+          .eq('unidade_id', validCellIdNoAuth);
+        if (typeof cellCountNoAuth === 'number') {
+          await supabaseNoAuth
+            .from('unidades')
+            .update({ quantidade_membros: cellCountNoAuth, atualizado_em: new Date().toISOString() })
+            .eq('id', validCellIdNoAuth);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        member: {
+          id: memberIdNoAuth,
+          churchId: validChurchIdNoAuth || '',
+          cellId: validCellIdNoAuth || '',
+          name: name.trim(),
+          login: null,
+          role,
+          roleId: ptPayloadNoAuth.papel_id,
+          neighborhood: ptPayloadNoAuth.bairro,
+          birthday: ptPayloadNoAuth.aniversario,
+          phone: ptPayloadNoAuth.telefone || '',
+          email: ptPayloadNoAuth.email || '',
+          attendanceStatus: ptPayloadNoAuth.status_frequencia,
+          attendancePercentage: ptPayloadNoAuth.percentual_frequencia,
+          avatarUrl: ptPayloadNoAuth.url_avatar,
+          notes: ptPayloadNoAuth.observacoes,
+          authUserId: null,
+        },
+      });
     }
 
     if (avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim().startsWith('data:')) {

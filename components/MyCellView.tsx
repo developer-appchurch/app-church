@@ -216,6 +216,14 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [isSubmittingEditMember, setIsSubmittingEditMember] = useState(false);
   const [memberEditSuccessToast, setMemberEditSuccessToast] = useState('');
 
+  // Atribuir Login e Senha a um membro que ainda não tem acesso ao app (ação independente, dentro da edição)
+  const [isAssignLoginOpen, setIsAssignLoginOpen] = useState(false);
+  const [assignLoginValue, setAssignLoginValue] = useState('');
+  const [assignPasswordValue, setAssignPasswordValue] = useState('');
+  const [isAssigningLogin, setIsAssigningLogin] = useState(false);
+  const [assignLoginError, setAssignLoginError] = useState('');
+  const [assignLoginSuccess, setAssignLoginSuccess] = useState('');
+
   // Edit Cell form state
   const [isEditCellModalOpen, setIsEditCellModalOpen] = useState(false);
   const [editName, setEditName] = useState('');
@@ -234,6 +242,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
   // New member form state
   const [newName, setNewName] = useState('');
+  const [assignLoginOnCreate, setAssignLoginOnCreate] = useState(false);
   const [newLogin, setNewLogin] = useState('');
   const [isLoginManuallyEdited, setIsLoginManuallyEdited] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -1038,6 +1047,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
   const handleOpenAddModal = () => {
     setNewName('');
+    setAssignLoginOnCreate(false);
     setNewLogin('');
     setIsLoginManuallyEdited(false);
     setNewPassword('');
@@ -1059,6 +1069,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const handleCloseAddModal = () => {
     setIsAddModalOpen(false);
     setNewName('');
+    setAssignLoginOnCreate(false);
     setNewLogin('');
     setIsLoginManuallyEdited(false);
     setNewPassword('');
@@ -1159,37 +1170,46 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       }
     }
 
-    const effectiveLogin = (
-      newLogin.trim() || generateLoginSuggestion(newName)
-    ).toLowerCase();
+    // Login e senha só são relevantes se o admin marcou "Atribuir Login e Senha" —
+    // a maioria dos membros não acessa o app diretamente (ele é feito para líderes).
+    let effectiveLogin = '';
+    let cleanPassword = '';
 
-    // 1. Checagem estrita de unicidade de login
-    setIsCheckingLogin(true);
-    setIsSubmitting(true);
-    try {
-      const check = await AppChurchService.isLoginAvailable(effectiveLogin);
-      if (!check.available) {
-        const errMsg =
-          check.error ||
-          'Este login já está em uso. Por favor, escolha outro login.';
-        setLoginDuplicateError(errMsg);
-        setFormError(errMsg);
+    if (assignLoginOnCreate) {
+      effectiveLogin = (
+        newLogin.trim() || generateLoginSuggestion(newName)
+      ).toLowerCase();
+
+      // 1. Checagem estrita de unicidade de login
+      setIsCheckingLogin(true);
+      setIsSubmitting(true);
+      try {
+        const check = await AppChurchService.isLoginAvailable(effectiveLogin);
+        if (!check.available) {
+          const errMsg =
+            check.error ||
+            'Este login já está em uso. Por favor, escolha outro login.';
+          setLoginDuplicateError(errMsg);
+          setFormError(errMsg);
+          setIsCheckingLogin(false);
+          setIsSubmitting(false);
+          return;
+        }
+      } catch (err: any) {
+        console.warn('Erro ao verificar disponibilidade de login:', err);
+      } finally {
         setIsCheckingLogin(false);
+      }
+
+      // Validação de senha: se informada, deve ter no mínimo 6 caracteres para autenticação
+      cleanPassword = newPassword.trim();
+      if (cleanPassword && cleanPassword.length < 6) {
+        setFormError('A senha de acesso deve ter no mínimo 6 caracteres para permitir o login no autenticador.');
         setIsSubmitting(false);
         return;
       }
-    } catch (err: any) {
-      console.warn('Erro ao verificar disponibilidade de login:', err);
-    } finally {
-      setIsCheckingLogin(false);
-    }
-
-    // Validação de senha: se informada, deve ter no mínimo 6 caracteres para autenticação
-    const cleanPassword = newPassword.trim();
-    if (cleanPassword && cleanPassword.length < 6) {
-      setFormError('A senha de acesso deve ter no mínimo 6 caracteres para permitir o login no autenticador.');
-      setIsSubmitting(false);
-      return;
+    } else {
+      setIsSubmitting(true);
     }
 
     // Validação estrita de nível de hierarquia
@@ -1203,8 +1223,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     try {
       await onAddMember({
         name: newName.trim(),
-        login: effectiveLogin,
-        password: cleanPassword || '123456',
+        assignLogin: assignLoginOnCreate,
+        login: assignLoginOnCreate ? effectiveLogin : undefined,
+        password: assignLoginOnCreate ? (cleanPassword || '123456') : undefined,
         role: effectiveRole,
         roleId: targetRoleObj?.id,
         neighborhood: newNeighborhood.trim(), // Deixa em branco caso o usuário não informe
@@ -1218,6 +1239,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       });
 
       setNewName('');
+      setAssignLoginOnCreate(false);
       setNewLogin('');
       setIsLoginManuallyEdited(false);
       setNewPassword('');
@@ -1306,6 +1328,11 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setEditMemberCellId(member.cellId || cell.id);
     setIsChangingCell(false);
     setEditMemberFormError('');
+    setIsAssignLoginOpen(false);
+    setAssignLoginValue('');
+    setAssignPasswordValue('');
+    setAssignLoginError('');
+    setAssignLoginSuccess('');
   };
 
   const handleCloseEditMemberModal = () => {
@@ -1318,6 +1345,56 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setEditMemberNeighborhood('');
     setEditMemberFormError('');
     setIsChangingCell(false);
+    setIsAssignLoginOpen(false);
+    setAssignLoginValue('');
+    setAssignPasswordValue('');
+    setAssignLoginError('');
+    setAssignLoginSuccess('');
+  };
+
+  const handleAssignLogin = async () => {
+    if (!editingMember) return;
+    setAssignLoginError('');
+
+    const cleanLogin = assignLoginValue.trim().toLowerCase().replace(/[^a-z0-9.]/g, '');
+    if (!cleanLogin) {
+      setAssignLoginError('Informe um login para o membro.');
+      return;
+    }
+
+    const cleanPass = assignPasswordValue.trim();
+    if (cleanPass && cleanPass.length < 6) {
+      setAssignLoginError('A senha deve ter no mínimo 6 caracteres.');
+      return;
+    }
+
+    setIsAssigningLogin(true);
+    try {
+      const availability = await AppChurchService.isLoginAvailable(cleanLogin);
+      if (!availability.available) {
+        setAssignLoginError(availability.error || `O login "${cleanLogin}" já está em uso.`);
+        setIsAssigningLogin(false);
+        return;
+      }
+
+      await AppChurchService.assignMemberLogin({
+        memberId: editingMember.id,
+        churchId: editingMember.churchId || cell.churchId,
+        login: cleanLogin,
+        password: cleanPass || '123456',
+      });
+
+      setEditingMember({ ...editingMember, login: cleanLogin });
+      setAssignLoginSuccess(`Login "${cleanLogin}" atribuído com sucesso. Informe a senha ao membro.`);
+      setIsAssignLoginOpen(false);
+      if (onUpdateMember) {
+        await onUpdateMember({ ...editingMember, login: cleanLogin }, cell.id);
+      }
+    } catch (err: any) {
+      setAssignLoginError(err?.message || 'Falha ao atribuir login.');
+    } finally {
+      setIsAssigningLogin(false);
+    }
   };
 
   const handleEditMemberBirthdayTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2012,7 +2089,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     const val = e.target.value;
                     setNewName(val);
                     // Preenche o campo de login automaticamente se o usuário ainda não o editou
-                    if (!isLoginManuallyEdited) {
+                    // (só relevante quando "Atribuir Login e Senha" está marcado)
+                    if (assignLoginOnCreate && !isLoginManuallyEdited) {
                       const sugg = generateLoginSuggestion(val);
                       setNewLogin(sugg);
                       if (sugg) {
@@ -2026,13 +2104,44 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 />
               </div>
 
-              {/* Login & Senha do Membro para Acesso à Aplicação */}
+              {/* Login & Senha do Membro para Acesso à Aplicação — opcional: a maioria dos
+                  membros não acessa o app diretamente, só os líderes precisam de login. */}
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <label className="flex items-center justify-between cursor-pointer select-none">
                   <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-[#052447]" />
-                    Credenciais de Acesso ao App
+                    Atribuir Login e Senha
                   </span>
+                  <span
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      assignLoginOnCreate ? 'bg-[#052447]' : 'bg-slate-300'
+                    }`}
+                    onClick={() => {
+                      const next = !assignLoginOnCreate;
+                      setAssignLoginOnCreate(next);
+                      if (next && !isLoginManuallyEdited) {
+                        const sugg = generateLoginSuggestion(newName);
+                        setNewLogin(sugg);
+                        if (sugg) handleValidateLogin(sugg);
+                      }
+                    }}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                        assignLoginOnCreate ? 'translate-x-[18px]' : 'translate-x-1'
+                      }`}
+                    />
+                  </span>
+                </label>
+                <p className="text-[11px] text-slate-500 -mt-1">
+                  {assignLoginOnCreate
+                    ? 'Este membro poderá fazer login no app com o login e senha abaixo.'
+                    : 'Desmarcado (padrão): o membro fica cadastrado sem acesso ao app. Você pode atribuir login e senha depois, editando o membro.'}
+                </p>
+
+                {assignLoginOnCreate && (
+                <>
+                <div className="flex items-center justify-between border-t border-slate-200 pt-2">
                   <span className="text-[10px] text-slate-500 font-medium">
                     Regra: Login único obrigatório
                   </span>
@@ -2129,6 +2238,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     </p>
                   </div>
                 </div>
+                </>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -2640,6 +2751,85 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   />
                 </div>
               </div>
+
+              {/* Atribuir Login e Senha — só aparece para membro que ainda não tem acesso ao app */}
+              {!editingMember?.login && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                  {!isAssignLoginOpen ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAssignLoginError('');
+                        setAssignLoginSuccess('');
+                        setAssignLoginValue(editingMember ? generateLoginSuggestion(editingMember.name) : '');
+                        setAssignPasswordValue('');
+                        setIsAssignLoginOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between text-xs font-bold text-slate-800"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5 text-[#052447]" />
+                        Atribuir Login e Senha
+                      </span>
+                      <span className="text-[11px] text-sky-700 font-semibold">Este membro não tem acesso ao app</span>
+                    </button>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5 text-[#052447]" />
+                          Atribuir Login e Senha
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setIsAssignLoginOpen(false)}
+                          className="text-slate-400 hover:text-slate-600"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">Login:</label>
+                          <input
+                            type="text"
+                            value={assignLoginValue}
+                            onChange={(e) =>
+                              setAssignLoginValue(e.target.value.toLowerCase().replace(/[^a-z0-9.]/g, ''))
+                            }
+                            placeholder="login.membro"
+                            className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">Senha:</label>
+                          <input
+                            type="text"
+                            value={assignPasswordValue}
+                            onChange={(e) => setAssignPasswordValue(e.target.value)}
+                            placeholder="Mín. 6 caracteres (padrão: 123456)"
+                            className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                          />
+                        </div>
+                      </div>
+                      {assignLoginError && (
+                        <p className="text-[11px] text-red-600 font-semibold">{assignLoginError}</p>
+                      )}
+                      {assignLoginSuccess && (
+                        <p className="text-[11px] text-emerald-600 font-semibold">{assignLoginSuccess}</p>
+                      )}
+                      <button
+                        type="button"
+                        disabled={isAssigningLogin}
+                        onClick={handleAssignLogin}
+                        className="w-full text-xs font-bold text-white bg-[#052447] rounded-xl py-2 disabled:opacity-60"
+                      >
+                        {isAssigningLogin ? 'Atribuindo...' : 'Confirmar Login e Senha'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
 
               {/* Função na Igreja (apenas os nomes das funções, sem descrever nível ao lado) */}
               <div>
