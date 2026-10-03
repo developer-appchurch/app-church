@@ -1323,6 +1323,43 @@ export const AppChurchService = {
   },
 
   /**
+   * Move várias células de uma vez para outro setor (mesmo nível hierárquico),
+   * usado quando um setor se multiplica e várias células precisam ser
+   * transferidas para o novo setor ao mesmo tempo.
+   */
+  async moveUnitsToParent(payload: {
+    unitIds: string[];
+    churchId: string;
+    newParentId: string;
+  }): Promise<{
+    movedIds: string[];
+    skipped: { id: string; reason: string }[];
+    parentId: string;
+    parentName?: string;
+  }> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/units/move', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao transferir células.');
+      }
+      invalidateMemoryCache('units:');
+      invalidateMemoryCache(`cells:${payload.churchId}`);
+      return {
+        movedIds: data.movedIds || [],
+        skipped: data.skipped || [],
+        parentId: data.parentId,
+        parentName: data.parentName,
+      };
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  /**
    * Obtém o Pool Geral de Membros da Igreja (membros sem célula e membros vinculados)
    * Suporta range e limit para evitar varredura massiva de registros
    */

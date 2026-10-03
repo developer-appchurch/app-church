@@ -28,8 +28,11 @@ import {
   Copy,
   RotateCcw,
   Search,
+  ArrowRightLeft,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
-import { UserProfile, Neighborhood, TrackStep } from '@/types';
+import { UserProfile, Neighborhood, TrackStep, ChurchHierarchicalLevel, OrganizationalUnit } from '@/types';
 import { AppChurchService } from '@/lib/supabase';
 
 type TrackStepWithProgress = TrackStep & { progressCount: number };
@@ -157,7 +160,9 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
         )}
         {activeTab === 'neighborhoods' && <NeighborhoodsTab currentUser={currentUser} />}
         {activeTab === 'track' && <TrackStepsTab currentUser={currentUser} />}
-        {activeTab === 'units' && <UnitsShortcutTab onNavigateToUnits={onNavigateToUnits} />}
+        {activeTab === 'units' && (
+          <UnitsTransferTab currentUser={currentUser} onNavigateToUnits={onNavigateToUnits} />
+        )}
         {activeTab === 'logins' && <LoginsTab currentUser={currentUser} />}
       </div>
     </div>
@@ -176,29 +181,324 @@ const ComingSoonTab: React.FC<{ icon: React.ElementType; title: string }> = ({ i
   </div>
 );
 
-const UnitsShortcutTab: React.FC<{ onNavigateToUnits?: () => void }> = ({ onNavigateToUnits }) => (
-  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-8 sm:p-12 text-center">
-    <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center mx-auto mb-3">
-      <Layers size={22} />
+/**
+ * Transferência em lote de Células entre Setores — útil quando um setor se
+ * multiplica e várias células precisam ser movidas para o novo setor de
+ * uma só vez. Opera sempre entre uma unidade "folha" (Célula) e seu nível
+ * pai imediato (Setor), quaisquer que sejam os nomes configurados pela
+ * igreja para esses níveis.
+ */
+const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?: () => void }> = ({
+  currentUser,
+  onNavigateToUnits,
+}) => {
+  const churchId = currentUser.churchId;
+  const [levels, setLevels] = useState<ChurchHierarchicalLevel[]>([]);
+  const [units, setUnits] = useState<OrganizationalUnit[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const [sourceSectorId, setSourceSectorId] = useState('');
+  const [targetSectorId, setTargetSectorId] = useState('');
+  const [selectedCellIds, setSelectedCellIds] = useState<Set<string>>(new Set());
+  const [isTransferring, setIsTransferring] = useState(false);
+  const [transferError, setTransferError] = useState('');
+
+  const showToast = useCallback((type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  const load = useCallback(async () => {
+    if (!churchId) return;
+    setIsLoading(true);
+    try {
+      const [currentLevels, currentUnits] = await Promise.all([
+        AppChurchService.getChurchLevels(churchId),
+        AppChurchService.getUnits(churchId, undefined, 'flat'),
+      ]);
+      setLevels(currentLevels);
+      setUnits(currentUnits);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao carregar setores e células.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [churchId, showToast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Nível folha (Célula) e seu pai imediato (Setor), pelos nomes configurados pela igreja
+  const cellLevel = levels.length > 0 ? levels[levels.length - 1] : null;
+  const sectorLevel = levels.length > 1 ? levels[levels.length - 2] : null;
+
+  const sectors = useMemo(
+    () => (sectorLevel ? units.filter((u) => u.levelTypeId === sectorLevel.id) : []),
+    [units, sectorLevel]
+  );
+
+  const cellsInSourceSector = useMemo(() => {
+    if (!sourceSectorId || !cellLevel) return [];
+    return units.filter((u) => u.levelTypeId === cellLevel.id && u.parentId === sourceSectorId);
+  }, [units, cellLevel, sourceSectorId]);
+
+  const targetSectorOptions = useMemo(
+    () => sectors.filter((s) => s.id !== sourceSectorId),
+    [sectors, sourceSectorId]
+  );
+
+  useEffect(() => {
+    setSelectedCellIds(new Set());
+    setTransferError('');
+    if (targetSectorId === sourceSectorId) {
+      setTargetSectorId('');
+    }
+  }, [sourceSectorId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleCell = (id: string) => {
+    setSelectedCellIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedCellIds.size === cellsInSourceSector.length) {
+      setSelectedCellIds(new Set());
+    } else {
+      setSelectedCellIds(new Set(cellsInSourceSector.map((c) => c.id)));
+    }
+  };
+
+  const handleTransfer = async () => {
+    if (!churchId || !targetSectorId || selectedCellIds.size === 0) return;
+    setIsTransferring(true);
+    setTransferError('');
+    try {
+      const unitIds = Array.from(selectedCellIds);
+      const result = await AppChurchService.moveUnitsToParent({
+        unitIds,
+        churchId,
+        newParentId: targetSectorId,
+      });
+
+      setUnits((prev) =>
+        prev.map((u) =>
+          result.movedIds.includes(u.id)
+            ? { ...u, parentId: result.parentId, parentName: result.parentName }
+            : u
+        )
+      );
+
+      const movedCount = result.movedIds.length;
+      const skippedCount = result.skipped.length;
+      showToast(
+        'success',
+        skippedCount > 0
+          ? `${movedCount} célula(s) transferida(s) para "${result.parentName}". ${skippedCount} não puderam ser movidas.`
+          : `${movedCount} célula(s) transferida(s) para "${result.parentName}" com sucesso.`
+      );
+      setSelectedCellIds(new Set());
+    } catch (err: any) {
+      setTransferError(err?.message || 'Falha ao transferir células.');
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-10 flex items-center justify-center text-slate-400">
+        <Loader2 size={20} className="animate-spin" />
+      </div>
+    );
+  }
+
+  if (!sectorLevel || !cellLevel || sectors.length === 0) {
+    return (
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-8 sm:p-12 text-center">
+        <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center mx-auto mb-3">
+          <Layers size={22} />
+        </div>
+        <h3 className="text-sm sm:text-base font-bold text-slate-800">Setores e Células</h3>
+        <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm mx-auto">
+          Ainda não há setores suficientes cadastrados para transferir células entre eles.
+        </p>
+        {onNavigateToUnits && (
+          <button
+            type="button"
+            onClick={onNavigateToUnits}
+            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition cursor-pointer"
+          >
+            <Layers size={15} />
+            Abrir Níveis Organizacionais
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {toast && (
+        <div
+          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold ${
+            toast.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+          ) : (
+            <AlertCircle size={16} className="text-rose-600 shrink-0" />
+          )}
+          <span>{toast.message}</span>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center shrink-0">
+            <ArrowRightLeft size={16} />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-slate-800">
+              Transferir {cellLevel.name} entre {sectorLevel.name}s
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              Útil quando um {sectorLevel.name.toLowerCase()} se multiplica e várias células precisam
+              ir para o novo {sectorLevel.name.toLowerCase()} de uma vez. Membros e líderes vinculados
+              continuam os mesmos.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-5 space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              {sectorLevel.name} de origem:
+            </label>
+            <select
+              value={sourceSectorId}
+              onChange={(e) => setSourceSectorId(e.target.value)}
+              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+            >
+              <option value="">Selecione...</option>
+              {sectors.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Transferir para o {sectorLevel.name.toLowerCase()}:
+            </label>
+            <select
+              value={targetSectorId}
+              onChange={(e) => setTargetSectorId(e.target.value)}
+              disabled={!sourceSectorId}
+              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              <option value="">Selecione...</option>
+              {targetSectorOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {sourceSectorId && (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-slate-700">
+                {cellLevel.name}s em {sectors.find((s) => s.id === sourceSectorId)?.name || 'setor selecionado'}:
+              </span>
+              {cellsInSourceSector.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 cursor-pointer"
+                >
+                  {selectedCellIds.size === cellsInSourceSector.length ? (
+                    <CheckSquare size={13} />
+                  ) : (
+                    <Square size={13} />
+                  )}
+                  Selecionar todas
+                </button>
+              )}
+            </div>
+
+            {cellsInSourceSector.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 text-center bg-slate-50 rounded-lg border border-slate-200">
+                Nenhuma {cellLevel.name.toLowerCase()} cadastrada neste {sectorLevel.name.toLowerCase()}.
+              </p>
+            ) : (
+              <ul className="divide-y divide-slate-100 border border-slate-200 rounded-lg max-h-72 overflow-y-auto">
+                {cellsInSourceSector.map((c) => (
+                  <li key={c.id}>
+                    <label className="flex items-center gap-2.5 px-3 py-2 cursor-pointer hover:bg-slate-50 select-none">
+                      <input
+                        type="checkbox"
+                        checked={selectedCellIds.has(c.id)}
+                        onChange={() => toggleCell(c.id)}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+                      />
+                      <span className="flex-1 min-w-0 text-sm font-medium text-slate-800 truncate">
+                        {c.name}
+                      </span>
+                      <span className="text-[11px] text-slate-400 shrink-0">
+                        {c.quantidade_membros ?? c.memberCount ?? 0} membro(s)
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {transferError && <p className="text-xs text-red-600 font-semibold">{transferError}</p>}
+
+        <button
+          type="button"
+          disabled={!targetSectorId || selectedCellIds.size === 0 || isTransferring}
+          onClick={handleTransfer}
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
+        >
+          {isTransferring ? <Loader2 size={15} className="animate-spin" /> : <ArrowRightLeft size={15} />}
+          Transferir {selectedCellIds.size > 0 ? `${selectedCellIds.size} célula(s)` : 'célula(s) selecionada(s)'}
+        </button>
+      </div>
+
+      {onNavigateToUnits && (
+        <p className="text-center text-[11px] text-slate-400">
+          Para criar setores ou mover uma célula individualmente, use{' '}
+          <button
+            type="button"
+            onClick={onNavigateToUnits}
+            className="font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+          >
+            Níveis Organizacionais
+          </button>
+          .
+        </p>
+      )}
     </div>
-    <h3 className="text-sm sm:text-base font-bold text-slate-800">Setores e Células</h3>
-    <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm mx-auto">
-      Mover uma célula para outro setor é feito direto na tela de{' '}
-      <strong>Níveis Organizacionais</strong> — abra os detalhes de uma célula e use o botão
-      &quot;Mover para outro Setor&quot;.
-    </p>
-    {onNavigateToUnits && (
-      <button
-        type="button"
-        onClick={onNavigateToUnits}
-        className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition cursor-pointer"
-      >
-        <Layers size={15} />
-        Abrir Níveis Organizacionais
-      </button>
-    )}
-  </div>
-);
+  );
+};
 
 const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) => {
   const churchId = currentUser.churchId;

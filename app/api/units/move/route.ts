@@ -14,13 +14,104 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
  * líderes vinculados continuam os mesmos, só a posição da célula na
  * árvore organizacional muda.
  *
- * Body: { unitId, churchId, newParentId }
+ * Body: { unitId, churchId, newParentId } — move uma única célula (modo original)
+ * Body: { unitIds: string[], churchId, newParentId } — move várias células de uma
+ *   vez (usado em "Mover para outro Setor" em lote, ex: multiplicação de setor)
  */
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
-    const { unitId, churchId, newParentId } = body || {};
+    const { unitId, unitIds, churchId, newParentId } = body || {};
 
+    // ===== Modo EM LOTE: várias células de uma vez (unitIds) =====
+    if (Array.isArray(unitIds) && unitIds.length > 0) {
+      if (!churchId || !newParentId) {
+        return NextResponse.json(
+          { error: 'churchId e newParentId são obrigatórios.' },
+          { status: 400 }
+        );
+      }
+
+      const supabaseBulk = getSupabaseServerClient();
+      if (!supabaseBulk) {
+        return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+      }
+
+      const { data: newParentBulk, error: parentErrBulk } = await supabaseBulk
+        .from('unidades')
+        .select('id, nome, nivel_tipo_id, igreja_id')
+        .eq('id', newParentId)
+        .eq('igreja_id', churchId)
+        .maybeSingle();
+
+      if (parentErrBulk || !newParentBulk) {
+        return NextResponse.json({ error: 'Setor de destino não encontrado nesta igreja.' }, { status: 404 });
+      }
+
+      const movedIds: string[] = [];
+      const skipped: { id: string; reason: string }[] = [];
+
+      for (const id of unitIds) {
+        const { data: unitBulk, error: unitErrBulk } = await supabaseBulk
+          .from('unidades')
+          .select('id, pai_id, igreja_id')
+          .eq('id', id)
+          .eq('igreja_id', churchId)
+          .maybeSingle();
+
+        if (unitErrBulk || !unitBulk) {
+          skipped.push({ id, reason: 'Célula não encontrada.' });
+          continue;
+        }
+
+        if (unitBulk.pai_id === newParentId) {
+          skipped.push({ id, reason: 'Já está neste setor.' });
+          continue;
+        }
+
+        if (unitBulk.pai_id) {
+          const { data: currentParentBulk } = await supabaseBulk
+            .from('unidades')
+            .select('nivel_tipo_id')
+            .eq('id', unitBulk.pai_id)
+            .maybeSingle();
+
+          if (currentParentBulk && currentParentBulk.nivel_tipo_id !== newParentBulk.nivel_tipo_id) {
+            skipped.push({ id, reason: 'Setor de destino em nível hierárquico diferente.' });
+            continue;
+          }
+        }
+
+        movedIds.push(id);
+      }
+
+      if (movedIds.length === 0) {
+        return NextResponse.json(
+          { error: skipped[0]?.reason || 'Nenhuma célula pôde ser movida.', skipped },
+          { status: 400 }
+        );
+      }
+
+      const { error: updateErrBulk } = await supabaseBulk
+        .from('unidades')
+        .update({ pai_id: newParentId })
+        .eq('igreja_id', churchId)
+        .in('id', movedIds);
+
+      if (updateErrBulk) {
+        return NextResponse.json({ error: updateErrBulk.message }, { status: 500 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        movedIds,
+        skipped,
+        parentId: newParentId,
+        parentName: newParentBulk.nome,
+      });
+    }
+
+    // ===== Modo ÚNICO: uma célula (unitId) — comportamento original, inalterado =====
     if (!unitId || !churchId || !newParentId) {
       return NextResponse.json(
         { error: 'unitId, churchId e newParentId são obrigatórios.' },

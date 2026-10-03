@@ -40,6 +40,8 @@ import {
   Mail,
   ArrowRightLeft,
   Phone,
+  RotateCcw,
+  Copy,
 } from 'lucide-react';
 
 interface MyCellViewProps {
@@ -223,6 +225,11 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [isAssigningLogin, setIsAssigningLogin] = useState(false);
   const [assignLoginError, setAssignLoginError] = useState('');
   const [assignLoginSuccess, setAssignLoginSuccess] = useState('');
+
+  // Resetar Senha de um membro que já tem login (membro esqueceu a senha), dentro da edição
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetPasswordError, setResetPasswordError] = useState('');
+  const [resetPasswordResult, setResetPasswordResult] = useState('');
 
   // Edit Cell form state
   const [isEditCellModalOpen, setIsEditCellModalOpen] = useState(false);
@@ -1333,6 +1340,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setAssignPasswordValue('');
     setAssignLoginError('');
     setAssignLoginSuccess('');
+    setResetPasswordError('');
+    setResetPasswordResult('');
   };
 
   const handleCloseEditMemberModal = () => {
@@ -1350,6 +1359,25 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setAssignPasswordValue('');
     setAssignLoginError('');
     setAssignLoginSuccess('');
+    setResetPasswordError('');
+    setResetPasswordResult('');
+  };
+
+  const handleResetMemberPassword = async () => {
+    if (!editingMember) return;
+    setResetPasswordError('');
+    setIsResettingPassword(true);
+    try {
+      const temporaryPassword = await AppChurchService.resetMemberPassword({
+        memberId: editingMember.id,
+        churchId: editingMember.churchId || cell.churchId,
+      });
+      setResetPasswordResult(temporaryPassword);
+    } catch (err: any) {
+      setResetPasswordError(err?.message || 'Falha ao resetar senha.');
+    } finally {
+      setIsResettingPassword(false);
+    }
   };
 
   const handleAssignLogin = async () => {
@@ -2827,6 +2855,60 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                         {isAssigningLogin ? 'Atribuindo...' : 'Confirmar Login e Senha'}
                       </button>
                     </>
+                  )}
+                </div>
+              )}
+
+              {/* Login e Senha — membro já tem acesso: mostra o usuário e permite resetar a senha
+                  caso o liderado tenha esquecido (o líder não vê a senha atual, só pode gerar uma nova) */}
+              {editingMember?.login && (
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5 min-w-0">
+                      <User className="w-3.5 h-3.5 text-[#052447] shrink-0" />
+                      <span className="truncate">Login: @{editingMember.login}</span>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isResettingPassword}
+                      onClick={handleResetMemberPassword}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-[#052447] hover:bg-sky-50 disabled:opacity-60 transition shrink-0"
+                      title="Gerar senha temporária — útil se o membro esqueceu a senha"
+                    >
+                      {isResettingPassword ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      )}
+                      Resetar Senha
+                    </button>
+                  </div>
+
+                  {resetPasswordError && (
+                    <p className="text-[11px] text-red-600 font-semibold">{resetPasswordError}</p>
+                  )}
+
+                  {resetPasswordResult && (
+                    <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] text-emerald-800 font-semibold">
+                          Senha temporária (repasse ao membro, só aparece uma vez):
+                        </p>
+                        <span className="text-sm font-mono font-bold text-emerald-900 tracking-wider">
+                          {resetPasswordResult}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(resetPasswordResult).catch(() => {});
+                        }}
+                        className="p-1.5 rounded-lg text-emerald-700 hover:bg-emerald-100 shrink-0"
+                        title="Copiar senha"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
