@@ -14,6 +14,20 @@ export default function LoginPage() {
   useEffect(() => {
     let isMounted = true;
     async function verifyAuth() {
+      // Se acabamos de deslogar (sinalizado pelo handleLogout), já sabemos com
+      // certeza que não há sessão ativa — pula a checagem no servidor, que é
+      // redundante aqui e foi o que causava o formulário "recarregar"/voltar
+      // enquanto o usuário já começava a digitar o próximo login.
+      try {
+        if (sessionStorage.getItem('appchurch_just_logged_out') === '1') {
+          sessionStorage.removeItem('appchurch_just_logged_out');
+          if (isMounted) setIsCheckingSession(false);
+          return;
+        }
+      } catch {
+        // ignore - segue para a checagem normal
+      }
+
       // Checa se já existe usuário em cache para redirecionamento imediato (0ms)
       const cached = AppChurchService.getCachedUser();
       if (cached && isMounted) {

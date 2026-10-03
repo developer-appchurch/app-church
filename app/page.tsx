@@ -373,6 +373,16 @@ export default function Home() {
     setActiveScreen('feed');
     setIsSidebarOpen(false);
 
+    // Sinaliza para a tela de login que acabamos de deslogar com sucesso,
+    // evitando uma checagem redundante de sessão no servidor logo em seguida
+    // (essa checagem concorrente é o que causava o "voltar pra tela principal"
+    // / recarregamento enquanto o usuário já começava a digitar o próximo login).
+    try {
+      sessionStorage.setItem('appchurch_just_logged_out', '1');
+    } catch {
+      // ignore - apenas uma otimização, não é crítico se falhar
+    }
+
     router.replace('/login');
   };
 
