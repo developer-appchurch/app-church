@@ -23,6 +23,11 @@ import {
   Trash2,
   ShieldCheck,
   Circle,
+  Lock,
+  Unlock,
+  Copy,
+  RotateCcw,
+  Search,
 } from 'lucide-react';
 import { UserProfile, Neighborhood, TrackStep } from '@/types';
 import { AppChurchService } from '@/lib/supabase';
@@ -153,7 +158,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
         {activeTab === 'neighborhoods' && <NeighborhoodsTab currentUser={currentUser} />}
         {activeTab === 'track' && <TrackStepsTab currentUser={currentUser} />}
         {activeTab === 'units' && <UnitsShortcutTab onNavigateToUnits={onNavigateToUnits} />}
-        {activeTab === 'logins' && <ComingSoonTab icon={KeyRound} title="Gestão de Logins" />}
+        {activeTab === 'logins' && <LoginsTab currentUser={currentUser} />}
       </div>
     </div>
   );
@@ -879,6 +884,286 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+interface MemberAccessItem {
+  id: string;
+  name: string;
+  login: string;
+  role: string;
+  cellName: string;
+  avatarUrl?: string;
+  accessActive: boolean;
+  temporaryPassword: boolean;
+}
+
+const LoginsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) => {
+  const churchId = currentUser.churchId;
+  const [members, setMembers] = useState<MemberAccessItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [confirmDeactivateId, setConfirmDeactivateId] = useState<string | null>(null);
+  const [resetResult, setResetResult] = useState<{ memberName: string; password: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const showToast = useCallback((type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedSearch(searchTerm), 300);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
+
+  const load = useCallback(async () => {
+    if (!churchId) return;
+    setIsLoading(true);
+    try {
+      const data = await AppChurchService.getMembersAccess(churchId, debouncedSearch);
+      setMembers(data);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao carregar membros.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [churchId, debouncedSearch, showToast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const applyToggleAccess = async (member: MemberAccessItem, nextActive: boolean) => {
+    if (!churchId) return;
+    setConfirmDeactivateId(null);
+    setSavingId(member.id);
+    try {
+      await AppChurchService.setMemberAccessActive({ memberId: member.id, churchId, accessActive: nextActive });
+      setMembers((prev) =>
+        prev.map((m) => (m.id === member.id ? { ...m, accessActive: nextActive } : m))
+      );
+      showToast('success', nextActive ? `Acesso de ${member.name} reativado.` : `Acesso de ${member.name} desativado.`);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao atualizar acesso.');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleToggleAccess = (member: MemberAccessItem) => {
+    const nextActive = !member.accessActive;
+    if (nextActive === false) {
+      setConfirmDeactivateId(member.id);
+      return;
+    }
+    applyToggleAccess(member, nextActive);
+  };
+
+  const handleResetPassword = async (member: MemberAccessItem) => {
+    if (!churchId) return;
+    setSavingId(member.id);
+    try {
+      const temporaryPassword = await AppChurchService.resetMemberPassword({
+        memberId: member.id,
+        churchId,
+      });
+      setResetResult({ memberName: member.name, password: temporaryPassword });
+      setMembers((prev) =>
+        prev.map((m) => (m.id === member.id ? { ...m, temporaryPassword: true } : m))
+      );
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao resetar senha.');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleCopyPassword = () => {
+    if (!resetResult) return;
+    navigator.clipboard
+      ?.writeText(resetResult.password)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {
+        // Clipboard pode ser bloqueado em alguns contextos (iframe sem permissão) —
+        // a senha já está visível na tela para cópia manual nesse caso.
+      });
+  };
+
+  return (
+    <div className="space-y-3">
+      {toast && (
+        <div
+          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold ${
+            toast.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+          ) : (
+            <AlertCircle size={16} className="text-rose-600 shrink-0" />
+          )}
+          <span>{toast.message}</span>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Buscar membro por nome ou login..."
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+          />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-10 text-slate-400">
+            <Loader2 size={20} className="animate-spin" />
+          </div>
+        ) : members.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-400">Nenhum membro encontrado.</div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {members.map((m) => (
+              <li key={m.id} className="px-3 sm:px-4 py-2.5">
+                {confirmDeactivateId === m.id ? (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                    <span className="flex-1 text-xs text-amber-900">
+                      <strong>{m.name}</strong> não conseguirá mais fazer login enquanto o acesso estiver
+                      desativado. Isso não remove o cadastro.
+                    </span>
+                    <div className="flex gap-2 shrink-0 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeactivateId(null)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyToggleAccess(m, false)}
+                        disabled={savingId === m.id}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 transition cursor-pointer"
+                      >
+                        {savingId === m.id && <Loader2 size={13} className="animate-spin" />}
+                        Desativar acesso
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`text-sm font-semibold truncate ${m.accessActive ? 'text-slate-800' : 'text-slate-400'}`}>
+                          {m.name}
+                        </span>
+                        {!m.accessActive && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-600 shrink-0">
+                            Acesso desativado
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 truncate">
+                        @{m.login} · {m.role}
+                        {m.cellName ? ` · ${m.cellName}` : ''}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleResetPassword(m)}
+                      disabled={savingId === m.id}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 transition cursor-pointer shrink-0"
+                      title="Gerar senha temporária"
+                    >
+                      {savingId === m.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+                      <span className="hidden sm:inline">Resetar Senha</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleAccess(m)}
+                      disabled={savingId === m.id}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition cursor-pointer disabled:opacity-50 shrink-0 ${
+                        m.accessActive
+                          ? 'text-rose-600 hover:bg-rose-50'
+                          : 'text-emerald-600 hover:bg-emerald-50'
+                      }`}
+                    >
+                      {m.accessActive ? <Lock size={13} /> : <Unlock size={13} />}
+                      <span className="hidden sm:inline">{m.accessActive ? 'Desativar' : 'Reativar'}</span>
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {resetResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+              <ShieldCheck size={18} className="text-emerald-600" />
+              <h3 className="text-sm font-bold text-slate-800">Senha Temporária Gerada</h3>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-slate-600">
+                Repasse esta senha para <strong>{resetResult.memberName}</strong> manualmente (WhatsApp,
+                pessoalmente etc.). Ela só é exibida uma vez — não é possível recuperá-la depois.
+              </p>
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <span className="flex-1 text-lg font-mono font-bold text-slate-900 tracking-wider text-center">
+                  {resetResult.password}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCopyPassword}
+                  className="p-2 rounded-lg text-slate-500 hover:bg-slate-200 transition cursor-pointer shrink-0"
+                  title="Copiar"
+                >
+                  {copied ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}
+                </button>
+              </div>
+            </div>
+            <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setResetResult(null);
+                  setCopied(false);
+                }}
+                className="px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition cursor-pointer"
+              >
+                Concluído
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <p className="text-[11px] text-slate-400 px-1">
+        Desativar o acesso impede o login, mas mantém todo o histórico do membro. Resetar a senha gera
+        uma senha temporária aleatória — não existe envio automático por e-mail ou SMS, o repasse é manual.
+      </p>
     </div>
   );
 };

@@ -227,6 +227,16 @@ export async function POST(req: NextRequest) {
     }
 
     const member = memberRows[0];
+
+    // Bloqueia login se a liderança desativou o acesso deste membro (Gestão de Logins)
+    if (member.acesso_ativo === false) {
+      recordAttempt(cleanLogin, loginAttempts);
+      return NextResponse.json(
+        { error: 'Seu acesso foi desativado. Procure a liderança da sua igreja.' },
+        { status: 403 }
+      );
+    }
+
     const canonicalLogin = (member.login || cleanLogin).trim().toLowerCase();
     const syntheticEmail = getSyntheticEmail(canonicalLogin);
 

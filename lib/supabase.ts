@@ -4798,4 +4798,62 @@ export const AppChurchService = {
     }
     throw new Error('Ambiente do cliente necessário.');
   },
+
+  /**
+   * Gestão de Logins — aba "Gestão de Logins" de Configurações da Igreja.
+   */
+  async getMembersAccess(
+    churchId: string,
+    search?: string
+  ): Promise<
+    { id: string; name: string; login: string; role: string; cellName: string; avatarUrl?: string; accessActive: boolean; temporaryPassword: boolean }[]
+  > {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      let url = `/api/members/access?churchId=${churchId}`;
+      if (search?.trim()) url += `&search=${encodeURIComponent(search.trim())}`;
+      const res = await fetch(url);
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao buscar membros.');
+      }
+      return data.members || [];
+    }
+    return [];
+  },
+
+  async setMemberAccessActive(payload: {
+    memberId: string;
+    churchId: string;
+    accessActive: boolean;
+  }): Promise<void> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/members/access', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao atualizar acesso do membro.');
+      }
+      return;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  async resetMemberPassword(payload: { memberId: string; churchId: string }): Promise<string> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/members/access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao resetar senha.');
+      }
+      return data.temporaryPassword as string;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
 };
