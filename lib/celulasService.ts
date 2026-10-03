@@ -84,12 +84,12 @@ export async function getCelulasByIgreja(
     );
   }
 
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   return {
-    celulas: data.celulas || [],
-    total: data.total || 0,
-    page: data.page || page,
-    pageSize: data.pageSize || pageSize,
-    hasMore: Boolean(data.hasMore),
+    celulas: data?.celulas || [],
+    total: data?.total || 0,
+    page: data?.page || page,
+    pageSize: data?.pageSize || pageSize,
+    hasMore: Boolean(data?.hasMore),
   };
 }

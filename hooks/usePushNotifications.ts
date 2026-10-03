@@ -118,7 +118,7 @@ export function usePushNotifications(membroId?: string) {
             // 3. Busca a chave pública VAPID do servidor
             const keyRes = await fetch('/api/notifications/public-key');
             if (keyRes.ok) {
-              const { publicKey } = await keyRes.json();
+              const { publicKey } = await keyRes.json().catch(() => ({ publicKey: null }));
               if (publicKey) {
                 const applicationServerKey = urlBase64ToUint8Array(publicKey);
                 let subscription = await registration.pushManager.getSubscription();

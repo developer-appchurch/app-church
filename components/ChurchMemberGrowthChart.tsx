@@ -104,7 +104,7 @@ export const ChurchMemberGrowthChart: React.FC<ChurchMemberGrowthChartProps> = (
         setIsLoadingApi(true);
         const res = await fetch(`/api/members/growth?churchId=${encodeURIComponent(churchId)}`);
         if (!res.ok) throw new Error('Falha ao carregar curva de crescimento');
-        const json = await res.json();
+        const json = await res.json().catch(() => ({}));
         if (isSubscribed) {
           if (json.growthSeries && Array.isArray(json.growthSeries)) {
             setApiSeries(json.growthSeries);

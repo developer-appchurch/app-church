@@ -170,6 +170,18 @@ const removeFromStorage = (key: string): void => {
   }
 };
 
+async function safeJsonParseResponse<T = any>(res: Response): Promise<T> {
+  try {
+    const text = await res.text();
+    if (!text || text.trim().startsWith('<')) {
+      return {} as T;
+    }
+    return JSON.parse(text) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
 export interface DatabaseConnectionStatus {
   connected: boolean;
   isCloud: boolean;
@@ -367,7 +379,7 @@ export const AppChurchService = {
           body: JSON.stringify({ login: cleanLogin, password: cleanPass }),
         });
 
-        const data = await res.json();
+        const data = await safeJsonParseResponse(res);
         if (!res.ok) {
           throw new Error(data.error || 'Credenciais inválidas.');
         }
@@ -639,7 +651,7 @@ export const AppChurchService = {
           },
         });
         if (res.ok) {
-          const data = await res.json();
+          const data = await safeJsonParseResponse(res);
           if (data.authenticated && data.user) {
             saveToStorage(STORAGE_KEYS.SESSION, data.user);
             return data.user;
@@ -817,7 +829,7 @@ export const AppChurchService = {
           body: JSON.stringify(input),
         });
 
-        const data = await response.json();
+        const data = await safeJsonParseResponse(response);
         if (response.ok && data?.success && data?.result) {
           const apiResult: RegisterChurchResult = data.result;
 
@@ -1088,7 +1100,7 @@ export const AppChurchService = {
       if (typeof window !== 'undefined') {
         try {
           const res = await fetch(`/api/hierarchy/levels?churchId=${churchId}`);
-          const data = await res.json();
+          const data = await safeJsonParseResponse(res);
           if (res.ok && data?.levels && data.levels.length > 0) {
             return data.levels;
           }
@@ -1168,7 +1180,7 @@ export const AppChurchService = {
           let url = `/api/hierarchy/units?churchId=${churchId}&mode=${mode}`;
           if (levelTypeId) url += `&levelTypeId=${levelTypeId}`;
           const res = await fetch(url);
-          const data = await res.json();
+          const data = await safeJsonParseResponse(res);
           if (res.ok && data?.units) {
             return data.units;
           }
@@ -1187,7 +1199,7 @@ export const AppChurchService = {
     if (typeof window !== 'undefined') {
       try {
         const res = await fetch(`/api/hierarchy/unit-details?unitId=${unitId}&churchId=${churchId}`);
-        const data = await res.json();
+        const data = await safeJsonParseResponse(res);
         if (res.ok && data?.details) {
           return data.details;
         }
@@ -1208,7 +1220,7 @@ export const AppChurchService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(input),
       });
-      const data = await res.json();
+      const data = await safeJsonParseResponse(res);
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Falha ao criar unidade organizacional.');
       }
@@ -1233,7 +1245,7 @@ export const AppChurchService = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ unitId, churchId, leaderMemberIds, setAsHomeCell }),
         });
-        const data = await res.json();
+        const data = await safeJsonParseResponse(res);
         if (res.ok && data?.success) {
           // Invalida caches em memória para garantir consistência instantânea nas próximas consultas
           invalidateMemoryCache('units:');
@@ -1463,7 +1475,7 @@ export const AppChurchService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ memberId, cellId, churchId }),
       });
-      const data = await res.json();
+      const data = await safeJsonParseResponse(res);
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Falha ao vincular membro à célula.');
       }
@@ -1494,7 +1506,7 @@ export const AppChurchService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await safeJsonParseResponse(res);
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Falha ao cadastrar membro.');
       }
@@ -1713,7 +1725,7 @@ export const AppChurchService = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await response.json();
+        const data = await safeJsonParseResponse(response);
         if (response.ok && data?.success && data?.cell) {
           const newCell: CellGroup = data.cell;
           // Atualiza cache local de células
@@ -1792,7 +1804,7 @@ export const AppChurchService = {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await response.json();
+        const data = await safeJsonParseResponse(response);
         if (response.ok && data?.success && data?.cell) {
           const updatedCell: CellGroup = data.cell;
 
@@ -2321,7 +2333,7 @@ export const AppChurchService = {
           }),
         });
 
-        const resData = await res.json();
+        const resData = await safeJsonParseResponse(res);
         if (res.ok && resData?.success && resData?.member) {
           created.id = resData.member.id;
           created.login = resData.member.login;
@@ -4473,7 +4485,7 @@ export const AppChurchService = {
         if (typeof window !== 'undefined' && typeof fetch === 'function') {
           const res = await fetch(`/api/permissions/member?memberId=${user.id}&churchId=${user.churchId}`);
           if (res.ok) {
-            const data = await res.json();
+            const data = await safeJsonParseResponse(res);
             if (data?.success && Array.isArray(data.permissions)) {
               const map: Record<string, boolean> = {};
               data.permissions.forEach((p: any) => {
@@ -4541,7 +4553,7 @@ export const AppChurchService = {
   async getMemberPermissions(memberId: string, churchId: string) {
     if (typeof window !== 'undefined' && typeof fetch === 'function') {
       const res = await fetch(`/api/permissions/member?memberId=${memberId}&churchId=${churchId}`);
-      const data = await res.json();
+      const data = await safeJsonParseResponse(res);
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Falha ao buscar permissões do membro.');
       }
@@ -4565,7 +4577,7 @@ export const AppChurchService = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await safeJsonParseResponse(res);
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Falha ao atualizar permissão do membro.');
       }

@@ -111,7 +111,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           }&mode=recent`;
           const res = await fetch(url);
           if (!res.ok) throw new Error('Falha no prefetch');
-          return res.json();
+          return res.json().catch(() => ({ reports: [] }));
         },
         staleTime: 1000 * 60 * 3,
       }).catch(() => {});

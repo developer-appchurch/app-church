@@ -134,7 +134,7 @@ export const MemberPermissionsView: React.FC<MemberPermissionsViewProps> = ({
 
       const res = await fetch(url);
       if (!res.ok) throw new Error('Falha ao buscar membros');
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (data?.members) {
         const mapped: MemberSummaryItem[] = data.members.map((m: any) => ({

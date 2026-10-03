@@ -99,10 +99,10 @@ export const AdminNotificationTestModal: React.FC<AdminNotificationTestModalProp
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(data.error || `Erro ${res.status} ao disparar notificação`);
+        throw new Error(data?.error || `Erro ${res.status} ao disparar notificação`);
       }
 
       if (data.warning) {

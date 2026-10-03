@@ -82,8 +82,8 @@ export async function uploadFeedImage(
       });
 
       if (res.ok) {
-        const data = await res.json();
-        if (data.signedUrl && data.token && data.path) {
+        const data = await res.json().catch(() => ({}));
+        if (data?.signedUrl && data?.token && data?.path) {
           signedUploadData = data;
         }
       } else {
@@ -186,8 +186,8 @@ export async function deleteFeedImage(
       });
 
       if (res.ok) {
-        const data = await res.json();
-        return Boolean(data.success);
+        const data = await res.json().catch(() => ({}));
+        return Boolean(data?.success);
       }
       console.warn('Exclusão via backend retornou erro:', await res.text());
     } catch (err) {

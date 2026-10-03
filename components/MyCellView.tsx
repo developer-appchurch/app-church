@@ -1573,16 +1573,16 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
           {/* Seletor de Células (A-Z), Botão Editar Célula & Botão Novo Membro */}
           {(accessibleCells.length > 1 || userHierarchyLevel > 1 || canEditCurrentCell) && (
-            <div className="flex flex-row items-center gap-2 justify-start lg:justify-end shrink-0 pt-2 lg:pt-0 border-t border-slate-100 lg:border-t-0 w-full lg:w-auto">
+            <div className="flex flex-row items-stretch sm:items-center gap-2 justify-start lg:justify-end shrink-0 pt-2 lg:pt-0 border-t border-slate-100 lg:border-t-0 w-full lg:w-auto">
               {/* Seletor de Célula em Ordem Alfabética (A-Z) apenas com o nome da célula */}
               {accessibleCells.length > 1 && (
-                <div className="flex items-center gap-1.5 bg-sky-50/80 hover:bg-sky-50 border border-sky-300 rounded-xl pl-2 pr-2.5 sm:px-2.5 py-2 min-w-0 shadow-2xs transition flex-1 sm:flex-initial h-10 sm:h-auto">
+                <div className="flex-1 sm:flex-initial h-10 sm:h-9 flex items-center gap-1.5 bg-sky-50/80 hover:bg-sky-50 border border-sky-300 rounded-xl px-2.5 py-1.5 min-w-0 shadow-2xs transition">
                   <span className="text-[10px] sm:text-xs font-bold text-sky-950 shrink-0 hidden sm:inline">Célula:</span>
                   <select
                     id="select-active-cell"
                     value={cell.id}
                     onChange={(e) => onSelectCell?.(e.target.value)}
-                    className="text-[15px] sm:text-xs font-bold text-[#04213d] bg-transparent focus:outline-none cursor-pointer w-full sm:w-auto sm:max-w-[180px] lg:max-w-[200px] truncate"
+                    className="text-xs font-bold text-[#04213d] bg-transparent focus:outline-none cursor-pointer w-full h-full sm:w-auto sm:max-w-[180px] lg:max-w-[200px] truncate"
                     title="Selecionar célula (Ordem A-Z)"
                   >
                     {displayedCells.map((c) => (
@@ -1600,7 +1600,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   type="button"
                   id="btn-edit-cell-info"
                   onClick={handleOpenEditCellModal}
-                  className="flex-1 sm:flex-initial h-10 sm:h-auto px-3 py-2 text-xs font-bold text-sky-950 bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap active:scale-95"
+                  className="flex-1 sm:flex-initial h-10 sm:h-9 px-3 py-2 text-xs font-bold text-sky-950 bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-xl shadow-2xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap active:scale-95 min-w-0"
                   title="Editar informações da célula (Nome, Dia, Horário, Endereço, Foto)"
                   aria-label="Editar informações da célula"
                 >
@@ -1615,7 +1615,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   type="button"
                   id="btn-cell-add-member"
                   onClick={handleOpenAddModal}
-                  className="flex-1 sm:flex-initial h-10 sm:h-auto px-3.5 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap"
+                  className="flex-1 sm:flex-initial h-10 sm:h-9 px-3 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] border border-[#04213d] rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap min-w-0"
                 >
                   <Plus size={15} className="shrink-0" />
                   <span className="truncate">Novo Membro</span>

@@ -346,7 +346,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       if (!res.ok) {
         throw new Error('Falha ao consultar membros no servidor.');
       }
-      return res.json();
+      return res.json().catch(() => ({ members: [], hasNextPage: false, nextCursor: null }));
     },
     initialPageParam: null,
     getNextPageParam: (lastPage) => (lastPage.hasNextPage ? lastPage.nextCursor : undefined),
@@ -414,7 +414,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         }),
       });
 
-      const resData = await res.json();
+      const resData = await res.json().catch(() => ({}));
       if (!res.ok || !resData?.success) {
         throw new Error(resData?.error || 'Falha ao vincular membro.');
       }
@@ -487,7 +487,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         }),
       });
 
-      const resData = await res.json();
+      const resData = await res.json().catch(() => ({}));
       if (!res.ok || !resData?.success) {
         throw new Error(resData?.error || 'Falha ao desvincular membro.');
       }
@@ -539,7 +539,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         method: 'DELETE',
       });
 
-      const resData = await res.json();
+      const resData = await res.json().catch(() => ({}));
       if (!res.ok || !resData?.success) {
         throw new Error(resData?.error || 'Falha ao excluir membro.');
       }
@@ -589,7 +589,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         }),
       });
 
-      const resData = await res.json();
+      const resData = await res.json().catch(() => ({}));
       if (!res.ok || !resData?.success) {
         throw new Error(resData?.error || 'Falha ao cadastrar membro.');
       }

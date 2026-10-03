@@ -666,7 +666,7 @@ export default function Home() {
             }&mode=recent`;
             const res = await fetch(url);
             if (!res.ok) throw new Error('Falha no prefetch de relatórios');
-            return res.json();
+            return res.json().catch(() => ({ reports: [] }));
           },
           staleTime: 1000 * 60 * 3,
         }).catch(() => {});

@@ -72,9 +72,9 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
         currentCell?.churchId ? `&churchId=${encodeURIComponent(currentCell.churchId)}` : ''
       }&mode=recent`;
       const res = await fetch(url);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(json.error || 'Erro ao carregar relatórios');
+        throw new Error(json?.error || 'Erro ao carregar relatórios');
       }
       return json;
     },
@@ -186,7 +186,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
         `/api/hierarchy/user-covered-cells?userId=${encodeURIComponent(currentUser.id)}&churchId=${encodeURIComponent(currentUser.churchId)}`
       );
       if (!res.ok) return null;
-      return res.json();
+      return res.json().catch(() => null);
     },
     enabled: Boolean(currentUser?.id && currentUser?.churchId),
     staleTime: 1000 * 60 * 5,
@@ -433,10 +433,10 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
       }&mode=older&offset=${olderOffset}&limit=10`;
 
       const res = await fetch(url);
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
 
       if (!res.ok) {
-        throw new Error(json.error || 'Erro ao carregar relatórios anteriores');
+        throw new Error(json?.error || 'Erro ao carregar relatórios anteriores');
       }
 
       const newOlderReports: WeeklyReport[] = json.reports || [];
@@ -525,9 +525,9 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
           method: 'DELETE',
         }
       );
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || 'Erro ao excluir relatório');
+        throw new Error(data?.error || 'Erro ao excluir relatório');
       }
 
       // 1. Remove o relatório excluído instantaneamente do cache do React Query
@@ -592,9 +592,9 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
         body: JSON.stringify(payload),
       });
 
-      const json = await res.json();
+      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(json.error || 'Falha ao salvar relatório');
+        throw new Error(json?.error || 'Falha ao salvar relatório');
       }
 
       // Se foi detectado um relatório duplicado e o usuário ainda não confirmou substituição

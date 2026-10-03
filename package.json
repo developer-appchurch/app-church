@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
-    "build": "NODE_ENV=production next build",
-    "start": "next start -p 3000",
-    "lint": "eslint .",
-    "clean": "next clean"
+    "dev": "[ -d /app/applet ] && cd /app/applet; next dev -p 3000",
+    "build": "[ -d /app/applet ] && cd /app/applet; NODE_ENV=production next build",
+    "start": "[ -d /app/applet ] && cd /app/applet; next start -p 3000",
+    "lint": "[ -d /app/applet ] && cd /app/applet; eslint .",
+    "clean": "[ -d /app/applet ] && cd /app/applet; next clean"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

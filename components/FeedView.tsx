@@ -248,9 +248,9 @@ export const FeedView: React.FC<FeedViewProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || 'Erro ao enviar notificação');
+        throw new Error(data?.error || 'Erro ao enviar notificação');
       }
 
       if (data.warning) {
