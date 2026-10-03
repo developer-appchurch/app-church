@@ -243,6 +243,23 @@ export function invalidateMemoryCache(prefix?: string): void {
       memoryCache.delete(k);
     }
   }
+
+  // Os Indicadores da Igreja (Trilho de Liderança) dependem diretamente da
+  // contagem de membros e das conclusões do trilho. Qualquer mutação que já
+  // dispara invalidação de "members"/"cells" (membro criado, removido ou
+  // transferido de unidade) ou de "track_status_map"/"track_steps_detailed"
+  // (etapa do trilho concluída) também deve derrubar o cache de indicadores,
+  // para a tela nunca mostrar números com mais de 120s de atraso nesses
+  // casos — fora isso, o cache natural de 120s evita refazer a mesma
+  // consulta agregada a cada troca de escopo (Igreja/Área/Setor).
+  const gatilhosRelacionados = ['members', 'cells', 'member_pool', 'track_status_map', 'track_steps_detailed'];
+  if (gatilhosRelacionados.some((g) => prefix.startsWith(g))) {
+    for (const k of Array.from(memoryCache.keys())) {
+      if (k.startsWith('leadership_track_indicators:')) {
+        memoryCache.delete(k);
+      }
+    }
+  }
 }
 
 /**
@@ -4737,7 +4754,8 @@ export const AppChurchService = {
   async getLeadershipTrackIndicators(
     churchId: string,
     unitId?: string,
-    compareLevelId?: string
+    compareLevelId?: string,
+    force: boolean = false
   ): Promise<{
     scopeUnit: { id: string; name?: string } | null;
     totalMembers: number;
@@ -4751,18 +4769,33 @@ export const AppChurchService = {
     distribution: { notStarted: number; inProgress: number; completed: number };
     compareUnits: { id: string; name: string; totalMembers: number; avgCompletionPercent: number }[];
   }> {
-    if (typeof window !== 'undefined' && typeof fetch === 'function') {
-      let url = `/api/indicators/leadership-track?churchId=${encodeURIComponent(churchId)}`;
-      if (unitId) url += `&unitId=${encodeURIComponent(unitId)}`;
-      if (compareLevelId) url += `&compareLevelId=${encodeURIComponent(compareLevelId)}`;
-      const res = await fetch(url);
-      const data = await safeJsonParseResponse(res);
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || 'Falha ao calcular indicadores do trilho.');
-      }
-      return data;
-    }
-    throw new Error('Ambiente do cliente necessário.');
+    // Cache de 120s por combinação de escopo (igreja + unidade + nível de
+    // comparação): evita repetir a mesma consulta agregada quando o usuário
+    // alterna rapidamente entre Igreja Geral / Área / Setor, ou volta para
+    // um escopo que já tinha acabado de ver. É invalidado automaticamente
+    // (ver invalidateMemoryCache) sempre que um membro é criado, removido,
+    // transferido de unidade, ou uma etapa do trilho é concluída — então a
+    // tela nunca fica mais de 120s desatualizada mesmo sem essas mudanças.
+    const cacheKey = `leadership_track_indicators:${churchId}:${unitId || 'all'}:${compareLevelId || 'none'}`;
+    return getCachedOrExecute(
+      cacheKey,
+      120 * 1000,
+      async () => {
+        if (typeof window !== 'undefined' && typeof fetch === 'function') {
+          let url = `/api/indicators/leadership-track?churchId=${encodeURIComponent(churchId)}`;
+          if (unitId) url += `&unitId=${encodeURIComponent(unitId)}`;
+          if (compareLevelId) url += `&compareLevelId=${encodeURIComponent(compareLevelId)}`;
+          const res = await fetch(url);
+          const data = await safeJsonParseResponse(res);
+          if (!res.ok || !data?.success) {
+            throw new Error(data?.error || 'Falha ao calcular indicadores do trilho.');
+          }
+          return data;
+        }
+        throw new Error('Ambiente do cliente necessário.');
+      },
+      force
+    );
   },
 
   async getTrackStepsDetailed(
