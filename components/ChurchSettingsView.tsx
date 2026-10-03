@@ -18,9 +18,16 @@ import {
   EyeOff,
   Eye,
   Users,
+  ChevronUp,
+  ChevronDown,
+  Trash2,
+  ShieldCheck,
+  Circle,
 } from 'lucide-react';
-import { UserProfile, Neighborhood } from '@/types';
+import { UserProfile, Neighborhood, TrackStep } from '@/types';
 import { AppChurchService } from '@/lib/supabase';
+
+type TrackStepWithProgress = TrackStep & { progressCount: number };
 
 interface ChurchSettingsViewProps {
   currentUser: UserProfile;
@@ -139,7 +146,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({ currentU
           </div>
         )}
         {activeTab === 'neighborhoods' && <NeighborhoodsTab currentUser={currentUser} />}
-        {activeTab === 'track' && <ComingSoonTab icon={Award} title="Trilho de Liderança" />}
+        {activeTab === 'track' && <TrackStepsTab currentUser={currentUser} />}
         {activeTab === 'units' && <ComingSoonTab icon={Layers} title="Setores e Células" />}
         {activeTab === 'logins' && <ComingSoonTab icon={KeyRound} title="Gestão de Logins" />}
       </div>
@@ -173,6 +180,7 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const [showInactive, setShowInactive] = useState(false);
+  const [confirmingDeactivateId, setConfirmingDeactivateId] = useState<string | null>(null);
 
   const showToast = useCallback((type: 'success' | 'error', message: string) => {
     setToast({ type, message });
@@ -250,15 +258,13 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
     }
   };
 
-  const handleToggleActive = async (n: Neighborhood) => {
+  // Executa de fato a troca de ativo/inativo (chamada direta, sem confirmação
+  // nativa do navegador — window.confirm/alert pode ficar bloqueado em
+  // silêncio dentro de iframes como o preview do AI Studio, retornando false
+  // sem exibir nada, o que fazia a ação parecer "não fazer nada".
+  const applyToggleActive = async (n: Neighborhood, nextActive: boolean) => {
     if (!churchId) return;
-    const nextActive = !n.active;
-    if (nextActive === false && n.usageCount > 0) {
-      const confirmed = window.confirm(
-        `${n.usageCount} cadastro(s) ainda usam "${n.name}". Desativar não altera os registros existentes, apenas remove o bairro da lista de opções para novos cadastros. Continuar?`
-      );
-      if (!confirmed) return;
-    }
+    setConfirmingDeactivateId(null);
     setSavingId(n.id);
     try {
       await AppChurchService.updateNeighborhood({ id: n.id, churchId, active: nextActive });
@@ -269,6 +275,17 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
     } finally {
       setSavingId(null);
     }
+  };
+
+  const handleToggleActive = (n: Neighborhood) => {
+    const nextActive = !n.active;
+    // Reativar nunca precisa de confirmação. Desativar só pede confirmação
+    // (inline, dentro da própria lista) quando há cadastros usando o nome.
+    if (nextActive === false && n.usageCount > 0) {
+      setConfirmingDeactivateId(n.id);
+      return;
+    }
+    applyToggleActive(n, nextActive);
   };
 
   return (
@@ -341,8 +358,35 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
         ) : (
           <ul className="divide-y divide-slate-100">
             {visibleNeighborhoods.map((n) => (
-              <li key={n.id} className="flex items-center gap-2 px-3 sm:px-4 py-2.5">
-                {editingId === n.id ? (
+              <li key={n.id} className="px-3 sm:px-4 py-2.5">
+                {confirmingDeactivateId === n.id ? (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                    <span className="flex-1 text-xs text-amber-900">
+                      <strong>{n.usageCount}</strong> cadastro(s) ainda usam &quot;{n.name}&quot;. Desativar não
+                      altera os registros existentes, só remove o bairro das opções para novos cadastros.
+                    </span>
+                    <div className="flex gap-2 shrink-0 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingDeactivateId(null)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => applyToggleActive(n, false)}
+                        disabled={savingId === n.id}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 transition cursor-pointer"
+                      >
+                        {savingId === n.id && <Loader2 size={13} className="animate-spin" />}
+                        Desativar mesmo assim
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    {editingId === n.id ? (
                   <>
                     <input
                       type="text"
@@ -408,6 +452,8 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
                       {savingId === n.id ? '...' : n.active ? 'Desativar' : 'Reativar'}
                     </button>
                   </>
+                    )}
+                  </div>
                 )}
               </li>
             ))}
@@ -419,6 +465,391 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
         Desativar um bairro não altera cadastros existentes — apenas o remove das opções para novos
         membros e células. Bairros já em uso aparecem com a quantidade de cadastros ao lado.
       </p>
+    </div>
+  );
+};
+
+interface StepModalState {
+  mode: 'create' | 'edit';
+  stepNumber?: number;
+  title: string;
+  description: string;
+  required: boolean;
+}
+
+const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) => {
+  const churchId = currentUser.churchId;
+  const [steps, setSteps] = useState<TrackStepWithProgress[]>([]);
+  const [isCustomized, setIsCustomized] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const [modal, setModal] = useState<StepModalState | null>(null);
+  const [isSavingModal, setIsSavingModal] = useState(false);
+
+  const [reorderingNumber, setReorderingNumber] = useState<number | null>(null);
+  const [confirmDeleteStep, setConfirmDeleteStep] = useState<{ stepNumber: number; progressCount: number } | null>(
+    null
+  );
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const showToast = useCallback((type: 'success' | 'error', message: string) => {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  const load = useCallback(
+    async (force = false) => {
+      if (!churchId) return;
+      setIsLoading(true);
+      try {
+        const data = await AppChurchService.getTrackStepsDetailed(churchId, force);
+        setSteps(data.steps.sort((a, b) => a.stepNumber - b.stepNumber));
+        setIsCustomized(data.isCustomized);
+      } catch (err: any) {
+        showToast('error', err?.message || 'Falha ao carregar o trilho.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [churchId, showToast]
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleReorder = async (step: TrackStepWithProgress, direction: 'up' | 'down') => {
+    if (!churchId) return;
+    setReorderingNumber(step.stepNumber);
+    try {
+      await AppChurchService.reorderTrackStep({ churchId, stepNumber: step.stepNumber, direction });
+      await load(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao reordenar etapa.');
+    } finally {
+      setReorderingNumber(null);
+    }
+  };
+
+  const openCreateModal = () => {
+    setModal({ mode: 'create', title: '', description: '', required: true });
+  };
+
+  const openEditModal = (step: TrackStepWithProgress) => {
+    setModal({
+      mode: 'edit',
+      stepNumber: step.stepNumber,
+      title: step.title,
+      description: step.description || '',
+      required: step.required,
+    });
+  };
+
+  const handleSaveModal = async () => {
+    if (!modal || !churchId) return;
+    const cleanTitle = modal.title.trim();
+    if (!cleanTitle) {
+      showToast('error', 'Informe um título para a etapa.');
+      return;
+    }
+    setIsSavingModal(true);
+    try {
+      if (modal.mode === 'create') {
+        await AppChurchService.createTrackStep({
+          churchId,
+          title: cleanTitle,
+          description: modal.description.trim(),
+          required: modal.required,
+        });
+        showToast('success', 'Etapa criada com sucesso.');
+      } else {
+        await AppChurchService.updateTrackStep({
+          churchId,
+          stepNumber: modal.stepNumber as number,
+          title: cleanTitle,
+          description: modal.description.trim(),
+          required: modal.required,
+        });
+        showToast('success', 'Etapa atualizada com sucesso.');
+      }
+      setModal(null);
+      await load(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao salvar etapa.');
+    } finally {
+      setIsSavingModal(false);
+    }
+  };
+
+  const handleDeleteClick = async (step: TrackStepWithProgress) => {
+    if (!churchId) return;
+    if (step.progressCount > 0) {
+      setConfirmDeleteStep({ stepNumber: step.stepNumber, progressCount: step.progressCount });
+      return;
+    }
+    setIsDeleting(true);
+    try {
+      await AppChurchService.deleteTrackStep({ churchId, stepNumber: step.stepNumber });
+      showToast('success', 'Etapa excluída.');
+      await load(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao excluir etapa.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!churchId || !confirmDeleteStep) return;
+    setIsDeleting(true);
+    try {
+      await AppChurchService.deleteTrackStep({
+        churchId,
+        stepNumber: confirmDeleteStep.stepNumber,
+        confirmDataLoss: true,
+      });
+      showToast('success', 'Etapa excluída.');
+      setConfirmDeleteStep(null);
+      await load(true);
+    } catch (err: any) {
+      showToast('error', err?.message || 'Falha ao excluir etapa.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {toast && (
+        <div
+          className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl border text-xs sm:text-sm font-semibold ${
+            toast.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              : 'bg-rose-50 border-rose-200 text-rose-900'
+          }`}
+        >
+          {toast.type === 'success' ? (
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+          ) : (
+            <AlertCircle size={16} className="text-rose-600 shrink-0" />
+          )}
+          <span>{toast.message}</span>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+        <div className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5 border-b border-slate-100">
+          <div className="min-w-0">
+            <span className="text-xs font-bold text-slate-700 block">
+              {steps.length} etapa{steps.length === 1 ? '' : 's'}
+            </span>
+            {!isCustomized && !isLoading && (
+              <span className="text-[10px] text-slate-400">
+                Ainda usando o trilho padrão da plataforma — a primeira edição cria uma cópia só desta igreja.
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition cursor-pointer shrink-0"
+          >
+            <Plus size={14} />
+            Nova Etapa
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-10 text-slate-400">
+            <Loader2 size={20} className="animate-spin" />
+          </div>
+        ) : steps.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-400">Nenhuma etapa cadastrada ainda.</div>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {steps.map((step, idx) => (
+              <li key={step.stepNumber} className="px-3 sm:px-4 py-2.5">
+                {confirmDeleteStep?.stepNumber === step.stepNumber ? (
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+                    <span className="flex-1 text-xs text-amber-900">
+                      <strong>{confirmDeleteStep.progressCount}</strong> membro(s) já têm progresso
+                      registrado nesta etapa. Excluir vai apagar esse histórico permanentemente.
+                    </span>
+                    <div className="flex gap-2 shrink-0 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteStep(null)}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmDelete}
+                        disabled={isDeleting}
+                        className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50 transition cursor-pointer"
+                      >
+                        {isDeleting && <Loader2 size={13} className="animate-spin" />}
+                        Excluir mesmo assim
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-col shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleReorder(step, 'up')}
+                        disabled={idx === 0 || reorderingNumber !== null}
+                        className="p-0.5 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                        title="Mover para cima"
+                      >
+                        <ChevronUp size={14} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleReorder(step, 'down')}
+                        disabled={idx === steps.length - 1 || reorderingNumber !== null}
+                        className="p-0.5 rounded text-slate-400 hover:text-slate-800 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition cursor-pointer"
+                        title="Mover para baixo"
+                      >
+                        <ChevronDown size={14} />
+                      </button>
+                    </div>
+
+                    <div className="w-6 h-6 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center text-[11px] font-bold shrink-0">
+                      {step.stepNumber}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold text-slate-800 truncate">{step.title}</span>
+                        {step.required && (
+                          <span
+                            className="text-indigo-500 shrink-0"
+                            title="Etapa obrigatória"
+                          >
+                            <ShieldCheck size={12} />
+                          </span>
+                        )}
+                      </div>
+                      {step.description && (
+                        <p className="text-[11px] text-slate-500 truncate">{step.description}</p>
+                      )}
+                    </div>
+
+                    {step.progressCount > 0 && (
+                      <span
+                        className="flex items-center gap-1 text-[11px] text-slate-400 shrink-0"
+                        title="Membros com progresso nesta etapa"
+                      >
+                        <Users size={12} />
+                        {step.progressCount}
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(step)}
+                      className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 transition cursor-pointer shrink-0"
+                      title="Editar etapa"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteClick(step)}
+                      disabled={isDeleting}
+                      className="p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 disabled:opacity-50 transition cursor-pointer shrink-0"
+                      title="Excluir etapa"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <p className="text-[11px] text-slate-400 px-1">
+        As setas reordenam a sequência do trilho. Excluir uma etapa com membros já avaliados nela apaga
+        esse histórico — a tela avisa antes de confirmar.
+      </p>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <h3 className="text-sm font-bold text-slate-800">
+                {modal.mode === 'create' ? 'Nova Etapa' : 'Editar Etapa'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setModal(null)}
+                className="p-1 rounded-lg text-slate-400 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700 mb-1 block">Título</label>
+                <input
+                  type="text"
+                  value={modal.title}
+                  onChange={(e) => setModal({ ...modal, title: e.target.value })}
+                  autoFocus
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  placeholder="Ex: Batismo nas Águas"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 mb-1 block">Descrição</label>
+                <textarea
+                  value={modal.description}
+                  onChange={(e) => setModal({ ...modal, description: e.target.value })}
+                  rows={3}
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
+                  placeholder="O que o membro precisa fazer nesta etapa?"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setModal({ ...modal, required: !modal.required })}
+                className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer"
+              >
+                {modal.required ? (
+                  <CheckCircle2 size={18} className="text-indigo-600" />
+                ) : (
+                  <Circle size={18} className="text-slate-300" />
+                )}
+                Etapa obrigatória
+              </button>
+            </div>
+            <div className="px-5 py-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModal(null)}
+                className="px-3.5 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveModal}
+                disabled={isSavingModal || !modal.title.trim()}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition cursor-pointer"
+              >
+                {isSavingModal && <Loader2 size={15} className="animate-spin" />}
+                Salvar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

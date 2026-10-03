@@ -4648,4 +4648,128 @@ export const AppChurchService = {
     }
     throw new Error('Ambiente do cliente necessário.');
   },
+
+  /**
+   * Trilho de Liderança — CRUD para a aba "Trilho" de Configurações da Igreja.
+   * Diferente de getTrackSteps() (usado na Visão do Trilho do membro), estas
+   * funções retornam também progressCount e isCustomized, e sempre passam
+   * pela rota de API (que clona as etapas para a igreja na primeira edição).
+   */
+  async getTrackStepsDetailed(
+    churchId: string,
+    force: boolean = false
+  ): Promise<{ steps: (TrackStep & { progressCount: number })[]; isCustomized: boolean }> {
+    return getCachedOrExecute(
+      `track_steps_detailed:${churchId}`,
+      30 * 1000,
+      async () => {
+        if (typeof window !== 'undefined' && typeof fetch === 'function') {
+          const res = await fetch(`/api/track-steps?churchId=${churchId}`);
+          const data = await safeJsonParseResponse(res);
+          if (!res.ok || !data?.success) {
+            throw new Error(data?.error || 'Falha ao buscar etapas do trilho.');
+          }
+          return { steps: data.steps || [], isCustomized: Boolean(data.isCustomized) };
+        }
+        return { steps: [], isCustomized: false };
+      },
+      force
+    );
+  },
+
+  async createTrackStep(payload: {
+    churchId: string;
+    title: string;
+    description?: string;
+    required?: boolean;
+  }): Promise<TrackStep> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/track-steps', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao criar etapa.');
+      }
+      invalidateMemoryCache(`track_steps_detailed:${payload.churchId}`);
+      return data.step as TrackStep;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  async updateTrackStep(payload: {
+    churchId: string;
+    stepNumber: number;
+    title?: string;
+    description?: string;
+    required?: boolean;
+  }): Promise<TrackStep> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/track-steps', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, action: 'update' }),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao atualizar etapa.');
+      }
+      invalidateMemoryCache(`track_steps_detailed:${payload.churchId}`);
+      return data.step as TrackStep;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  async reorderTrackStep(payload: {
+    churchId: string;
+    stepNumber: number;
+    direction: 'up' | 'down';
+  }): Promise<void> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/track-steps', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, action: 'reorder' }),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao reordenar etapa.');
+      }
+      invalidateMemoryCache(`track_steps_detailed:${payload.churchId}`);
+      return;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  /**
+   * Exclui uma etapa do trilho. Se houver membros com progresso registrado
+   * nela, a API responde 409 com progressCount — é preciso chamar de novo
+   * com confirmDataLoss: true (feito na própria tela via confirmação inline,
+   * nunca com window.confirm, que pode ficar bloqueado em iframes).
+   */
+  async deleteTrackStep(payload: {
+    churchId: string;
+    stepNumber: number;
+    confirmDataLoss?: boolean;
+  }): Promise<{ requiresConfirmation?: boolean; progressCount?: number }> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/track-steps', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (res.status === 409 && data?.requiresConfirmation) {
+        return { requiresConfirmation: true, progressCount: data.progressCount || 0 };
+      }
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao excluir etapa.');
+      }
+      invalidateMemoryCache(`track_steps_detailed:${payload.churchId}`);
+      return {};
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
 };
