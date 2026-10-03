@@ -8,6 +8,11 @@ export const metadata: Metadata = {
   title: 'AppChurch - Gestão de Igrejas em Célula',
   description: 'Aplicativo para gestão de igrejas em Célula, com feed de notícias, controle de membros, relatórios, frequência e acompanhamento de toda a trajetória de Membro a liderança.',
   manifest: "/site.webmanifest",
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/icon.png',
+    apple: '/apple-icon.png',
+  },
   openGraph: {
     title: 'AppChurch - Gestão de Igrejas em Célula',
     description: 'Aplicativo para gestão de igrejas em Célula, com feed de notícias, controle de membros, relatórios, frequência e acompanhamento de toda a trajetória de Membro a liderança.',

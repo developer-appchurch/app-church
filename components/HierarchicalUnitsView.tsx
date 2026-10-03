@@ -1898,48 +1898,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                         </div>
                       )}
 
-                      {/* Dados adicionais para célula */}
-                      {isLeafLevel && (
-                        <div className="flex flex-wrap items-center gap-3 pt-1 text-[10px] text-slate-500 border-t border-slate-200/60 mt-1.5">
-                          {unit.meetingDay && (
-                            <span className="flex items-center gap-1">
-                              <Calendar size={11} />
-                              {unit.meetingDay} {unit.meetingTime ? `às ${unit.meetingTime}` : ''}
-                            </span>
-                          )}
-                          {unit.neighborhood && (
-                            <span className="flex items-center gap-1">
-                              <MapPin size={11} />
-                              {unit.neighborhood}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {/* Botão para ver Detalhes Sob Demanda (Passo 2) */}
-                      <div className="pt-2 border-t border-slate-200/60 mt-2 flex items-center justify-between">
-                        <button
-                          type="button"
-                          onClick={() => toggleUnitExpand(unit.id)}
-                          className="text-[11px] font-bold text-sky-800 hover:text-sky-950 flex items-center gap-1 cursor-pointer bg-sky-50/60 hover:bg-sky-100/80 px-2.5 py-1 rounded-lg border border-sky-200/60 transition"
-                        >
-                          {loadingDetailUnitId === unit.id ? (
-                            <Loader2 size={12} className="animate-spin text-sky-700" />
-                          ) : (
-                            <ChevronRight
-                              size={13}
-                              className={`text-sky-700 transition-transform ${
-                                expandedUnitId === unit.id ? 'rotate-90' : ''
-                              }`}
-                            />
-                          )}
-                          <span>
-                            {expandedUnitId === unit.id
-                              ? 'Ocultar Detalhes'
-                              : 'Ver Detalhes (Sob Demanda)'}
-                          </span>
-                        </button>
-
-                        {isLeafLevel && canTransferUnits && (
+                      {/* Ação de Mover para outro Setor */}
+                      {isLeafLevel && canTransferUnits && (
+                        <div className="pt-2 border-t border-slate-200/60 mt-2 flex items-center justify-end">
                           <button
                             type="button"
                             onClick={() => handleOpenMoveModal(unit)}
@@ -1949,68 +1910,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                             <ArrowRightLeft size={12} />
                             <span>Mover para outro Setor</span>
                           </button>
-                        )}
-                      </div>
-
-                      {/* Painel de Detalhes Carregados Sob Demanda */}
-                      {expandedUnitId === unit.id && (
-                        <div className="mt-2.5 p-3 bg-white rounded-xl border border-sky-100 shadow-2xs space-y-2 text-xs animate-in fade-in">
-                          {loadingDetailUnitId === unit.id ? (
-                            <div className="py-4 flex items-center justify-center gap-2 text-slate-500 text-xs">
-                              <Loader2 size={14} className="animate-spin text-sky-600" />
-                              <span>Carregando detalhes sob demanda...</span>
-                            </div>
-                          ) : unitDetailsMap[unit.id] ? (
-                            (() => {
-                              const d = unitDetailsMap[unit.id];
-                              return (
-                                <div className="space-y-2 text-slate-700">
-                                  {d.address && (
-                                    <p className="flex items-center gap-1.5 text-[11px]">
-                                      <MapPin size={12} className="text-slate-400 shrink-0" />
-                                      <span><strong>Endereço:</strong> {d.address}</span>
-                                    </p>
-                                  )}
-                                  {d.latitude && d.longitude && (
-                                    <p className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                                      <Compass size={12} className="text-slate-400 shrink-0" />
-                                      <span>Coordenadas: {d.latitude.toFixed(4)}, {d.longitude.toFixed(4)}</span>
-                                    </p>
-                                  )}
-                                  {d.cobertura && d.cobertura.length > 0 && (
-                                    <p className="flex items-center gap-1.5 text-[11px]">
-                                      <ShieldCheck size={12} className="text-indigo-500 shrink-0" />
-                                      <span><strong>Supervisão:</strong> {d.cobertura.map((c: any) => c.name).join(', ')}</span>
-                                    </p>
-                                  )}
-                                  {d.members && d.members.length > 0 && (
-                                    <div className="pt-1.5 border-t border-slate-100">
-                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                        Membros Vinculados ({d.members.length}):
-                                      </span>
-                                      <div className="flex flex-wrap gap-1">
-                                        {d.members.slice(0, 5).map((m: any) => (
-                                          <span
-                                            key={m.id}
-                                            className="px-2 py-0.5 bg-slate-100 text-[10px] font-medium rounded text-slate-700"
-                                          >
-                                            {m.name}
-                                          </span>
-                                        ))}
-                                        {d.members.length > 5 && (
-                                          <span className="px-2 py-0.5 bg-slate-100 text-[10px] text-slate-500 rounded">
-                                            +{d.members.length - 5} membros
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })()
-                          ) : (
-                            <p className="text-[11px] text-slate-400">Nenhum detalhe adicional encontrado.</p>
-                          )}
                         </div>
                       )}
                     </div>
