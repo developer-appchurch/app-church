@@ -32,6 +32,7 @@ type TrackStepWithProgress = TrackStep & { progressCount: number };
 interface ChurchSettingsViewProps {
   currentUser: UserProfile;
   onBack?: () => void;
+  onNavigateToUnits?: () => void;
 }
 
 type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins';
@@ -50,7 +51,11 @@ const TABS: TabDef[] = [
   { id: 'logins', label: 'Gestão de Logins', icon: KeyRound, permissionCode: 'member:access_manage' },
 ];
 
-export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({ currentUser, onBack }) => {
+export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
+  currentUser,
+  onBack,
+  onNavigateToUnits,
+}) => {
   const [userPermissions, setUserPermissions] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -147,7 +152,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({ currentU
         )}
         {activeTab === 'neighborhoods' && <NeighborhoodsTab currentUser={currentUser} />}
         {activeTab === 'track' && <TrackStepsTab currentUser={currentUser} />}
-        {activeTab === 'units' && <ComingSoonTab icon={Layers} title="Setores e Células" />}
+        {activeTab === 'units' && <UnitsShortcutTab onNavigateToUnits={onNavigateToUnits} />}
         {activeTab === 'logins' && <ComingSoonTab icon={KeyRound} title="Gestão de Logins" />}
       </div>
     </div>
@@ -163,6 +168,30 @@ const ComingSoonTab: React.FC<{ icon: React.ElementType; title: string }> = ({ i
     <p className="text-xs sm:text-sm text-slate-500 mt-1">
       Esta aba ainda está em desenvolvimento e chegará em breve.
     </p>
+  </div>
+);
+
+const UnitsShortcutTab: React.FC<{ onNavigateToUnits?: () => void }> = ({ onNavigateToUnits }) => (
+  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-8 sm:p-12 text-center">
+    <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center mx-auto mb-3">
+      <Layers size={22} />
+    </div>
+    <h3 className="text-sm sm:text-base font-bold text-slate-800">Setores e Células</h3>
+    <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-sm mx-auto">
+      Mover uma célula para outro setor é feito direto na tela de{' '}
+      <strong>Níveis Organizacionais</strong> — abra os detalhes de uma célula e use o botão
+      &quot;Mover para outro Setor&quot;.
+    </p>
+    {onNavigateToUnits && (
+      <button
+        type="button"
+        onClick={onNavigateToUnits}
+        className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition cursor-pointer"
+      >
+        <Layers size={15} />
+        Abrir Níveis Organizacionais
+      </button>
+    )}
   </div>
 );
 

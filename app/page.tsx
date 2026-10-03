@@ -912,6 +912,7 @@ export default function Home() {
             <ChurchSettingsView
               currentUser={user}
               onBack={() => setActiveScreen('feed')}
+              onNavigateToUnits={() => setActiveScreen('hierarchy_units')}
             />
           )}
         </main>

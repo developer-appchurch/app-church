@@ -1297,6 +1297,32 @@ export const AppChurchService = {
   },
 
   /**
+   * Move uma célula (ou unidade folha) para outro setor da mesma igreja.
+   * Não afeta membros.unidade_id nem unidade_lideres — só a posição na árvore.
+   */
+  async moveUnitToParent(payload: {
+    unitId: string;
+    churchId: string;
+    newParentId: string;
+  }): Promise<{ id: string; parentId: string; parentName?: string }> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/units/move', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao mover célula.');
+      }
+      invalidateMemoryCache('units:');
+      invalidateMemoryCache(`cells:${payload.churchId}`);
+      return data.unit;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  /**
    * Obtém o Pool Geral de Membros da Igreja (membros sem célula e membros vinculados)
    * Suporta range e limit para evitar varredura massiva de registros
    */

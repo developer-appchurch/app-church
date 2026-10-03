@@ -25,6 +25,7 @@ import {
   Compass,
   Lock,
   X,
+  ArrowRightLeft,
 } from 'lucide-react';
 import {
   ChurchHierarchicalLevel,
@@ -105,6 +106,26 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [bindLeaderSearchTerm, setBindLeaderSearchTerm] = useState<string>('');
   const [isBindingLeaders, setIsBindingLeaders] = useState<boolean>(false);
   const [bindLeaderError, setBindLeaderError] = useState<string>('');
+
+  // Modal de Mover Célula para outro Setor (Configurações da Igreja > Setores e Células)
+  const [unitToMove, setUnitToMove] = useState<OrganizationalUnit | null>(null);
+  const [moveTargetParentId, setMoveTargetParentId] = useState<string>('');
+  const [isMovingUnit, setIsMovingUnit] = useState<boolean>(false);
+  const [moveError, setMoveError] = useState<string>('');
+
+  // Permissões efetivas do usuário, usadas para liberar a ação de mover célula
+  const [userPermissions, setUserPermissions] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    let mounted = true;
+    AppChurchService.getUserEffectivePermissions(user)
+      .then((map) => {
+        if (mounted) setUserPermissions(map || {});
+      })
+      .catch((err) => console.warn('Erro ao carregar permissões efetivas:', err));
+    return () => {
+      mounted = false;
+    };
+  }, [user]);
 
   // Form states
   const [unitName, setUnitName] = useState<string>('');
@@ -200,6 +221,16 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     if (roleLower.includes('célula') || roleLower.includes('celula') || roleLower.includes('lider')) return 2;
     return 1;
   }, [user, roles]);
+
+  // Permissão para transferir/excluir unidades (mover célula de setor) — gate: unit:transfer_delete ou church:admin
+  const canTransferUnits = useMemo(() => {
+    if (user.isSystemAdmin || user.role === 'Administrador' || user.login === 'admin') return true;
+    if (userHierarchyLevel >= 6) return true;
+    return (
+      AppChurchService.hasPermission(user, 'unit:transfer_delete', userPermissions) ||
+      AppChurchService.hasPermission(user, 'church:admin', userPermissions)
+    );
+  }, [user, userHierarchyLevel, userPermissions]);
 
   // Obtém o nível numérico de hierarquia exigido para gerenciar/acessar um nível da igreja
   const getLevelRequiredHierarchy = React.useCallback((lvl: ChurchHierarchicalLevel, index: number): number => {
@@ -993,6 +1024,57 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       setBindLeaderError(err?.message || 'Falha ao vincular líderes.');
     } finally {
       setIsBindingLeaders(false);
+    }
+  };
+
+  // Lista de setores (ou nível pai equivalente) disponíveis como destino, excluindo o setor atual da célula
+  const moveTargetOptions = useMemo(() => {
+    if (!unitToMove) return [];
+    return parentUnitsAvailable.filter((p) => p.id !== unitToMove.parentId);
+  }, [parentUnitsAvailable, unitToMove]);
+
+  const handleOpenMoveModal = (unit: OrganizationalUnit) => {
+    setMoveError('');
+    setMoveTargetParentId('');
+    setUnitToMove(unit);
+  };
+
+  const handleConfirmMove = async () => {
+    if (!unitToMove || !moveTargetParentId) return;
+    setIsMovingUnit(true);
+    setMoveError('');
+    try {
+      const result = await AppChurchService.moveUnitToParent({
+        unitId: unitToMove.id,
+        churchId: effectiveChurchId,
+        newParentId: moveTargetParentId,
+      });
+
+      setUnits((prev) =>
+        prev.map((u) =>
+          u.id === unitToMove.id ? { ...u, parentId: result.parentId, parentName: result.parentName } : u
+        )
+      );
+      queryClient.setQueryData(
+        ['churchUnits', effectiveChurchId],
+        (old: OrganizationalUnit[] | undefined) => {
+          if (!old) return old;
+          return old.map((u) =>
+            u.id === unitToMove.id ? { ...u, parentId: result.parentId, parentName: result.parentName } : u
+          );
+        }
+      );
+      queryClient.invalidateQueries({ queryKey: ['churchUnits', effectiveChurchId] });
+
+      setSuccessBanner(
+        `"${unitToMove.name}" foi movida para "${result.parentName || 'o novo setor'}" com sucesso. Membros e líderes vinculados continuam os mesmos.`
+      );
+      setUnitToMove(null);
+    } catch (err: any) {
+      console.error('Erro ao mover célula de setor:', err);
+      setMoveError(err?.message || 'Falha ao mover célula.');
+    } finally {
+      setIsMovingUnit(false);
     }
   };
 
@@ -1856,6 +1938,18 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                               : 'Ver Detalhes (Sob Demanda)'}
                           </span>
                         </button>
+
+                        {isLeafLevel && canTransferUnits && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenMoveModal(unit)}
+                            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 flex items-center gap-1 cursor-pointer bg-indigo-50/60 hover:bg-indigo-100/80 px-2.5 py-1 rounded-lg border border-indigo-200/60 transition shrink-0"
+                            title="Mover esta célula para outro setor"
+                          >
+                            <ArrowRightLeft size={12} />
+                            <span>Mover para outro Setor</span>
+                          </button>
+                        )}
                       </div>
 
                       {/* Painel de Detalhes Carregados Sob Demanda */}
@@ -2295,6 +2389,96 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   )}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Mover Célula para outro Setor */}
+      {unitToMove && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="bg-[#04213d] text-white p-4 sm:p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300">
+                  <ArrowRightLeft size={20} />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-extrabold text-white">
+                    Mover Célula de Setor
+                  </h3>
+                  <p className="text-[11px] text-slate-300 mt-0.5">{unitToMove.name}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setUnitToMove(null)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-5 space-y-4">
+              {moveError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0" />
+                  <span>{moveError}</span>
+                </div>
+              )}
+
+              <div className="p-2.5 bg-sky-50/70 border border-sky-100 rounded-xl text-[11px] text-sky-900">
+                <p>
+                  Setor atual: <strong>{unitToMove.parentName || 'Sem setor vinculado'}</strong>
+                </p>
+                <p className="mt-1 text-sky-800">
+                  Os membros e o(s) líder(es) desta célula não serão afetados — apenas a posição dela na
+                  árvore organizacional muda.
+                </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 mb-1.5 block">
+                  Novo setor de destino
+                </label>
+                {moveTargetOptions.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic">
+                    Nenhum outro setor disponível para transferência.
+                  </p>
+                ) : (
+                  <select
+                    value={moveTargetParentId}
+                    onChange={(e) => setMoveTargetParentId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+                  >
+                    <option value="">Selecione um setor...</option>
+                    {moveTargetOptions.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+
+            <div className="px-4 sm:px-5 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUnitToMove(null)}
+                className="px-3.5 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMove}
+                disabled={isMovingUnit || !moveTargetParentId}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition cursor-pointer"
+              >
+                {isMovingUnit && <Loader2 size={15} className="animate-spin" />}
+                Confirmar Transferência
+              </button>
             </div>
           </div>
         </div>
