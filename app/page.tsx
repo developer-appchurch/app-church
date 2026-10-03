@@ -91,6 +91,11 @@ const MemberPermissionsView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const ChurchSettingsView = dynamic(
+  () => import('../components/ChurchSettingsView').then((m) => m.ChurchSettingsView),
+  { loading: ViewLoading, ssr: false }
+);
+
 const NotificationPermissionBanner = dynamic(
   () => import('../components/NotificationPermissionBanner').then((m) => m.NotificationPermissionBanner),
   { ssr: false }
@@ -898,6 +903,13 @@ export default function Home() {
 
           {activeScreen === 'permissions_manage' && user && (
             <MemberPermissionsView
+              currentUser={user}
+              onBack={() => setActiveScreen('feed')}
+            />
+          )}
+
+          {activeScreen === 'church_settings' && user && (
+            <ChurchSettingsView
               currentUser={user}
               onBack={() => setActiveScreen('feed')}
             />

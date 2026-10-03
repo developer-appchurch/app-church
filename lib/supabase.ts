@@ -26,6 +26,7 @@ import {
   CreateUnitInput,
   UnitLeader,
   UpdateUnitLeadersInput,
+  Neighborhood,
 } from '../types';
 import {
   INITIAL_CHURCHES,
@@ -4583,6 +4584,67 @@ export const AppChurchService = {
       }
       invalidateMemoryCache(`user_effective_permissions_${payload.memberId}`);
       return data;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  /**
+   * Catálogo de Bairros por Igreja (public.bairros)
+   */
+  async getNeighborhoods(churchId: string, force: boolean = false): Promise<Neighborhood[]> {
+    return getCachedOrExecute(
+      `neighborhoods:${churchId}`,
+      60 * 1000,
+      async () => {
+        if (typeof window !== 'undefined' && typeof fetch === 'function') {
+          const res = await fetch(`/api/neighborhoods?churchId=${churchId}`);
+          const data = await safeJsonParseResponse(res);
+          if (!res.ok || !data?.success) {
+            throw new Error(data?.error || 'Falha ao buscar bairros.');
+          }
+          return (data.neighborhoods || []) as Neighborhood[];
+        }
+        return [];
+      },
+      force
+    );
+  },
+
+  async createNeighborhood(payload: { churchId: string; name: string }): Promise<Neighborhood> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/neighborhoods', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao criar bairro.');
+      }
+      invalidateMemoryCache(`neighborhoods:${payload.churchId}`);
+      return data.neighborhood as Neighborhood;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  async updateNeighborhood(payload: {
+    id: string;
+    churchId: string;
+    name?: string;
+    active?: boolean;
+  }): Promise<Neighborhood> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/neighborhoods', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: payload.id, name: payload.name, active: payload.active }),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao atualizar bairro.');
+      }
+      invalidateMemoryCache(`neighborhoods:${payload.churchId}`);
+      return data.neighborhood as Neighborhood;
     }
     throw new Error('Ambiente do cliente necessário.');
   },

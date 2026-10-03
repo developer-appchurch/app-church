@@ -91,6 +91,18 @@ export interface MemberEffectivePermission {
 }
 
 /**
+ * Catálogo de Bairros por Igreja (public.bairros)
+ */
+export interface Neighborhood {
+  id: string;
+  churchId: string;
+  name: string;
+  active: boolean;
+  usageCount: number; // quantos membros/células usam esse nome hoje
+  createdAt?: string;
+}
+
+/**
  * Tabela de Etapas do Trilho de Liderança (etapa_trilhos)
  */
 export interface TrackStep {
@@ -286,7 +298,8 @@ export type ActiveScreen =
   | 'hierarchy_units'
   | 'member_pool'
   | 'church_overview'
-  | 'permissions_manage';
+  | 'permissions_manage'
+  | 'church_settings';
 
 export interface CelulaCardItem {
   id: string;

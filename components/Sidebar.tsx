@@ -29,6 +29,7 @@ import {
   RefreshCw,
   CheckCircle2,
   ShieldCheck,
+  Settings,
 } from 'lucide-react';
 import {
   optimizeImageToWebP,
@@ -259,6 +260,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     AppChurchService.hasPermission(user, 'church:admin', userPermissions) ||
     AppChurchService.hasPermission(user, 'permissions:manage', userPermissions);
 
+  const canAccessChurchSettings =
+    isSystemAdmin ||
+    userRoleNorm.includes('pastor') ||
+    AppChurchService.hasPermission(user, 'church:admin', userPermissions) ||
+    AppChurchService.hasPermission(user, 'track:manage', userPermissions) ||
+    AppChurchService.hasPermission(user, 'unit:transfer_delete', userPermissions) ||
+    AppChurchService.hasPermission(user, 'neighborhood:manage', userPermissions) ||
+    AppChurchService.hasPermission(user, 'member:access_manage', userPermissions);
+
   const menuItems = [
     {
       id: 'feed' as ActiveScreen,
@@ -332,6 +342,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             label: 'Gestão de Permissões',
             sublabel: 'Permissões especiais por membro',
             icon: ShieldCheck,
+          },
+        ]
+      : []),
+    ...(canAccessChurchSettings
+      ? [
+          {
+            id: 'church_settings' as ActiveScreen,
+            label: 'Configurações da Igreja',
+            sublabel: 'Trilho, Setores, Bairros & Logins',
+            icon: Settings,
           },
         ]
       : []),
