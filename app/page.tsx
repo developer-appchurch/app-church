@@ -96,6 +96,11 @@ const ChurchSettingsView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const ChurchIndicatorsView = dynamic(
+  () => import('../components/ChurchIndicatorsView').then((m) => m.ChurchIndicatorsView),
+  { loading: ViewLoading, ssr: false }
+);
+
 const NotificationPermissionBanner = dynamic(
   () => import('../components/NotificationPermissionBanner').then((m) => m.NotificationPermissionBanner),
   { ssr: false }
@@ -914,6 +919,10 @@ export default function Home() {
               onBack={() => setActiveScreen('feed')}
               onNavigateToUnits={() => setActiveScreen('hierarchy_units')}
             />
+          )}
+
+          {activeScreen === 'church_indicators' && user && (
+            <ChurchIndicatorsView currentUser={user} onBack={() => setActiveScreen('feed')} />
           )}
         </main>
       </PullToRefresh>

@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   ShieldCheck,
   Settings,
+  BarChart3,
 } from 'lucide-react';
 import {
   optimizeImageToWebP,
@@ -325,6 +326,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             label: 'Visão Geral da Igreja',
             sublabel: 'Organograma & árvore hierárquica',
             icon: Network,
+          },
+          {
+            id: 'church_indicators' as ActiveScreen,
+            label: 'Indicadores da Igreja',
+            sublabel: 'Trilho de Liderança em gráficos',
+            icon: BarChart3,
           },
         ]
       : [

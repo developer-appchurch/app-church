@@ -300,7 +300,8 @@ export type ActiveScreen =
   | 'member_pool'
   | 'church_overview'
   | 'permissions_manage'
-  | 'church_settings';
+  | 'church_settings'
+  | 'church_indicators';
 
 export interface CelulaCardItem {
   id: string;
