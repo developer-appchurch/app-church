@@ -343,87 +343,87 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
               <>
                 {/* Cards de KPI */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs p-4">
+                  <div className="bg-[#052447] rounded-xl sm:rounded-2xl border border-[#04213d] shadow-sm p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      <span className="text-[10px] sm:text-[11px] font-bold text-white/50 uppercase tracking-wider">
                         Total de Membros
                       </span>
-                      <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                      <div className="w-7 h-7 rounded-lg bg-white/10 text-white flex items-center justify-center shrink-0">
                         <Users size={14} />
                       </div>
                     </div>
-                    <p className="text-2xl sm:text-3xl font-black text-slate-900">{indicators.totalMembers}</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">em {scopeLabel}</p>
-                    <div className="mt-2 pt-2 border-t border-slate-100 text-[11px] space-y-0.5">
-                      <p className="flex justify-between text-slate-600">
+                    <p className="text-2xl sm:text-3xl font-black text-white">{indicators.totalMembers}</p>
+                    <p className="text-[11px] text-white/50 mt-0.5">em {scopeLabel}</p>
+                    <div className="mt-2 pt-2 border-t border-white/10 text-[11px] space-y-0.5">
+                      <p className="flex justify-between text-white/70">
                         <span>Com progresso:</span>
-                        <span className="font-bold text-emerald-600">
+                        <span className="font-bold text-emerald-300">
                           {indicators.totalMembers - indicators.distribution.notStarted}
                         </span>
                       </p>
-                      <p className="flex justify-between text-slate-600">
+                      <p className="flex justify-between text-white/70">
                         <span>Sem progresso (0%):</span>
-                        <span className="font-bold text-rose-500">{indicators.distribution.notStarted}</span>
+                        <span className="font-bold text-rose-300">{indicators.distribution.notStarted}</span>
                       </p>
                     </div>
                   </div>
 
-                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs p-4">
+                  <div className="bg-[#052447] rounded-xl sm:rounded-2xl border border-[#04213d] shadow-sm p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      <span className="text-[10px] sm:text-[11px] font-bold text-white/50 uppercase tracking-wider">
                         Conclusão Média
                       </span>
-                      <div className="w-7 h-7 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0">
+                      <div className="w-7 h-7 rounded-lg bg-white/10 text-white flex items-center justify-center shrink-0">
                         <TrendingUp size={14} />
                       </div>
                     </div>
-                    <p className="text-2xl sm:text-3xl font-black text-slate-900">
+                    <p className="text-2xl sm:text-3xl font-black text-white">
                       {indicators.avgCompletionPercent}
-                      <span className="text-base font-bold text-slate-400">%</span>
+                      <span className="text-base font-bold text-white/50">%</span>
                     </p>
-                    <div className="w-full h-1.5 bg-slate-100 rounded-full mt-2 overflow-hidden">
+                    <div className="w-full h-1.5 bg-white/10 rounded-full mt-2 overflow-hidden">
                       <div
-                        className="h-full rounded-full bg-sky-500"
+                        className="h-full rounded-full bg-sky-400"
                         style={{ width: `${Math.min(100, indicators.avgCompletionPercent)}%` }}
                       />
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-1.5">
+                    <p className="text-[11px] text-white/50 mt-1.5">
                       Média do trilho entre os {indicators.totalMembers} membros · {indicators.totalSteps} etapas
                     </p>
                   </div>
 
-                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs p-4">
+                  <div className="bg-[#052447] rounded-xl sm:rounded-2xl border border-[#04213d] shadow-sm p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      <span className="text-[10px] sm:text-[11px] font-bold text-white/50 uppercase tracking-wider">
                         Trilho Completo
                       </span>
-                      <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                      <div className="w-7 h-7 rounded-lg bg-white/10 text-white flex items-center justify-center shrink-0">
                         <Award size={14} />
                       </div>
                     </div>
-                    <p className="text-2xl sm:text-3xl font-black text-slate-900">
+                    <p className="text-2xl sm:text-3xl font-black text-white">
                       {indicators.completedCount}
-                      <span className="text-base font-bold text-slate-400 ml-1">
+                      <span className="text-base font-bold text-white/50 ml-1">
                         ({indicators.completedPercent}%)
                       </span>
                     </p>
-                    <p className="text-[11px] text-slate-400 mt-2">
+                    <p className="text-[11px] text-white/50 mt-2">
                       Ainda não concluíram: {indicators.totalMembers - indicators.completedCount} (
                       {Math.round((100 - indicators.completedPercent) * 10) / 10}%)
                     </p>
                   </div>
 
-                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs p-4">
+                  <div className="bg-[#052447] rounded-xl sm:rounded-2xl border border-[#04213d] shadow-sm p-4">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                      <span className="text-[10px] sm:text-[11px] font-bold text-white/50 uppercase tracking-wider">
                         Destaque &amp; Gargalo
                       </span>
-                      <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                      <div className="w-7 h-7 rounded-lg bg-white/10 text-white flex items-center justify-center shrink-0">
                         <Sparkles size={14} />
                       </div>
                     </div>
                     {indicators.bestStep && (
-                      <p className="flex items-center gap-1.5 text-xs text-emerald-700 font-semibold mb-1">
+                      <p className="flex items-center gap-1.5 text-xs text-emerald-300 font-semibold mb-1">
                         <Trophy size={13} className="shrink-0" />
                         <span className="truncate">
                           {indicators.bestStep.title} ({indicators.bestStep.completionPercent}%)
@@ -431,7 +431,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                       </p>
                     )}
                     {indicators.worstStep && (
-                      <p className="flex items-center gap-1.5 text-xs text-rose-700 font-semibold">
+                      <p className="flex items-center gap-1.5 text-xs text-rose-300 font-semibold">
                         <Flame size={13} className="shrink-0" />
                         <span className="truncate">
                           {indicators.worstStep.title} ({indicators.worstStep.completionPercent}%)
@@ -439,14 +439,14 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                       </p>
                     )}
                     {!indicators.bestStep && !indicators.worstStep && (
-                      <p className="text-xs text-slate-400">Nenhuma etapa cadastrada.</p>
+                      <p className="text-xs text-white/40">Nenhuma etapa cadastrada.</p>
                     )}
                   </div>
                 </div>
 
                 {viewMode === 'charts' && (
                   <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-3">
-                    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
+                    <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                           <BarChart3 size={15} className="text-[#052447]" />
@@ -469,7 +469,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                       ) : (
                         <ResponsiveContainer width="100%" height={Math.max(260, indicators.steps.length * 34)}>
                           <BarChart data={indicators.steps} layout="vertical" margin={{ left: 8, right: 24 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
                             <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} unit="%" />
                             <YAxis
                               type="category"
@@ -494,7 +494,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                       )}
                     </div>
 
-                    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
+                    <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
                       <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5 mb-3">
                         <Users size={15} className="text-[#052447]" />
                         Distribuição do Trilho
@@ -538,7 +538,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                 )}
 
                 {viewMode === 'compare' && (
-                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
+                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
                     <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5 mb-3">
                       <GitCompareArrows size={15} className="text-[#052447]" />
                       Comparativo entre {compareLevelName || 'Unidades'}
@@ -550,7 +550,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                     ) : (
                       <ResponsiveContainer width="100%" height={Math.max(260, indicators.compareUnits.length * 36)}>
                         <BarChart data={indicators.compareUnits} layout="vertical" margin={{ left: 8, right: 24 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" horizontal={false} />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
                           <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11, fill: '#94a3b8' }} unit="%" />
                           <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 11, fill: '#475569' }} />
                           <Tooltip
