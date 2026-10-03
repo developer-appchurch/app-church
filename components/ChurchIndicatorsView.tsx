@@ -17,12 +17,9 @@ import {
   ArrowLeft,
   Award,
   BarChart3,
-  ChevronLeft,
-  ChevronRight,
   Flame,
   GitCompareArrows,
   Loader2,
-  Search,
   Sparkles,
   TrendingUp,
   Trophy,
@@ -37,7 +34,7 @@ interface ChurchIndicatorsViewProps {
 }
 
 type ScopeTab = 'church' | 'area' | 'sector';
-type ViewMode = 'charts' | 'compare' | 'members';
+type ViewMode = 'charts' | 'compare';
 type IndicatorsTab = 'track';
 
 const TABS: { id: IndicatorsTab; label: string; icon: React.ElementType }[] = [
@@ -70,18 +67,6 @@ interface IndicatorsData {
   compareUnits: { id: string; name: string; totalMembers: number; avgCompletionPercent: number }[];
 }
 
-interface MemberRow {
-  id: string;
-  name: string;
-  avatarUrl?: string;
-  cellName?: string;
-  completedCount: number;
-  totalSteps: number;
-  percent: number;
-}
-
-const MEMBERS_PAGE_SIZE = 20;
-
 export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ currentUser, onBack }) => {
   const churchId = currentUser.churchId;
   const [activeTab, setActiveTab] = useState<IndicatorsTab>('track');
@@ -101,12 +86,6 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
   const [indicators, setIndicators] = useState<IndicatorsData | null>(null);
   const [isLoadingIndicators, setIsLoadingIndicators] = useState(true);
   const [indicatorsError, setIndicatorsError] = useState('');
-
-  const [members, setMembers] = useState<MemberRow[]>([]);
-  const [membersTotal, setMembersTotal] = useState(0);
-  const [membersOffset, setMembersOffset] = useState(0);
-  const [membersSearch, setMembersSearch] = useState('');
-  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
 
   useEffect(() => {
     if (!churchId) return;
@@ -198,35 +177,6 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
   useEffect(() => {
     if (!isLoadingBase) loadIndicators();
   }, [isLoadingBase, loadIndicators]);
-
-  const loadMembers = useCallback(
-    async (offset: number) => {
-      if (!churchId || !scopeIsReady) return;
-      setIsLoadingMembers(true);
-      try {
-        const data = await AppChurchService.getLeadershipTrackIndicatorMembers(churchId, effectiveUnitId, {
-          limit: MEMBERS_PAGE_SIZE,
-          offset,
-          search: membersSearch,
-        });
-        setMembers(data.members);
-        setMembersTotal(data.total);
-        setMembersOffset(offset);
-      } catch (err) {
-        // Mantém a lista anterior visível em caso de falha pontual
-      } finally {
-        setIsLoadingMembers(false);
-      }
-    },
-    [churchId, scopeIsReady, effectiveUnitId, membersSearch]
-  );
-
-  useEffect(() => {
-    if (viewMode === 'members' && !isLoadingBase) {
-      loadMembers(0);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, effectiveUnitId, membersSearch, isLoadingBase]);
 
   const scopeLabel =
     scopeTab === 'church' ? 'toda a igreja' : scopeTab === 'area' ? `Área ${effectiveUnitName || ''}` : `Setor ${effectiveUnitName || ''}`;
@@ -358,7 +308,6 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                 {([
                   { id: 'charts', label: 'Gráficos', icon: BarChart3 },
                   { id: 'compare', label: 'Comparativo', icon: GitCompareArrows },
-                  { id: 'members', label: `Membros${indicators ? ` (${indicators.totalMembers})` : ''}`, icon: Users },
                 ] as { id: ViewMode; label: string; icon: React.ElementType }[]).map((opt) => {
                   const Icon = opt.icon;
                   return (
@@ -394,7 +343,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
               <>
                 {/* Cards de KPI */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4">
+                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         Total de Membros
@@ -419,7 +368,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                     </div>
                   </div>
 
-                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4">
+                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         Conclusão Média
@@ -443,7 +392,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                     </p>
                   </div>
 
-                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4">
+                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         Trilho Completo
@@ -464,7 +413,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                     </p>
                   </div>
 
-                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4">
+                  <div className="bg-slate-100 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs p-4">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                         Destaque &amp; Gargalo
@@ -497,7 +446,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
 
                 {viewMode === 'charts' && (
                   <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-3">
-                    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4">
+                    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                           <BarChart3 size={15} className="text-[#052447]" />
@@ -545,7 +494,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                       )}
                     </div>
 
-                    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4">
+                    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
                       <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5 mb-3">
                         <Users size={15} className="text-[#052447]" />
                         Distribuição do Trilho
@@ -589,7 +538,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                 )}
 
                 {viewMode === 'compare' && (
-                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4">
+                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-4">
                     <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5 mb-3">
                       <GitCompareArrows size={15} className="text-[#052447]" />
                       Comparativo entre {compareLevelName || 'Unidades'}
@@ -618,80 +567,6 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                   </div>
                 )}
 
-                {viewMode === 'members' && (
-                  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-                    <div className="p-3 sm:p-4 border-b border-slate-100">
-                      <div className="relative">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                        <input
-                          type="text"
-                          value={membersSearch}
-                          onChange={(e) => setMembersSearch(e.target.value)}
-                          placeholder="Buscar membro por nome..."
-                          className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                        />
-                      </div>
-                    </div>
-
-                    {isLoadingMembers ? (
-                      <div className="flex items-center justify-center py-10 text-slate-400">
-                        <Loader2 size={20} className="animate-spin" />
-                      </div>
-                    ) : members.length === 0 ? (
-                      <div className="py-10 text-center text-sm text-slate-400">Nenhum membro encontrado.</div>
-                    ) : (
-                      <ul className="divide-y divide-slate-100">
-                        {members.map((m) => (
-                          <li key={m.id} className="px-3 sm:px-4 py-2.5 flex items-center gap-3">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold text-slate-800 truncate">{m.name}</p>
-                              <p className="text-[11px] text-slate-500 truncate">
-                                {m.cellName || 'Sem célula'} · {m.completedCount}/{m.totalSteps} etapas
-                              </p>
-                            </div>
-                            <div className="w-24 sm:w-32 shrink-0 text-right">
-                              <span className="text-xs font-bold" style={{ color: colorForPercent(m.percent) }}>
-                                {m.percent}%
-                              </span>
-                              <div className="w-full h-1.5 bg-slate-100 rounded-full mt-1 overflow-hidden">
-                                <div
-                                  className="h-full rounded-full"
-                                  style={{ width: `${Math.min(100, m.percent)}%`, background: colorForPercent(m.percent) }}
-                                />
-                              </div>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-
-                    {membersTotal > MEMBERS_PAGE_SIZE && (
-                      <div className="flex items-center justify-between px-3 sm:px-4 py-2.5 border-t border-slate-100 text-xs text-slate-500">
-                        <span>
-                          {membersOffset + 1}–{Math.min(membersOffset + MEMBERS_PAGE_SIZE, membersTotal)} de {membersTotal}
-                        </span>
-                        <div className="flex gap-1.5">
-                          <button
-                            type="button"
-                            disabled={membersOffset === 0 || isLoadingMembers}
-                            onClick={() => loadMembers(Math.max(0, membersOffset - MEMBERS_PAGE_SIZE))}
-                            className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50 cursor-pointer"
-                          >
-                            <ChevronLeft size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={membersOffset + MEMBERS_PAGE_SIZE >= membersTotal || isLoadingMembers}
-                            onClick={() => loadMembers(membersOffset + MEMBERS_PAGE_SIZE)}
-                            className="p-1.5 rounded-lg border border-slate-200 disabled:opacity-40 hover:bg-slate-50 cursor-pointer"
-                          >
-                            <ChevronRight size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
               </>
             ) : null}
           </>

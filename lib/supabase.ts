@@ -4765,45 +4765,6 @@ export const AppChurchService = {
     throw new Error('Ambiente do cliente necessário.');
   },
 
-  /**
-   * Lista paginada de membros (com % de conclusão do trilho) no mesmo
-   * escopo usado por getLeadershipTrackIndicators, para a visão "Membros".
-   */
-  async getLeadershipTrackIndicatorMembers(
-    churchId: string,
-    unitId?: string,
-    options?: { limit?: number; offset?: number; search?: string }
-  ): Promise<{
-    total: number;
-    members: {
-      id: string;
-      name: string;
-      avatarUrl?: string;
-      cellName?: string;
-      completedCount: number;
-      totalSteps: number;
-      percent: number;
-    }[];
-  }> {
-    if (typeof window !== 'undefined' && typeof fetch === 'function') {
-      const limit = options?.limit ?? 30;
-      const offset = options?.offset ?? 0;
-      const search = options?.search?.trim() || '';
-      let url = `/api/indicators/leadership-track/members?churchId=${encodeURIComponent(
-        churchId
-      )}&limit=${limit}&offset=${offset}`;
-      if (unitId) url += `&unitId=${encodeURIComponent(unitId)}`;
-      if (search) url += `&search=${encodeURIComponent(search)}`;
-      const res = await fetch(url);
-      const data = await safeJsonParseResponse(res);
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || 'Falha ao listar membros do trilho.');
-      }
-      return { total: data.total || 0, members: data.members || [] };
-    }
-    throw new Error('Ambiente do cliente necessário.');
-  },
-
   async getTrackStepsDetailed(
     churchId: string,
     force: boolean = false
