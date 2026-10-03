@@ -187,6 +187,11 @@ const ComingSoonTab: React.FC<{ icon: React.ElementType; title: string }> = ({ i
  * uma só vez. Opera sempre entre uma unidade "folha" (Célula) e seu nível
  * pai imediato (Setor), quaisquer que sejam os nomes configurados pela
  * igreja para esses níveis.
+ *
+ * (marcador de sincronização: 2026-10-03 — se você está lendo este
+ * comentário no AI Studio após sincronizar com o GitHub, esta tela já
+ * deve mostrar os seletores de setor de origem/destino e a lista de
+ * células com checkboxes, não mais o atalho antigo.)
  */
 const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?: () => void }> = ({
   currentUser,
