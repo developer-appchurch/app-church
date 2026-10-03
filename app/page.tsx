@@ -263,6 +263,26 @@ export default function Home() {
         }
       }
 
+      // 2. Atalho para visitante sem sessão: sem cache local E sem nenhum
+      // cookie de autenticação (Supabase prefixa os cookies de sessão com
+      // "sb-"; o admin de emergência usa "appchurch_admin_session"). Nesse
+      // caso já sabemos de antemão que /api/auth/session vai responder
+      // "não autenticado" — então pulamos essa ida ao servidor e liberamos
+      // a tela de Login na hora, em vez de bloquear o maior conteúdo da
+      // página (LCP) atrás de uma chamada de rede que não muda o resultado.
+      // Isso não afeta quem já está logado: o cookie existe e o fluxo normal
+      // (abaixo) continua validando a sessão com o servidor normalmente.
+      if (!cached && typeof document !== 'undefined') {
+        const hasAuthCookie = document.cookie.includes('sb-') || document.cookie.includes('appchurch_admin_session');
+        if (!hasAuthCookie) {
+          if (isMounted) {
+            setIsAuthenticated(false);
+            setIsCheckingSession(false);
+          }
+          return;
+        }
+      }
+
       try {
         const sessionUser = await AppChurchService.getCurrentUser();
         if (isMounted) {
