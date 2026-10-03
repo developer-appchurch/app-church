@@ -316,6 +316,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             icon: Compass,
           },
           {
+            id: 'church_indicators' as ActiveScreen,
+            label: 'Indicadores da Igreja',
+            sublabel: 'Trilho de Liderança em gráficos',
+            icon: BarChart3,
+          },
+          {
             id: 'hierarchy_units' as ActiveScreen,
             label: 'Níveis Organizacionais',
             sublabel: 'Cadastro por nível (Área, Setor, Célula)',
@@ -326,12 +332,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             label: 'Visão Geral da Igreja',
             sublabel: 'Organograma & árvore hierárquica',
             icon: Network,
-          },
-          {
-            id: 'church_indicators' as ActiveScreen,
-            label: 'Indicadores da Igreja',
-            sublabel: 'Trilho de Liderança em gráficos',
-            icon: BarChart3,
           },
         ]
       : [
