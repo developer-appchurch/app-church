@@ -45,6 +45,7 @@ import {
 import { ActiveScreen, UserProfile, CellGroup, ChurchHierarchicalLevel, OrganizationalUnit } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService, invalidateMemoryCache } from '../lib/supabase';
+import { uploadUnitPhoto, deleteUnitPhoto } from '../lib/unitPhotoStorage';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 
@@ -290,8 +291,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newCellNeighborhood, setNewCellNeighborhood] = useState('Centro');
   const [newCellDay, setNewCellDay] = useState('Quarta-feira');
   const [newCellTime, setNewCellTime] = useState('19:30');
-  const [newCellPhotoPreview, setNewCellPhotoPreview] = useState('');
-  const [isOptimizingCellPhoto, setIsOptimizingCellPhoto] = useState(false);
+  const [newCellPhotoPreview, setNewCellPhotoPreview] = useState(''); // data URL local, só para exibição imediata
+  const [newCellPhotoUrl, setNewCellPhotoUrl] = useState(''); // URL pública real no Storage, enviada ao backend
+  const [isUploadingCellPhoto, setIsUploadingCellPhoto] = useState(false);
   const [isCreatingCell, setIsCreatingCell] = useState(false);
   const [createCellError, setCreateCellError] = useState('');
   const [createCellSuccessMessage, setCreateCellSuccessMessage] = useState('');
@@ -334,6 +336,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setNewCellAddress('');
     setNewCellNeighborhood('Centro');
     setNewCellPhotoPreview('');
+    setNewCellPhotoUrl('');
     setCreateCellError('');
   };
 
@@ -358,18 +361,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return;
     }
 
-    setIsOptimizingCellPhoto(true);
+    // Se já havia uma foto anterior enviada ao Storage para esta célula ainda não
+    // salva, remove para não deixar arquivo órfão ao trocar a foto antes de confirmar.
+    const previousPhotoPath = newCellPhotoUrl;
+
+    setIsUploadingCellPhoto(true);
     try {
-      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.UNIT_PHOTO);
-      if (!result.dataUrl.startsWith('data:image/webp')) {
-        throw new Error('A imagem não pôde ser convertida para WebP.');
+      // Preview local imediato (apenas em memória, nunca enviado ao banco)
+      const optimized = await optimizeImageToWebP(file, IMAGE_PRESETS.UNIT_PHOTO);
+      setNewCellPhotoPreview(optimized.dataUrl);
+
+      // Upload real para o Supabase Storage (bucket "units") — só a URL pública
+      // resultante é salva em unidades.foto_url, igual ao padrão usado no Feed.
+      const { publicUrl } = await uploadUnitPhoto(optimized.blob, user?.id || user?.login || '');
+      setNewCellPhotoUrl(publicUrl);
+
+      if (previousPhotoPath) {
+        deleteUnitPhoto(previousPhotoPath, user?.id || user?.login || '');
       }
-      setNewCellPhotoPreview(result.dataUrl);
     } catch (err: any) {
-      console.error('Falha ao processar foto da célula:', err);
-      setCreateCellError('Não foi possível converter a imagem. Envie uma foto válida (JPG, PNG ou WEBP).');
+      console.error('Falha ao enviar foto da célula para o Storage:', err);
+      setCreateCellError(err?.message || 'Não foi possível enviar a foto. Tente novamente.');
+      setNewCellPhotoPreview('');
+      setNewCellPhotoUrl('');
     } finally {
-      setIsOptimizingCellPhoto(false);
+      setIsUploadingCellPhoto(false);
     }
   };
 
@@ -383,18 +399,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
       setCreateCellError(`Informe o nome do(a) ${leafLevel.name}.`);
       return;
     }
+    if (isUploadingCellPhoto) {
+      setCreateCellError('Aguarde o envio da foto terminar antes de salvar.');
+      return;
+    }
 
     setIsCreatingCell(true);
     setCreateCellError('');
     const createdName = newCellName.trim();
     try {
-      if (newCellPhotoPreview) {
-        const dbValidation = validateImageForDatabase(newCellPhotoPreview, 'Foto da célula');
-        if (!dbValidation.isValid) {
-          throw new Error(dbValidation.error || 'A foto deve estar no formato WebP.');
-        }
-      }
-
+      // newCellPhotoUrl já é a URL pública real no Supabase Storage (bucket "units"),
+      // nunca o base64 — só a URL é salva em unidades.foto_url.
       await AppChurchService.createUnit({
         churchId: user.churchId,
         levelTypeId: leafLevel.id,
@@ -404,7 +419,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         address: newCellAddress.trim(),
         meetingDay: newCellDay,
         meetingTime: newCellTime,
-        fotoUrl: newCellPhotoPreview || undefined,
+        fotoUrl: newCellPhotoUrl || undefined,
         createdByMemberId: user.id || user.login,
       });
 
@@ -1176,7 +1191,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {/* Foto da Célula (compacta, opcional) */}
               <div className="flex items-center gap-2.5 p-2 bg-slate-50 border border-slate-200 rounded-xl">
                 <div
-                  onClick={() => !isOptimizingCellPhoto && cellPhotoInputRef.current?.click()}
+                  onClick={() => !isUploadingCellPhoto && cellPhotoInputRef.current?.click()}
                   className="w-12 h-12 rounded-lg border-2 border-sky-300 overflow-hidden bg-white shrink-0 relative cursor-pointer flex items-center justify-center"
                   title="Clique para adicionar uma foto da célula"
                 >
@@ -1189,10 +1204,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       className="w-full h-full object-cover"
                       unoptimized
                     />
-                  ) : isOptimizingCellPhoto ? (
-                    <Loader2 size={16} className="animate-spin text-sky-600" />
                   ) : (
                     <Camera size={18} className="text-sky-400" />
+                  )}
+                  {isUploadingCellPhoto && (
+                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                      <Loader2 size={16} className="animate-spin text-white" />
+                    </div>
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
@@ -1200,10 +1218,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <button
                     type="button"
                     onClick={() => cellPhotoInputRef.current?.click()}
-                    disabled={isOptimizingCellPhoto}
+                    disabled={isUploadingCellPhoto}
                     className="text-[11px] text-sky-700 hover:text-sky-900 font-semibold underline underline-offset-2 cursor-pointer disabled:opacity-50"
                   >
-                    {newCellPhotoPreview ? 'Trocar foto' : 'Adicionar foto (opcional)'}
+                    {isUploadingCellPhoto ? 'Enviando...' : newCellPhotoUrl ? 'Trocar foto' : 'Adicionar foto (opcional)'}
                   </button>
                 </div>
                 <input
@@ -1344,7 +1362,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 type="button"
                 id="btn-confirm-create-cell"
-                disabled={isCreatingCell}
+                disabled={isCreatingCell || isUploadingCellPhoto}
                 onClick={handleCreateQuickCell}
                 className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
