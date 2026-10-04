@@ -431,6 +431,27 @@ export async function PUT(req: NextRequest) {
     // ---- 1) Sincroniza o Supabase Auth primeiro (se o membro já tem conta lá)
     const previousLogin = member.login;
     let authUpdated = false;
+
+    // Se o vínculo membros.auth_user_id estiver vazio, procura a conta pelo e-mail sintético do login
+    // atual, para não deixar em auth.users uma conta com o e-mail antigo (o login novo não entraria).
+    if (!member.auth_user_id && previousLogin) {
+      const supabaseAdmin = getSupabaseAdminClient();
+      if (supabaseAdmin) {
+        const oldEmail = getSyntheticMemberEmail(previousLogin).toLowerCase();
+        for (let page = 1; page <= 10; page++) {
+          const { data: list, error: listErr } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+          if (listErr || !list?.users?.length) break;
+          const found = list.users.find((u) => (u.email || '').toLowerCase() === oldEmail);
+          if (found) {
+            member.auth_user_id = found.id;
+            await supabase.from('membros').update({ auth_user_id: found.id }).eq('id', memberId);
+            break;
+          }
+          if (list.users.length < 1000) break;
+        }
+      }
+    }
+
     if (member.auth_user_id) {
       const supabaseAdmin = getSupabaseAdminClient();
       if (!supabaseAdmin) {
