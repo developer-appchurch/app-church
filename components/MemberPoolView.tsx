@@ -331,7 +331,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       }
     });
 
-    return Array.from(map.values());
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }, [helperData, unitsList, isUnitInUserCoverage]);
 
   // Define seleção inicial nos modals quando as células carregarem
