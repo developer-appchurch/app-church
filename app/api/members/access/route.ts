@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
-import { createAuthUserForMember } from '@/lib/supabase/authAdmin';
+import { createServerClient } from '@supabase/ssr';
+import { createAuthUserForMember, getSyntheticMemberEmail } from '@/lib/supabase/authAdmin';
+import { getSupabaseAdminClient } from '@/lib/supabase/admin';
+import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/config';
 import bcrypt from 'bcryptjs';
 
 /**
@@ -152,7 +155,7 @@ export async function POST(req: NextRequest) {
 
     // ===== Modo ATRIBUIR: membro ainda não tem login =====
     if (login) {
-      const cleanLogin = String(login).trim().toLowerCase().replace(/[^a-z0-9.]/g, '');
+      const cleanLogin = sanitizeLogin(login);
       if (!cleanLogin) {
         return NextResponse.json({ error: 'Login inválido.' }, { status: 400 });
       }
@@ -164,7 +167,7 @@ export async function POST(req: NextRequest) {
       const { data: existingLogin } = await supabase
         .from('membros')
         .select('id')
-        .eq('login', cleanLogin)
+        .ilike('login', escapeLike(cleanLogin))
         .neq('id', memberId)
         .limit(1);
 
@@ -236,6 +239,282 @@ export async function POST(req: NextRequest) {
     console.error('Erro na rota /api/members/access POST:', err);
     return NextResponse.json(
       { error: err?.message || 'Erro interno ao resetar senha.' },
+      { status: 500 }
+    );
+  }
+}
+
+// =============================================================================
+// PUT /api/members/access — Editar login e/ou senha de um membro
+// Usado na edição de membro em "Minha Célula" (botão "Editar login e senha").
+// Body: { memberId, churchId, login?, password? }
+//  - login: novo login (opcional). Valida formato, logins reservados e unicidade.
+//  - password: nova senha (opcional). Mínimo de 6 caracteres. Em branco = mantém.
+// Mantém o Supabase Auth sincronizado (e-mail sintético e senha), pois o login
+// do app autentica primeiro no Auth (login@membros.appchurch.local).
+// =============================================================================
+
+const RESERVED_LOGINS = ['admin', 'administrator', 'root', 'sistema', 'suporte'];
+const MIN_PASSWORD_LENGTH = 6;
+
+/** Escapa curingas do ILIKE (o "_" é permitido em login e não pode virar curinga). */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+function sanitizeLogin(raw: unknown): string {
+  return String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '');
+}
+
+/** Resolve o membro logado que está fazendo a requisição e o seu nível hierárquico. */
+async function resolveRequester(req: NextRequest, supabase: any) {
+  if (req.cookies.get('appchurch_admin_session')?.value === 'true') {
+    return { isSystemAdmin: true, churchId: null as string | null, level: 99, id: '', canEditMembers: true };
+  }
+
+  const ssrClient = createServerClient(getSupabaseUrl(), getSupabaseAnonKey(), {
+    cookies: {
+      getAll() {
+        return req.cookies.getAll();
+      },
+      setAll() {
+        // Rota de escrita: não precisa renovar cookies de sessão aqui
+      },
+    },
+  });
+
+  const {
+    data: { user: authUser },
+  } = await ssrClient.auth.getUser();
+  if (!authUser) return null;
+
+  const membroId = authUser.app_metadata?.membro_id;
+  let query = supabase.from('membros').select('id, igreja_id, funcao, papel_id, papel:papeis(nivel_hierarquia)');
+  query = membroId ? query.eq('id', membroId) : query.eq('auth_user_id', authUser.id);
+  const { data: requester } = await query.maybeSingle();
+  if (!requester) return null;
+
+  const papel = Array.isArray(requester.papel) ? requester.papel[0] : requester.papel;
+  const funcao = (requester.funcao || '').toLowerCase();
+  const level = funcao.includes('pastor') ? 99 : Number(papel?.nivel_hierarquia || 1);
+
+  // Mesma permissão que libera a edição de membros na tela ("Editar Membros" = member:edit),
+  // respeitando concessões/bloqueios individuais em membro_permissoes.
+  let canEditMembers = funcao.includes('pastor');
+  const { data: perm } = await supabase.from('permissoes').select('id').eq('codigo', 'member:edit').maybeSingle();
+  if (perm?.id) {
+    const { data: individual } = await supabase
+      .from('membro_permissoes')
+      .select('concedida')
+      .eq('membro_id', requester.id)
+      .eq('permissao_id', perm.id)
+      .maybeSingle();
+    if (individual) {
+      canEditMembers = individual.concedida === true;
+    } else if (!canEditMembers && requester.papel_id) {
+      const { data: rolePerm } = await supabase
+        .from('papel_permissoes')
+        .select('papel_id')
+        .eq('papel_id', requester.papel_id)
+        .eq('permissao_id', perm.id)
+        .maybeSingle();
+      canEditMembers = Boolean(rolePerm);
+    }
+  }
+
+  return {
+    isSystemAdmin: false,
+    churchId: requester.igreja_id as string,
+    level,
+    id: requester.id as string,
+    canEditMembers,
+  };
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { memberId, churchId } = body || {};
+    const wantsLogin = body?.login !== undefined && body?.login !== null && String(body.login).trim() !== '';
+    const rawPassword = typeof body?.password === 'string' ? body.password.trim() : '';
+    const wantsPassword = rawPassword.length > 0;
+
+    if (!memberId) {
+      return NextResponse.json({ error: 'memberId é obrigatório.' }, { status: 400 });
+    }
+    if (!wantsLogin && !wantsPassword) {
+      return NextResponse.json({ error: 'Informe um novo login e/ou uma nova senha.' }, { status: 400 });
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) {
+      return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
+    }
+
+    const { data: member, error: memberErr } = await supabase
+      .from('membros')
+      .select('id, nome, login, funcao, igreja_id, auth_user_id, papel:papeis(nivel_hierarquia)')
+      .eq('id', memberId)
+      .maybeSingle();
+
+    if (memberErr || !member) {
+      return NextResponse.json({ error: 'Membro não encontrado.' }, { status: 404 });
+    }
+    if (churchId && member.igreja_id !== churchId) {
+      return NextResponse.json({ error: 'Membro não pertence a esta igreja.' }, { status: 403 });
+    }
+
+    // ---- Autorização: precisa ser líder da mesma igreja e não pode editar alguém acima dele
+    const requester = await resolveRequester(req, supabase);
+    if (!requester) {
+      return NextResponse.json({ error: 'Sessão expirada. Entre novamente no app.' }, { status: 401 });
+    }
+    if (!requester.isSystemAdmin) {
+      const targetPapel = Array.isArray((member as any).papel) ? (member as any).papel[0] : (member as any).papel;
+      const targetLevel = (member.funcao || '').toLowerCase().includes('pastor')
+        ? 99
+        : Number(targetPapel?.nivel_hierarquia || 1);
+      const isSelf = requester.id === member.id;
+      if (requester.churchId !== member.igreja_id || (!isSelf && !requester.canEditMembers)) {
+        return NextResponse.json({ error: 'Você não tem permissão para editar o acesso deste membro.' }, { status: 403 });
+      }
+      if (!isSelf && targetLevel > requester.level) {
+        return NextResponse.json(
+          { error: 'Este membro tem um nível acima do seu. Peça à liderança superior para alterar o acesso.' },
+          { status: 403 }
+        );
+      }
+    }
+
+    // ---- Validação do login
+    let newLogin: string | null = null;
+    if (wantsLogin) {
+      const cleanLogin = sanitizeLogin(body.login);
+      if (cleanLogin.length < 3) {
+        return NextResponse.json(
+          { error: 'O login deve ter pelo menos 3 caracteres (letras, números, ponto, hífen ou _).' },
+          { status: 400 }
+        );
+      }
+      if (cleanLogin !== (member.login || '').trim().toLowerCase()) {
+        if (RESERVED_LOGINS.includes(cleanLogin)) {
+          return NextResponse.json({ error: 'Este login já está em uso. Por favor, escolha outro login.' }, { status: 409 });
+        }
+        const { data: existing } = await supabase
+          .from('membros')
+          .select('id')
+          .ilike('login', escapeLike(cleanLogin))
+          .neq('id', memberId)
+          .limit(1);
+        if (existing && existing.length > 0) {
+          return NextResponse.json({ error: 'Este login já está em uso. Por favor, escolha outro login.' }, { status: 409 });
+        }
+        newLogin = cleanLogin;
+      }
+    }
+
+    // ---- Validação da senha (regra do banco/Auth: mínimo 6 caracteres)
+    if (wantsPassword && rawPassword.length < MIN_PASSWORD_LENGTH) {
+      return NextResponse.json(
+        { error: `A senha deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.` },
+        { status: 400 }
+      );
+    }
+
+    if (!newLogin && !wantsPassword) {
+      return NextResponse.json({ success: true, login: member.login, unchanged: true });
+    }
+
+    // ---- 1) Sincroniza o Supabase Auth primeiro (se o membro já tem conta lá)
+    const previousLogin = member.login;
+    let authUpdated = false;
+
+    // Se o vínculo membros.auth_user_id estiver vazio, procura a conta pelo e-mail sintético do login
+    // atual, para não deixar em auth.users uma conta com o e-mail antigo (o login novo não entraria).
+    if (!member.auth_user_id && previousLogin) {
+      const supabaseAdmin = getSupabaseAdminClient();
+      if (supabaseAdmin) {
+        const oldEmail = getSyntheticMemberEmail(previousLogin).toLowerCase();
+        for (let page = 1; page <= 10; page++) {
+          const { data: list, error: listErr } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+          if (listErr || !list?.users?.length) break;
+          const found = list.users.find((u) => (u.email || '').toLowerCase() === oldEmail);
+          if (found) {
+            member.auth_user_id = found.id;
+            await supabase.from('membros').update({ auth_user_id: found.id }).eq('id', memberId);
+            break;
+          }
+          if (list.users.length < 1000) break;
+        }
+      }
+    }
+
+    if (member.auth_user_id) {
+      const supabaseAdmin = getSupabaseAdminClient();
+      if (!supabaseAdmin) {
+        return NextResponse.json(
+          { error: 'Servidor sem acesso administrativo ao Supabase Auth. Nada foi alterado.' },
+          { status: 500 }
+        );
+      }
+      const authPatch: Record<string, any> = {};
+      if (newLogin) {
+        authPatch.email = getSyntheticMemberEmail(newLogin);
+        authPatch.email_confirm = true;
+        authPatch.user_metadata = { nome: member.nome, login: newLogin };
+      }
+      if (wantsPassword) authPatch.password = rawPassword;
+
+      const { error: authErr } = await supabaseAdmin.auth.admin.updateUserById(member.auth_user_id, authPatch);
+      if (authErr) {
+        const msg = (authErr.message || '').toLowerCase();
+        if (newLogin && (msg.includes('already') || msg.includes('exists') || (authErr as any).status === 422)) {
+          return NextResponse.json({ error: 'Este login já está em uso. Por favor, escolha outro login.' }, { status: 409 });
+        }
+        return NextResponse.json({ error: `Falha ao atualizar o acesso: ${authErr.message}` }, { status: 500 });
+      }
+      authUpdated = true;
+    }
+
+    // ---- 2) Atualiza a tabela membros
+    const memberPatch: Record<string, any> = {};
+    if (newLogin) memberPatch.login = newLogin;
+    if (wantsPassword) {
+      memberPatch.senha_hash = bcrypt.hashSync(rawPassword, 10);
+      memberPatch.senha_temporaria = false;
+    }
+
+    const { error: updateErr } = await supabase.from('membros').update(memberPatch).eq('id', memberId);
+    if (updateErr) {
+      // Desfaz a troca de e-mail no Auth para não deixar login e Auth divergentes
+      if (authUpdated && newLogin && previousLogin) {
+        const supabaseAdmin = getSupabaseAdminClient();
+        await supabaseAdmin?.auth.admin
+          .updateUserById(member.auth_user_id, {
+            email: getSyntheticMemberEmail(previousLogin),
+            user_metadata: { nome: member.nome, login: previousLogin },
+          })
+          .catch(() => {});
+      }
+      if (updateErr.code === '23505') {
+        return NextResponse.json({ error: 'Este login já está em uso. Por favor, escolha outro login.' }, { status: 409 });
+      }
+      return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      login: newLogin || member.login,
+      loginChanged: Boolean(newLogin),
+      passwordChanged: wantsPassword,
+    });
+  } catch (err: any) {
+    console.error('Erro na rota /api/members/access PUT:', err);
+    return NextResponse.json(
+      { error: err?.message || 'Erro interno ao atualizar login e senha.' },
       { status: 500 }
     );
   }

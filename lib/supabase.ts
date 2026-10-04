@@ -2237,7 +2237,7 @@ export const AppChurchService = {
         let query = supabase
           .from('membros')
           .select('id, login')
-          .ilike('login', cleanLogin);
+          .ilike('login', cleanLogin.replace(/[\\%_]/g, (c) => `\\${c}`));
         if (excludeMemberId) {
           query = query.neq('id', excludeMemberId);
         }
@@ -2247,7 +2247,7 @@ export const AppChurchService = {
           let legQuery = supabase
             .from('members')
             .select('id, login')
-            .ilike('login', cleanLogin);
+            .ilike('login', cleanLogin.replace(/[\\%_]/g, (c) => `\\${c}`));
           if (excludeMemberId) {
             legQuery = legQuery.neq('id', excludeMemberId);
           }
@@ -4992,6 +4992,37 @@ export const AppChurchService = {
       }
       invalidateMemoryCache(`members:${payload.churchId}`);
       return data.assignedLogin as string;
+    }
+    throw new Error('Ambiente do cliente necessário.');
+  },
+
+  /**
+   * Edita login e/ou senha de um membro que já tem acesso ao app.
+   * Envie apenas o que mudou: login (novo login) e/ou password (nova senha, mín. 6).
+   * Retorna o login final do membro.
+   */
+  async updateMemberCredentials(payload: {
+    memberId: string;
+    churchId: string;
+    login?: string;
+    password?: string;
+  }): Promise<{ login: string; loginChanged: boolean; passwordChanged: boolean }> {
+    if (typeof window !== 'undefined' && typeof fetch === 'function') {
+      const res = await fetch('/api/members/access', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await safeJsonParseResponse(res);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Falha ao atualizar login e senha.');
+      }
+      invalidateMemoryCache(`members:${payload.churchId}`);
+      return {
+        login: data.login as string,
+        loginChanged: Boolean(data.loginChanged),
+        passwordChanged: Boolean(data.passwordChanged),
+      };
     }
     throw new Error('Ambiente do cliente necessário.');
   },
