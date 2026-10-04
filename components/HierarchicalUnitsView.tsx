@@ -106,6 +106,10 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [bindLeaderSearchTerm, setBindLeaderSearchTerm] = useState<string>('');
   const [isBindingLeaders, setIsBindingLeaders] = useState<boolean>(false);
   const [bindLeaderError, setBindLeaderError] = useState<string>('');
+  // Resultado da busca de membros direto no banco (não fica preso ao teto de 1000 registros
+  // carregados inicialmente em `churchMembers` — ver modalFilteredMembers abaixo)
+  const [bindLeaderServerResults, setBindLeaderServerResults] = useState<CellMember[]>([]);
+  const [isSearchingBindLeaderMembers, setIsSearchingBindLeaderMembers] = useState<boolean>(false);
 
   // Modal de Mover Célula para outro Setor (Configurações da Igreja > Setores e Células)
   const [unitToMove, setUnitToMove] = useState<OrganizationalUnit | null>(null);
@@ -460,11 +464,56 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return churchMembers.filter((m) => m.churchId === effectiveChurchId);
   }, [churchMembers, effectiveChurchId]);
 
-  // Filtro de membros da igreja para o modal de vinculação direta de líderes
+  // Busca membros direto no banco ao digitar no modal de vinculação de líderes.
+  // Necessário porque `churchMembers` é carregado uma única vez com um teto (ver fetchData
+  // acima) e o Supabase/PostgREST também aplica um limite máximo de linhas por requisição
+  // (geralmente 1000), então um membro cadastrado fora desse recorte nunca apareceria só
+  // filtrando a lista já carregada em memória — era o caso relatado com o membro "Vicente".
+  useEffect(() => {
+    const term = bindLeaderSearchTerm.trim();
+    if (!isBindLeaderModalOpen || term.length < 2) {
+      setBindLeaderServerResults([]);
+      setIsSearchingBindLeaderMembers(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsSearchingBindLeaderMembers(true);
+    const timeoutId = setTimeout(async () => {
+      try {
+        const results = await AppChurchService.getMembers(effectiveChurchId, undefined, false, {
+          search: term,
+          limit: 100,
+        });
+        if (!cancelled) {
+          setBindLeaderServerResults(results || []);
+        }
+      } catch (e) {
+        console.error('[HierarchicalUnitsView] Erro ao buscar membros no banco para vincular líder:', e);
+        if (!cancelled) {
+          setBindLeaderServerResults([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSearchingBindLeaderMembers(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [bindLeaderSearchTerm, isBindLeaderModalOpen, effectiveChurchId]);
+
+  // Filtro de membros da igreja para o modal de vinculação direta de líderes.
+  // Combina o filtro local (sobre a lista já carregada em memória, com retorno instantâneo)
+  // com o resultado da busca direta no banco (bindLeaderServerResults), que cobre qualquer
+  // membro da igreja, mesmo fora do recorte inicial carregado em `churchMembers`.
   const modalFilteredMembers = useMemo(() => {
     if (!bindLeaderSearchTerm.trim()) return filteredChurchMembers;
     const term = bindLeaderSearchTerm.toLowerCase();
-    return filteredChurchMembers.filter(
+    const localMatches = filteredChurchMembers.filter(
       (m) =>
         m.name.toLowerCase().includes(term) ||
         (m.role && m.role.toLowerCase().includes(term)) ||
@@ -472,7 +521,15 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         (m.neighborhood && m.neighborhood.toLowerCase().includes(term)) ||
         (m.cellName && m.cellName.toLowerCase().includes(term))
     );
-  }, [filteredChurchMembers, bindLeaderSearchTerm]);
+
+    const merged = new Map<string, CellMember>();
+    localMatches.forEach((m) => merged.set(m.id, m));
+    bindLeaderServerResults
+      .filter((m) => m.churchId === effectiveChurchId)
+      .forEach((m) => merged.set(m.id, m));
+
+    return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [filteredChurchMembers, bindLeaderSearchTerm, bindLeaderServerResults, effectiveChurchId]);
 
   // Mapa de membro_id -> lista de nomes de unidades que o membro já lidera atualmente
   const memberLedUnitsMap = useMemo(() => {
@@ -2129,7 +2186,15 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   placeholder="Buscar membro por nome, cargo ou telefone..."
                   className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800"
                 />
+                {isSearchingBindLeaderMembers && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-sky-700">
+                    Buscando...
+                  </span>
+                )}
               </div>
+              <p className="text-[10px] text-slate-400 -mt-1">
+                A busca consulta todos os membros da igreja, não apenas os já carregados na tela.
+              </p>
 
               {/* Contador & Selecionados */}
               <div className="flex items-center justify-between text-xs">
@@ -2146,7 +2211,13 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
               {bindLeaderSelectedIds.length > 0 && (
                 <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200/80">
                   {bindLeaderSelectedIds.map((id) => {
-                    const mem = churchMembers.find((m) => m.id === id);
+                    // Procura também nos resultados da busca no banco: um membro selecionado
+                    // via busca pode não estar na lista `churchMembers` carregada inicialmente
+                    // (sujeita ao teto de registros), então o chip não pode depender só dela.
+                    const mem =
+                      churchMembers.find((m) => m.id === id) ||
+                      bindLeaderServerResults.find((m) => m.id === id) ||
+                      modalFilteredMembers.find((m) => m.id === id);
                     if (!mem) return null;
                     const otherLedUnits = (memberLedUnitsMap.get(id) || []).filter(
                       (name) => name !== unitToBindLeaders?.name
@@ -2178,7 +2249,11 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
               {/* Lista de Membros */}
               <div className="max-h-60 overflow-y-auto border border-slate-200 rounded-xl p-1.5 bg-slate-50/50 space-y-1">
-                {modalFilteredMembers.length === 0 ? (
+                {modalFilteredMembers.length === 0 && isSearchingBindLeaderMembers ? (
+                  <div className="p-6 text-center">
+                    <p className="text-xs text-slate-500 font-medium">Buscando membros...</p>
+                  </div>
+                ) : modalFilteredMembers.length === 0 ? (
                   <div className="p-6 text-center space-y-2">
                     <p className="text-xs text-slate-500 font-medium">
                       Nenhum membro encontrado com os critérios de busca.
