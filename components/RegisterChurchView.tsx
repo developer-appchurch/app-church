@@ -36,6 +36,23 @@ import {
   IMAGE_PRESETS,
   formatFileSize,
 } from '../lib/imageOptimizer';
+import { uploadChurchLogo, deleteChurchLogo } from '../lib/churchLogoStorage';
+
+/**
+ * Gera um UUID v4 no navegador. Usado para pré-gerar o churchId desta igreja em
+ * cadastro ANTES de ela existir no banco, só para correlacionar o upload do
+ * logotipo (Storage) com o registro que será criado em seguida.
+ */
+function generateClientUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 interface RegisterChurchViewProps {
   onBack?: () => void;
@@ -165,10 +182,13 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
   const [cnpj, setCnpj] = useState('');
   const [city, setCity] = useState('');
   const [stateUf, setStateUf] = useState('');
-  const [logoUrl, setLogoUrl] = useState('');
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState(''); // URL pública real no Storage, enviada ao backend
+  const [logoPreview, setLogoPreview] = useState<string | null>(null); // data URL local, só para exibição
   const [isOptimizingLogo, setIsOptimizingLogo] = useState(false);
   const [logoStats, setLogoStats] = useState<{ size: string; reduction: string } | null>(null);
+  // churchId pré-gerado no navegador, só para correlacionar o logo (Storage) com a
+  // igreja que será criada em /api/churches/register ao confirmar o cadastro.
+  const [pendingChurchId, setPendingChurchId] = useState(() => generateClientUUID());
 
   // Níveis Hierárquicos
   const [levels, setLevels] = useState<HierarchicalLevelInput[]>([
@@ -219,7 +239,9 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
     setPastorPassword(pass);
   };
 
-  // Upload do Logotipo (Drag & Drop / Input file) com validação e conversão estrita para WebP
+  // Upload do Logotipo (Drag & Drop / Input file): otimiza para WebP e envia
+  // direto para o Supabase Storage (bucket "church-logos") — só a URL pública
+  // resultante é salva como logoUrl; o data URL fica apenas no preview local.
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -233,22 +255,30 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
       return;
     }
 
+    const previousLogoUrl = logoUrl;
+
     setIsOptimizingLogo(true);
     try {
-      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.LOGO);
-      if (!result.dataUrl.startsWith('data:image/webp')) {
+      const optimized = await optimizeImageToWebP(file, IMAGE_PRESETS.LOGO);
+      if (!optimized.dataUrl.startsWith('data:image/webp')) {
         throw new Error('A imagem não pôde ser convertida para WebP.');
       }
-      setLogoPreview(result.dataUrl);
-      setLogoUrl(result.dataUrl);
+      setLogoPreview(optimized.dataUrl);
       setLogoStats({
-        size: formatFileSize(result.optimizedSize),
-        reduction: result.reductionLabel,
+        size: formatFileSize(optimized.optimizedSize),
+        reduction: optimized.reductionLabel,
       });
+
+      const { publicUrl } = await uploadChurchLogo(optimized.blob, pendingChurchId);
+      setLogoUrl(publicUrl);
       setErrorMessage('');
+
+      if (previousLogoUrl) {
+        deleteChurchLogo(previousLogoUrl, pendingChurchId);
+      }
     } catch (err: any) {
-      console.error('Falha ao processar e converter logotipo para WebP:', err);
-      setErrorMessage('Não foi possível converter o logotipo para WebP. Por favor, envie uma imagem válida (PNG, JPG ou WEBP).');
+      console.error('Falha ao processar/enviar logotipo:', err);
+      setErrorMessage(err?.message || 'Não foi possível enviar o logotipo. Envie uma imagem válida (PNG, JPG ou WEBP).');
       setLogoPreview('');
       setLogoUrl('');
       setLogoStats(null);
@@ -341,6 +371,10 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
       setErrorMessage('Informe uma senha de acesso para o Pastor.');
       return;
     }
+    if (isOptimizingLogo) {
+      setErrorMessage('Aguarde o envio do logotipo terminar antes de confirmar.');
+      return;
+    }
 
     if (logoUrl.trim()) {
       const logoValidation = validateImageForDatabase(logoUrl.trim(), 'Logotipo da Igreja');
@@ -354,6 +388,7 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
 
     try {
       const input: RegisterChurchInput = {
+        churchId: pendingChurchId,
         name: churchName.trim(),
         cnpj: cnpj.trim() || undefined,
         city: city.trim(),
@@ -407,6 +442,8 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
     setStateUf('');
     setLogoUrl('');
     setLogoPreview(null);
+    setLogoStats(null);
+    setPendingChurchId(generateClientUUID());
     setPastorName('');
     setPastorPhone('');
     setPastorEmail('');
@@ -796,6 +833,9 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
                           <button
                             type="button"
                             onClick={() => {
+                              if (logoUrl) {
+                                deleteChurchLogo(logoUrl, pendingChurchId);
+                              }
                               setLogoPreview(null);
                               setLogoUrl('');
                               setLogoStats(null);

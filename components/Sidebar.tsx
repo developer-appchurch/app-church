@@ -46,6 +46,7 @@ import { ActiveScreen, UserProfile, CellGroup, ChurchHierarchicalLevel, Organiza
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService, invalidateMemoryCache } from '../lib/supabase';
 import { uploadUnitPhoto, deleteUnitPhoto } from '../lib/unitPhotoStorage';
+import { uploadAvatarPhoto, deleteAvatarPhoto } from '../lib/avatarPhotoStorage';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 
@@ -82,7 +83,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onUpdateAvatar,
 }) => {
   const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
-  const [avatarPreview, setAvatarPreview] = useState(user?.avatarUrl || '');
+  const [avatarPreview, setAvatarPreview] = useState(user?.avatarUrl || ''); // exibição (data URL ao enviar do dispositivo, ou URL direta)
+  const [avatarUploadedUrl, setAvatarUploadedUrl] = useState(''); // URL pública real no Storage, só quando a foto vem do dispositivo
+  const [isUploadingAvatarPhoto, setIsUploadingAvatarPhoto] = useState(false);
   const [isOptimizingAvatar, setIsOptimizingAvatar] = useState(false);
   const [avatarStats, setAvatarStats] = useState<{ size: string; reduction: string } | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
@@ -192,23 +195,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return;
     }
 
+    const previousUploadedUrl = avatarUploadedUrl;
+
     setIsOptimizingAvatar(true);
     try {
-      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.AVATAR);
-      if (!result.dataUrl.startsWith('data:image/webp')) {
+      const optimized = await optimizeImageToWebP(file, IMAGE_PRESETS.AVATAR);
+      if (!optimized.dataUrl.startsWith('data:image/webp')) {
         throw new Error('A imagem não pôde ser convertida para WebP.');
       }
-      setAvatarPreview(result.dataUrl);
+      // Preview local imediato
+      setAvatarPreview(optimized.dataUrl);
       setAvatarStats({
-        size: formatFileSize(result.optimizedSize),
-        reduction: result.reductionLabel,
+        size: formatFileSize(optimized.optimizedSize),
+        reduction: optimized.reductionLabel,
       });
       setAvatarError(null);
+      setIsOptimizingAvatar(false);
+
+      // Upload real para o Supabase Storage (bucket "avatars") — só a URL pública
+      // resultante é salva em membros.url_avatar, igual ao padrão usado no Feed.
+      setIsUploadingAvatarPhoto(true);
+      const { publicUrl } = await uploadAvatarPhoto(optimized.blob, user?.id || '', user?.login);
+      setAvatarUploadedUrl(publicUrl);
+
+      if (previousUploadedUrl) {
+        deleteAvatarPhoto(previousUploadedUrl, user?.id || '', user?.login);
+      }
     } catch (err: any) {
-      console.error('Falha ao processar e converter foto para WebP:', err);
-      setAvatarError('Não foi possível converter a imagem para WebP. Por favor, envie uma foto válida (JPG, PNG ou WEBP).');
+      console.error('Falha ao processar/enviar foto de perfil:', err);
+      setAvatarError(err?.message || 'Não foi possível enviar a foto. Envie uma imagem válida (JPG, PNG ou WEBP).');
+      setAvatarPreview(user?.avatarUrl || '');
+      setAvatarUploadedUrl('');
     } finally {
       setIsOptimizingAvatar(false);
+      setIsUploadingAvatarPhoto(false);
     }
   };
 
@@ -216,7 +236,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (!avatarPreview || !user) return;
     setAvatarError(null);
 
-    const dbValidation = validateImageForDatabase(avatarPreview, 'Foto de perfil');
+    if (isUploadingAvatarPhoto) {
+      setAvatarError('Aguarde o envio da foto terminar antes de salvar.');
+      return;
+    }
+
+    // Se a prévia é um data URL (foto do dispositivo), usa a URL pública já
+    // enviada ao Storage. Se for um avatar sugerido ou URL colada, usa direto.
+    const finalAvatarUrl = avatarPreview.startsWith('data:') ? avatarUploadedUrl : avatarPreview;
+    if (!finalAvatarUrl) {
+      setAvatarError('Aguarde o envio da foto terminar antes de salvar.');
+      return;
+    }
+
+    const dbValidation = validateImageForDatabase(finalAvatarUrl, 'Foto de perfil');
     if (!dbValidation.isValid) {
       setAvatarError(dbValidation.error || 'A imagem deve estar no formato WebP.');
       return;
@@ -225,9 +258,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setIsSavingAvatar(true);
     try {
       if (onUpdateAvatar) {
-        await onUpdateAvatar(avatarPreview);
+        await onUpdateAvatar(finalAvatarUrl);
       } else {
-        await AppChurchService.updateUserAvatar(user.id, avatarPreview);
+        await AppChurchService.updateUserAvatar(user.id, finalAvatarUrl);
       }
       setAvatarSuccess(true);
       setTimeout(() => {
@@ -825,7 +858,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 )}
 
-                {avatarStats && !isOptimizingAvatar && (
+                {isUploadingAvatarPhoto && !isOptimizingAvatar && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-sky-50 text-sky-800 border border-sky-200 text-xs font-semibold animate-pulse mt-1">
+                    <Loader2 size={14} className="animate-spin text-sky-600" />
+                    <span>Enviando foto...</span>
+                  </div>
+                )}
+
+                {avatarStats && !isOptimizingAvatar && !isUploadingAvatarPhoto && (
                   <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold mt-1 shadow-2xs">
                     <Sparkles size={12} className="text-emerald-600" />
                     <span>WebP Otimizado: {avatarStats.size} ({avatarStats.reduction})</span>
@@ -843,10 +883,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   type="button"
                   id="btn-select-device-photo"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={isOptimizingAvatar}
+                  disabled={isOptimizingAvatar || isUploadingAvatarPhoto}
                   className="mt-1 inline-flex items-center gap-2 px-4 py-2 bg-sky-50 hover:bg-sky-100 text-sky-950 border border-sky-300 text-xs font-bold rounded-xl transition cursor-pointer active:scale-95 shadow-2xs disabled:opacity-50"
                 >
-                  {isOptimizingAvatar ? (
+                  {isOptimizingAvatar || isUploadingAvatarPhoto ? (
                     <Loader2 size={15} className="animate-spin text-sky-700" />
                   ) : (
                     <Upload size={15} />
@@ -872,6 +912,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         type="button"
                         onClick={() => {
                           setAvatarPreview(avatar);
+                          setAvatarUploadedUrl('');
                           setAvatarStats(null);
                         }}
                         className={`w-full aspect-square rounded-full overflow-hidden border-2 transition p-0.5 cursor-pointer relative ${
@@ -909,7 +950,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <input
                   type="url"
                   value={avatarPreview}
-                  onChange={(e) => setAvatarPreview(e.target.value)}
+                  onChange={(e) => {
+                    setAvatarPreview(e.target.value);
+                    setAvatarUploadedUrl('');
+                  }}
                   placeholder="https://exemplo.com/sua-foto.jpg"
                   className="w-full text-xs p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800"
                 />
@@ -929,6 +973,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 type="button"
                 onClick={() => {
                   setAvatarPreview('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=250');
+                  setAvatarUploadedUrl('');
                 }}
                 className="text-xs text-slate-500 hover:text-rose-600 font-medium cursor-pointer"
               >
@@ -946,11 +991,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <button
                   type="button"
                   id="btn-confirm-save-avatar"
-                  disabled={isSavingAvatar || !avatarPreview}
+                  disabled={isSavingAvatar || isUploadingAvatarPhoto || !avatarPreview}
                   onClick={handleSaveAvatar}
                   className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
-                  {isSavingAvatar ? 'Salvando...' : 'Salvar Nova Foto'}
+                  {isSavingAvatar ? 'Salvando...' : isUploadingAvatarPhoto ? 'Enviando foto...' : 'Salvar Nova Foto'}
                 </button>
               </div>
             </div>

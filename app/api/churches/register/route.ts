@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const churchId = generateUUID();
+    const churchId = (input.churchId && input.churchId.trim()) || generateUUID();
     const pastorId = generateUUID();
     const cellId = generateUUID();
     const unitId = generateUUID();

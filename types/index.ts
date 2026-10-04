@@ -420,6 +420,9 @@ export interface UpdateUnitLeadersInput {
 }
 
 export interface RegisterChurchInput {
+  // Gerado no navegador antes do envio apenas para correlacionar o upload do
+  // logotipo (Storage) com a igreja que será criada; se ausente, o servidor gera um novo.
+  churchId?: string;
   name: string;
   cnpj?: string;
   city: string;

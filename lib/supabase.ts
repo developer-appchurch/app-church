@@ -794,7 +794,7 @@ export const AppChurchService = {
    * Register a new Church with customizable hierarchical levels and Pastor credentials
    */
   async registerChurch(input: RegisterChurchInput): Promise<RegisterChurchResult> {
-    const churchId = generateUUID();
+    const churchId = (input.churchId && input.churchId.trim()) || generateUUID();
     const pastorId = generateUUID();
     const cellId = generateUUID();
     const slug =
