@@ -192,26 +192,28 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
   return (
     <div className="min-h-screen bg-slate-50/70 p-2 sm:p-5 lg:p-6 pb-20">
       <div className="max-w-6xl mx-auto mb-3 sm:mb-5">
-        <div className="bg-[#04213d] text-white rounded-xl sm:rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800 flex items-center gap-3.5">
+        <div className="flex items-center gap-2.5 bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs">
           {onBack && (
             <button
               type="button"
               onClick={onBack}
-              className="p-1.5 sm:p-2 -ml-1 text-slate-300 hover:text-white hover:bg-white/10 rounded-lg sm:rounded-xl transition cursor-pointer shrink-0"
+              className="p-1.5 sm:p-2 -ml-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg sm:rounded-xl transition cursor-pointer"
               title="Voltar"
               aria-label="Voltar"
             >
               <ArrowLeft size={18} />
             </button>
           )}
-          <div className="w-12 h-12 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
-            <BarChart3 size={24} />
-          </div>
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight truncate">
-              Indicadores da Igreja
-            </h1>
-            <p className="text-xs sm:text-sm text-slate-300 mt-0.5 truncate">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-700 shrink-0">
+                <BarChart3 size={14} className="sm:w-[18px] sm:h-[18px]" />
+              </div>
+              <h1 className="text-base sm:text-xl lg:text-2xl font-black text-slate-900 tracking-tight truncate">
+                Indicadores da Igreja
+              </h1>
+            </div>
+            <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate max-w-xl">
               Acompanhe o avanço do discipulado por toda a igreja, Área ou Setor.
             </p>
           </div>
