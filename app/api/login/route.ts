@@ -5,6 +5,14 @@ import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/config';
 import { UserProfile } from '@/types';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import {
+  ADMIN_LOGIN,
+  ADMIN_SESSION_COOKIE,
+  ADMIN_SESSION_MAX_AGE_SECONDS,
+  createAdminSessionToken,
+  isAdminLoginConfigured,
+  verifyAdminPassword,
+} from '@/lib/adminSession';
 
 // =============================================================================
 // RATE LIMITING EM MEMÓRIA (Janela Deslizante de 5 minutos)
@@ -129,18 +137,20 @@ export async function POST(req: NextRequest) {
     // =========================================================================
     // 3. CASO ESPECIAL: ADMINISTRADOR GLOBAL DO SISTEMA (admin / developer)
     // =========================================================================
-    const isGlobalAdminLogin =
-      cleanLogin === 'admin' ||
-      cleanLogin === 'administrador' ||
-      cleanLogin === 'developer.appchurch@gmail.com';
+    const isGlobalAdminLogin = cleanLogin === ADMIN_LOGIN;
 
     if (isGlobalAdminLogin) {
-      const isValidAdminPass =
-        cleanPass === 'admin' ||
-        cleanPass === 'admin123' ||
-        cleanPass === '123456';
+      // Senha conferida contra o hash em ADMIN_PASSWORD_HASH (nunca fica no código)
+      if (!isAdminLoginConfigured()) {
+        console.error('[Auth /api/login] Login de administrador desativado: defina ADMIN_PASSWORD_HASH no servidor.');
+        recordAttempt(cleanLogin, loginAttempts);
+        return NextResponse.json(
+          { error: 'Senha incorreta para o Administrador do Sistema.' },
+          { status: 401 }
+        );
+      }
 
-      if (!isValidAdminPass) {
+      if (!verifyAdminPassword(cleanPass)) {
         recordAttempt(cleanLogin, loginAttempts);
         return NextResponse.json(
           { error: 'Senha incorreta para o Administrador do Sistema.' },
@@ -173,12 +183,20 @@ export async function POST(req: NextRequest) {
         isSystemAdmin: true,
       });
 
-      // Grava cookie de sessão administrativa para persistência
-      response.cookies.set('appchurch_admin_session', 'true', {
+      // Grava cookie de sessão administrativa ASSINADO (não pode ser forjado no navegador)
+      const adminToken = createAdminSessionToken();
+      if (!adminToken) {
+        return NextResponse.json(
+          { error: 'Login de administrador indisponível no servidor.' },
+          { status: 500 }
+        );
+      }
+      response.cookies.set(ADMIN_SESSION_COOKIE, adminToken, {
         path: '/',
         httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 60 * 60 * 24 * 7, // 7 dias
+        maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,
       });
 
       return response;

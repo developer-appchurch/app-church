@@ -428,60 +428,10 @@ export const AppChurchService = {
       }
     }
 
-    // 0. Super Administrador do Sistema AppChurch (Fallback de Emergência)
-    const isAdminLogin =
-      cleanLogin === 'admin' ||
-      cleanLogin === 'administrador' ||
-      cleanLogin === 'developer.appchurch@gmail.com';
-
-    const isValidAdminPass =
-      cleanPass === 'admin' ||
-      cleanPass === 'admin123' ||
-      cleanPass === '123456';
-
-    if (isAdminLogin) {
-      if (!isValidAdminPass) {
-        throw new Error('Senha incorreta para o Administrador do Sistema.');
-      }
-
-      // Busca primeira igreja disponível no Supabase se houver, ou cria contexto mestre
-      let adminChurchId = 'church-master';
-      let adminChurchName = 'Administração do Sistema';
-      if (supabase) {
-        try {
-          let { data: firstChurch } = await supabase.from('igrejas').select('id, nome').limit(1);
-          if (!firstChurch || firstChurch.length === 0) {
-            const legRes = await supabase.from('churches').select('id, nome').limit(1);
-            firstChurch = legRes.data;
-          }
-          if (firstChurch && firstChurch.length > 0) {
-            adminChurchId = firstChurch[0].id;
-            adminChurchName = firstChurch[0].nome;
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      const adminUser: UserProfile = {
-        id: 'a0000000-0000-0000-0000-000000000001',
-        churchId: adminChurchId,
-        churchName: adminChurchName,
-        name: 'Administrador do Sistema',
-        login: 'admin',
-        role: 'Administrador',
-        roleId: 'b2000000-0000-0000-0000-000000000000',
-        sector: 'Diretoria Geral',
-        currentCellId: '',
-        email: 'developer.appchurch@gmail.com',
-        phone: '(88) 99999-0000',
-        avatarUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=150',
-        isPrivileged: true,
-        isSystemAdmin: true,
-      };
-
-      saveToStorage(STORAGE_KEYS.SESSION, adminUser);
-      return adminUser;
+    // 0. Administrador do Sistema: autenticação EXCLUSIVA no servidor (/api/login).
+    // Não existe mais senha de administrador no código do navegador.
+    if (cleanLogin === 'admin') {
+      throw new Error('Não foi possível validar o Administrador agora. Verifique a conexão e tente novamente.');
     }
 
     // 1. Consulta prioritária na tabela real "membros" (ou "members") do Supabase
