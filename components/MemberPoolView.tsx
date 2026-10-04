@@ -204,13 +204,34 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
   // Todas as unidades da igreja
   const unitsList = useMemo(() => helperData?.units || [], [helperData]);
 
+  // Pastor/Administrador cobrem toda a congregação, independente de estarem
+  // vinculados a uma célula própria ou de terem liderança explícita cadastrada
+  // em alguma unidade. O limiar numérico (userHierarchyLevel >= 7) nunca é
+  // atingido na prática — o papel "Pastor" é cadastrado com nivel_hierarquia 6
+  // no banco — então o nome literal do papel precisa ser checado também (mesmo
+  // padrão já usado em NossasCelulasView.tsx).
+  const isPastorOrAdmin = useMemo(() => {
+    if (!user) return false;
+    const roleNorm = (user.role || '').toLowerCase().trim();
+    return (
+      user.isSystemAdmin === true ||
+      user.login === 'admin' ||
+      roleNorm === 'administrador' ||
+      roleNorm === 'pastor' ||
+      roleNorm === 'pastor titular' ||
+      roleNorm === 'pastor(a)' ||
+      roleNorm === 'pastor de rede' ||
+      userHierarchyLevel >= 7
+    );
+  }, [user, userHierarchyLevel]);
+
   // Verifica se uma unidade/célula está sob a cobertura direta ou indireta do usuário logado
   const isUnitInUserCoverage = useCallback(
     (unitId: string | null | undefined): boolean => {
       if (!unitId || !user) return false;
 
       // Pastores e administradores cobrem toda a congregação
-      if (userHierarchyLevel >= 7 || user.isSystemAdmin || user.role === 'Administrador') {
+      if (isPastorOrAdmin) {
         return true;
       }
 
@@ -249,7 +270,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
 
       return false;
     },
-    [user, userHierarchyLevel, unitsList]
+    [user, userHierarchyLevel, unitsList, isPastorOrAdmin]
   );
 
   // Verifica se um membro está sob a cobertura do usuário logado
@@ -258,7 +279,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       if (!user) return false;
 
       // Pastores e administradores cobrem todos os membros da igreja
-      if (userHierarchyLevel >= 7 || user.isSystemAdmin || user.role === 'Administrador') {
+      if (isPastorOrAdmin) {
         return true;
       }
 
@@ -271,7 +292,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       // Membro vinculado a uma célula: só quem tem cobertura sobre aquela célula pode desvincular ou excluir
       return isUnitInUserCoverage(member.cellId);
     },
-    [user, userHierarchyLevel, isUnitInUserCoverage]
+    [user, userHierarchyLevel, isUnitInUserCoverage, isPastorOrAdmin]
   );
 
   // Funções que o usuário logado tem permissão de atribuir (até o seu próprio nível)
