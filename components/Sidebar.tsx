@@ -273,6 +273,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     AppChurchService.hasPermission(user, 'neighborhood:manage', userPermissions) ||
     AppChurchService.hasPermission(user, 'member:access_manage', userPermissions);
 
+  // Restrito a Líder de Célula ou funções acima (Setor, Área, Rede, Distrito, Pastor, Supervisor, Admin) —
+  // deliberadamente mais estrito que canAccessLeadershipFeatures, que também libera Discipulador/Anfitrião/etc.
+  const isCellLeaderOrAbove =
+    isSystemAdmin ||
+    userRoleNorm.includes('pastor') ||
+    userRoleNorm.includes('supervisor') ||
+    userRoleNorm.includes('administrador') ||
+    userRoleNorm.includes('líder de');
+
   // --- Criação Rápida de Célula (modal disparado direto pelo menu lateral) ---
   const [isNewCellModalOpen, setIsNewCellModalOpen] = useState(false);
   const [newCellSetorId, setNewCellSetorId] = useState('');
@@ -281,23 +290,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newCellNeighborhood, setNewCellNeighborhood] = useState('Centro');
   const [newCellDay, setNewCellDay] = useState('Quarta-feira');
   const [newCellTime, setNewCellTime] = useState('19:30');
+  const [newCellPhotoPreview, setNewCellPhotoPreview] = useState('');
+  const [isOptimizingCellPhoto, setIsOptimizingCellPhoto] = useState(false);
   const [isCreatingCell, setIsCreatingCell] = useState(false);
   const [createCellError, setCreateCellError] = useState('');
-  const [createCellSuccess, setCreateCellSuccess] = useState(false);
+  const [createCellSuccessMessage, setCreateCellSuccessMessage] = useState('');
+  const cellPhotoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Reaproveita as mesmas chaves de cache do React Query usadas em Níveis Organizacionais
   // e Configurações da Igreja, para que a lista de Setores já venha do cache quando possível.
   const { data: churchLevelsForNewCell = [] } = useQuery({
     queryKey: ['churchLevels', user?.churchId],
     queryFn: () => AppChurchService.getChurchLevels(user!.churchId),
-    enabled: !!user?.churchId && canAccessLeadershipFeatures,
+    enabled: !!user?.churchId && isCellLeaderOrAbove,
     staleTime: 1000 * 60 * 10,
   });
 
   const { data: churchUnitsForNewCell = [] } = useQuery({
     queryKey: ['churchUnits', user?.churchId],
     queryFn: () => AppChurchService.getUnits(user!.churchId, undefined, 'flat'),
-    enabled: !!user?.churchId && canAccessLeadershipFeatures && isNewCellModalOpen,
+    enabled: !!user?.churchId && isCellLeaderOrAbove && isNewCellModalOpen,
     staleTime: 1000 * 60 * 5,
   });
 
@@ -313,22 +325,52 @@ export const Sidebar: React.FC<SidebarProps> = ({
         .sort((a: OrganizationalUnit, b: OrganizationalUnit) => a.name.localeCompare(b.name))
     : [];
 
-  const canCreateQuickCell = canAccessLeadershipFeatures && !!leafLevel && leafLevelIndex > 0;
+  const canCreateQuickCell = isCellLeaderOrAbove && !!leafLevel && leafLevelIndex > 0;
 
-  const resetNewCellForm = () => {
-    setNewCellSetorId('');
+  // Limpa apenas os campos de conteúdo (mantém Setor, Dia e Horário, já que
+  // em geral quem usa esse modal cadastra uma célula por vez no mesmo Setor).
+  const resetNewCellContentFields = () => {
     setNewCellName('');
     setNewCellAddress('');
     setNewCellNeighborhood('Centro');
-    setNewCellDay('Quarta-feira');
-    setNewCellTime('19:30');
+    setNewCellPhotoPreview('');
     setCreateCellError('');
   };
 
   const handleOpenNewCellModal = () => {
-    resetNewCellForm();
-    setCreateCellSuccess(false);
+    setNewCellSetorId('');
+    setNewCellDay('Quarta-feira');
+    setNewCellTime('19:30');
+    resetNewCellContentFields();
+    setCreateCellSuccessMessage('');
     setIsNewCellModalOpen(true);
+  };
+
+  const handleCellPhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setCreateCellError('');
+
+    const validation = validateImageFile(file);
+    if (!validation.isValid) {
+      setCreateCellError(validation.error || 'Arquivo de imagem inválido.');
+      return;
+    }
+
+    setIsOptimizingCellPhoto(true);
+    try {
+      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.UNIT_PHOTO);
+      if (!result.dataUrl.startsWith('data:image/webp')) {
+        throw new Error('A imagem não pôde ser convertida para WebP.');
+      }
+      setNewCellPhotoPreview(result.dataUrl);
+    } catch (err: any) {
+      console.error('Falha ao processar foto da célula:', err);
+      setCreateCellError('Não foi possível converter a imagem. Envie uma foto válida (JPG, PNG ou WEBP).');
+    } finally {
+      setIsOptimizingCellPhoto(false);
+    }
   };
 
   const handleCreateQuickCell = async () => {
@@ -344,16 +386,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     setIsCreatingCell(true);
     setCreateCellError('');
+    const createdName = newCellName.trim();
     try {
+      if (newCellPhotoPreview) {
+        const dbValidation = validateImageForDatabase(newCellPhotoPreview, 'Foto da célula');
+        if (!dbValidation.isValid) {
+          throw new Error(dbValidation.error || 'A foto deve estar no formato WebP.');
+        }
+      }
+
       await AppChurchService.createUnit({
         churchId: user.churchId,
         levelTypeId: leafLevel.id,
-        name: newCellName.trim(),
+        name: createdName,
         parentId: newCellSetorId,
         neighborhood: newCellNeighborhood.trim(),
         address: newCellAddress.trim(),
         meetingDay: newCellDay,
         meetingTime: newCellTime,
+        fotoUrl: newCellPhotoPreview || undefined,
         createdByMemberId: user.id || user.login,
       });
 
@@ -363,12 +414,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       invalidateMemoryCache(`cells:${user.churchId}`);
       queryClient.invalidateQueries({ queryKey: ['churchUnits', user.churchId] });
 
-      setCreateCellSuccess(true);
-      setTimeout(() => {
-        setCreateCellSuccess(false);
-        setIsNewCellModalOpen(false);
-        resetNewCellForm();
-      }, 1100);
+      // Mantém o modal aberto (ver ponto 5 da conversa): limpa só os campos de
+      // conteúdo, mantém o Setor/Dia/Horário selecionados e avisa com um banner
+      // que desaparece sozinho, para cadastrar a próxima célula em seguida se precisar.
+      resetNewCellContentFields();
+      setCreateCellSuccessMessage(`${leafLevel.name} "${createdName}" cadastrado(a) com sucesso!`);
+      setTimeout(() => setCreateCellSuccessMessage(''), 4000);
     } catch (err: any) {
       setCreateCellError(err?.message || `Falha ao cadastrar o(a) ${leafLevel.name}.`);
     } finally {
@@ -1083,16 +1134,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
           role="dialog"
           aria-modal="true"
         >
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden flex flex-col border border-slate-200 animate-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden flex flex-col border border-slate-200 animate-in zoom-in-95 duration-150">
             {/* Header */}
-            <div className="bg-[#04213d] text-white p-4 sm:p-5 flex items-center justify-between">
+            <div className="bg-[#04213d] text-white p-3.5 sm:p-4 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300">
+                <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
                   <Plus size={20} />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base text-white">Novo(a) {leafLevel?.name || 'Célula'}</h3>
-                  <p className="text-xs text-sky-200">Cadastro rápido por {setorLevel?.name || 'Setor'}</p>
+                  <h3 className="font-bold text-sm text-white">Novo(a) {leafLevel?.name || 'Célula'}</h3>
+                  <p className="text-[11px] text-sky-200">Cadastro rápido por {setorLevel?.name || 'Setor'}</p>
                 </div>
               </div>
               <button
@@ -1107,168 +1158,206 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
 
             {/* Body */}
-            <div className="p-5 space-y-3.5 max-h-[75vh] overflow-y-auto">
-              {createCellSuccess ? (
-                <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-sm text-emerald-800 font-semibold flex items-center gap-2 animate-in fade-in">
-                  <Check size={20} className="text-emerald-600 shrink-0" />
-                  {leafLevel?.name || 'Célula'} &quot;{newCellName}&quot; cadastrado(a) com sucesso!
+            <div className="p-4 space-y-2.5 max-h-[75vh] overflow-y-auto">
+              {createCellSuccessMessage && (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2 animate-in fade-in">
+                  <Check size={16} className="text-emerald-600 shrink-0" />
+                  <span>{createCellSuccessMessage}</span>
                 </div>
-              ) : (
-                <>
-                  {createCellError && (
-                    <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 text-xs font-semibold">
-                      <AlertCircle size={15} className="text-rose-600 shrink-0" />
-                      <span>{createCellError}</span>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      {setorLevel?.name || 'Setor'} responsável <span className="text-rose-600">*</span>
-                    </label>
-                    <select
-                      value={newCellSetorId}
-                      onChange={(e) => setNewCellSetorId(e.target.value)}
-                      disabled={isCreatingCell}
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer disabled:opacity-60"
-                    >
-                      <option value="">Selecione...</option>
-                      {setorOptions.map((setor) => (
-                        <option key={setor.id} value={setor.id}>
-                          {setor.name}
-                        </option>
-                      ))}
-                    </select>
-                    {setorOptions.length === 0 && (
-                      <p className="text-[11px] text-amber-600 mt-1">
-                        Nenhum {setorLevel?.name || 'Setor'} cadastrado ainda.
-                      </p>
-                    )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      Nome do(a) {leafLevel?.name || 'Célula'} <span className="text-rose-600">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={newCellName}
-                      onChange={(e) => setNewCellName(e.target.value)}
-                      disabled={isCreatingCell}
-                      placeholder="Ex: Betel, Ágape, Filadélfia"
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                      <MapPin size={13} className="text-sky-700" />
-                      <span>Endereço</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={newCellAddress}
-                      onChange={(e) => setNewCellAddress(e.target.value)}
-                      disabled={isCreatingCell}
-                      placeholder="Rua, número, complemento"
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Bairro</label>
-                    <input
-                      type="text"
-                      value={newCellNeighborhood}
-                      onChange={(e) => setNewCellNeighborhood(e.target.value)}
-                      disabled={isCreatingCell}
-                      placeholder="Ex: Centro ou Jardim Europa"
-                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1">Dia da Reunião</label>
-                      <select
-                        value={newCellDay}
-                        onChange={(e) => setNewCellDay(e.target.value)}
-                        disabled={isCreatingCell}
-                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer disabled:opacity-60"
-                      >
-                        <option value="Segunda-feira">Segunda-feira</option>
-                        <option value="Terça-feira">Terça-feira</option>
-                        <option value="Quarta-feira">Quarta-feira</option>
-                        <option value="Quinta-feira">Quinta-feira</option>
-                        <option value="Sexta-feira">Sexta-feira</option>
-                        <option value="Sábado">Sábado</option>
-                        <option value="Domingo">Domingo</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                        <Clock size={13} className="text-sky-700" />
-                        <span>Horário</span>
-                      </label>
-                      <input
-                        type="time"
-                        value={newCellTime}
-                        onChange={(e) => setNewCellTime(e.target.value)}
-                        disabled={isCreatingCell}
-                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
-                      />
-                      <div className="flex items-center gap-1 mt-1.5 overflow-x-auto no-scrollbar">
-                        {['18:00', '19:00', '19:30', '20:00', '20:30'].map((preset) => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => setNewCellTime(preset)}
-                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-md transition cursor-pointer shrink-0 ${
-                              newCellTime === preset
-                                ? 'bg-[#052447] text-white font-bold'
-                                : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                            }`}
-                          >
-                            {preset}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </>
               )}
+
+              {createCellError && (
+                <div className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 text-rose-800 border border-rose-200 text-xs font-semibold">
+                  <AlertCircle size={15} className="text-rose-600 shrink-0" />
+                  <span>{createCellError}</span>
+                </div>
+              )}
+
+              {/* Foto da Célula (compacta, opcional) */}
+              <div className="flex items-center gap-2.5 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                <div
+                  onClick={() => !isOptimizingCellPhoto && cellPhotoInputRef.current?.click()}
+                  className="w-12 h-12 rounded-lg border-2 border-sky-300 overflow-hidden bg-white shrink-0 relative cursor-pointer flex items-center justify-center"
+                  title="Clique para adicionar uma foto da célula"
+                >
+                  {newCellPhotoPreview ? (
+                    <Image
+                      src={newCellPhotoPreview}
+                      alt="Foto da célula"
+                      width={48}
+                      height={48}
+                      className="w-full h-full object-cover"
+                      unoptimized
+                    />
+                  ) : isOptimizingCellPhoto ? (
+                    <Loader2 size={16} className="animate-spin text-sky-600" />
+                  ) : (
+                    <Camera size={18} className="text-sky-400" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-700">Foto do(a) {leafLevel?.name || 'Célula'}</p>
+                  <button
+                    type="button"
+                    onClick={() => cellPhotoInputRef.current?.click()}
+                    disabled={isOptimizingCellPhoto}
+                    className="text-[11px] text-sky-700 hover:text-sky-900 font-semibold underline underline-offset-2 cursor-pointer disabled:opacity-50"
+                  >
+                    {newCellPhotoPreview ? 'Trocar foto' : 'Adicionar foto (opcional)'}
+                  </button>
+                </div>
+                <input
+                  ref={cellPhotoInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleCellPhotoSelected}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    {setorLevel?.name || 'Setor'} <span className="text-rose-600">*</span>
+                  </label>
+                  <select
+                    value={newCellSetorId}
+                    onChange={(e) => setNewCellSetorId(e.target.value)}
+                    disabled={isCreatingCell}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer disabled:opacity-60"
+                  >
+                    <option value="">Selecione...</option>
+                    {setorOptions.map((setor) => (
+                      <option key={setor.id} value={setor.id}>
+                        {setor.name}
+                      </option>
+                    ))}
+                  </select>
+                  {setorOptions.length === 0 && (
+                    <p className="text-[11px] text-amber-600 mt-1">
+                      Nenhum {setorLevel?.name || 'Setor'} cadastrado ainda.
+                    </p>
+                  )}
+                </div>
+
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Nome do(a) {leafLevel?.name || 'Célula'} <span className="text-rose-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newCellName}
+                    onChange={(e) => setNewCellName(e.target.value)}
+                    disabled={isCreatingCell}
+                    placeholder="Ex: Betel, Ágape, Filadélfia"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                    <MapPin size={12} className="text-sky-700" />
+                    <span>Endereço</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newCellAddress}
+                    onChange={(e) => setNewCellAddress(e.target.value)}
+                    disabled={isCreatingCell}
+                    placeholder="Rua, número"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Bairro</label>
+                  <input
+                    type="text"
+                    value={newCellNeighborhood}
+                    onChange={(e) => setNewCellNeighborhood(e.target.value)}
+                    disabled={isCreatingCell}
+                    placeholder="Ex: Centro"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Dia da Reunião</label>
+                  <select
+                    value={newCellDay}
+                    onChange={(e) => setNewCellDay(e.target.value)}
+                    disabled={isCreatingCell}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer disabled:opacity-60"
+                  >
+                    <option value="Segunda-feira">Segunda-feira</option>
+                    <option value="Terça-feira">Terça-feira</option>
+                    <option value="Quarta-feira">Quarta-feira</option>
+                    <option value="Quinta-feira">Quinta-feira</option>
+                    <option value="Sexta-feira">Sexta-feira</option>
+                    <option value="Sábado">Sábado</option>
+                    <option value="Domingo">Domingo</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                    <Clock size={12} className="text-sky-700" />
+                    <span>Horário</span>
+                  </label>
+                  <input
+                    type="time"
+                    value={newCellTime}
+                    onChange={(e) => setNewCellTime(e.target.value)}
+                    disabled={isCreatingCell}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
+                  />
+                  <div className="flex items-center gap-1 mt-1.5">
+                    {['19:30', '20:00'].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setNewCellTime(preset)}
+                        className={`flex-1 text-[10px] font-semibold px-1.5 py-1 rounded-md transition cursor-pointer ${
+                          newCellTime === preset
+                            ? 'bg-[#052447] text-white font-bold'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Footer */}
-            {!createCellSuccess && (
-              <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsNewCellModalOpen(false)}
-                  disabled={isCreatingCell}
-                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 rounded-xl hover:bg-slate-200 transition cursor-pointer disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  id="btn-confirm-create-cell"
-                  disabled={isCreatingCell}
-                  onClick={handleCreateQuickCell}
-                  className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  {isCreatingCell ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>Criando...</span>
-                    </>
-                  ) : (
-                    <span>Criar {leafLevel?.name || 'Célula'}</span>
-                  )}
-                </button>
-              </div>
-            )}
+            <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsNewCellModalOpen(false)}
+                disabled={isCreatingCell}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 rounded-xl hover:bg-slate-200 transition cursor-pointer disabled:opacity-50"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                id="btn-confirm-create-cell"
+                disabled={isCreatingCell}
+                onClick={handleCreateQuickCell}
+                className="px-4 py-2 text-xs font-bold text-white bg-[#04213d] hover:bg-[#073366] rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isCreatingCell ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Criando...</span>
+                  </>
+                ) : (
+                  <span>Criar {leafLevel?.name || 'Célula'}</span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}

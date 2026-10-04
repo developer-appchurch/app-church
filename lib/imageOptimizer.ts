@@ -138,6 +138,12 @@ export const IMAGE_PRESETS = {
     maxHeight: 600,
     quality: 0.85,
   },
+  // Foto de capa de Célula / unidade organizacional (cadastro rápido)
+  UNIT_PHOTO: {
+    maxWidth: 480,
+    maxHeight: 480,
+    quality: 0.8,
+  },
 } as const;
 
 /**

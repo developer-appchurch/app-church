@@ -404,6 +404,7 @@ export interface CreateUnitInput {
   meetingTime?: string;
   latitude?: number;
   longitude?: number;
+  fotoUrl?: string;
   createdByMemberId?: string;
   unidade_criadora_id?: string | null;
   unidade_mae_id?: string | null;
