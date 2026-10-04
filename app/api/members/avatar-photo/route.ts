@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import crypto from 'crypto';
+import { hasValidAdminSession } from '@/lib/adminSession';
 
 interface AvatarPhotoRequestBody {
   action: 'upload' | 'excluir';
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body: AvatarPhotoRequestBody = await req.json();
-    const { action, memberId, login, imagePath, imageUrl } = body;
+    const { action, memberId, imagePath, imageUrl } = body;
 
     if (!memberId) {
       return NextResponse.json(
@@ -38,9 +39,8 @@ export async function POST(req: NextRequest) {
     }
 
     const isGlobalAdmin =
-      login === 'admin' ||
-      login === 'developer.appchurch@gmail.com' ||
-      memberId === 'a0000000-0000-0000-0000-000000000001';
+      // Admin do sistema só com cookie de sessão assinado (o "login" do corpo da requisição pode ser forjado)
+      hasValidAdminSession(req);
 
     let churchId = 'church-master';
     if (!isGlobalAdmin) {

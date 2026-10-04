@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import crypto from 'crypto';
+import { hasValidAdminSession } from '@/lib/adminSession';
 
 interface FeedImageRequestBody {
   action: 'upload' | 'excluir';
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     }
 
     const body: FeedImageRequestBody = await req.json();
-    const { action, memberId, login, postId, imagePath, imageUrl } = body;
+    const { action, memberId, postId, imagePath, imageUrl } = body;
 
     if (!memberId) {
       return NextResponse.json(
@@ -46,9 +47,8 @@ export async function POST(req: NextRequest) {
     const isGlobalAdmin =
       member?.login === 'admin' ||
       member?.login === 'developer.appchurch@gmail.com' ||
-      login === 'admin' ||
-      login === 'developer.appchurch@gmail.com' ||
-      memberId === 'a0000000-0000-0000-0000-000000000001';
+      // Admin do sistema só com cookie de sessão assinado (o "login" do corpo da requisição pode ser forjado)
+      hasValidAdminSession(req);
 
     if (!member && !isGlobalAdmin) {
       return NextResponse.json(

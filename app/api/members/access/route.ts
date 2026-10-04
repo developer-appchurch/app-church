@@ -5,6 +5,7 @@ import { createAuthUserForMember, getSyntheticMemberEmail } from '@/lib/supabase
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/config';
 import bcrypt from 'bcryptjs';
+import { hasValidAdminSession } from '@/lib/adminSession';
 
 /**
  * GET /api/members/access?churchId=...&search=...
@@ -159,6 +160,9 @@ export async function POST(req: NextRequest) {
       if (!cleanLogin) {
         return NextResponse.json({ error: 'Login inválido.' }, { status: 400 });
       }
+      if (RESERVED_LOGINS.includes(cleanLogin)) {
+        return NextResponse.json({ error: 'Este login já está em uso. Por favor, escolha outro login.' }, { status: 409 });
+      }
       const cleanPass = (password || '123456').trim();
       if (cleanPass.length < 6) {
         return NextResponse.json({ error: 'A senha deve ter no mínimo 6 caracteres.' }, { status: 400 });
@@ -254,7 +258,7 @@ export async function POST(req: NextRequest) {
 // do app autentica primeiro no Auth (login@membros.appchurch.local).
 // =============================================================================
 
-const RESERVED_LOGINS = ['admin', 'administrator', 'root', 'sistema', 'suporte'];
+const RESERVED_LOGINS = ['admin', 'administrador', 'administrator', 'root', 'sistema', 'suporte'];
 const MIN_PASSWORD_LENGTH = 6;
 
 /** Escapa curingas do ILIKE (o "_" é permitido em login e não pode virar curinga). */
@@ -271,7 +275,7 @@ function sanitizeLogin(raw: unknown): string {
 
 /** Resolve o membro logado que está fazendo a requisição e o seu nível hierárquico. */
 async function resolveRequester(req: NextRequest, supabase: any) {
-  if (req.cookies.get('appchurch_admin_session')?.value === 'true') {
+  if (hasValidAdminSession(req)) {
     return { isSystemAdmin: true, churchId: null as string | null, level: 99, id: '', canEditMembers: true };
   }
 

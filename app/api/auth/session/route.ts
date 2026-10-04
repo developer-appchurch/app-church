@@ -3,13 +3,14 @@ import { createServerClient } from '@supabase/ssr';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseUrl, getSupabaseAnonKey } from '@/lib/supabase/config';
 import { UserProfile } from '@/types';
+import { hasValidAdminSession } from '@/lib/adminSession';
 
 export async function GET(req: NextRequest) {
   try {
     const cookiesToSetList: { name: string; value: string; options?: any }[] = [];
 
-    // Checa cookie administrativo de emergência
-    if (req.cookies.get('appchurch_admin_session')?.value === 'true') {
+    // Sessão do administrador: só vale com cookie assinado e dentro da validade
+    if (hasValidAdminSession(req)) {
       const adminUser: UserProfile = {
         id: 'a0000000-0000-0000-0000-000000000001',
         churchId: '6ddefcae-2fec-41ba-b187-bb290b05beee',
