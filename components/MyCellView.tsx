@@ -42,6 +42,9 @@ import {
   Phone,
   RotateCcw,
   Copy,
+  Eye,
+  EyeOff,
+  KeyRound,
 } from 'lucide-react';
 
 interface MyCellViewProps {
@@ -61,6 +64,13 @@ interface MyCellViewProps {
   onUpdateMember?: (updatedMember: CellMember, previousCellId?: string) => Promise<void> | void;
   onUpdateCell?: (updatedCell: CellGroup) => Promise<void> | void;
 }
+
+/** Mesmos caracteres aceitos pelo servidor (e pelo e-mail sintético do Supabase Auth). */
+const sanitizeLoginInput = (value: string) => value.toLowerCase().replace(/[^a-z0-9._-]/g, '');
+const MIN_PASSWORD_LENGTH = 6;
+const MIN_LOGIN_LENGTH = 3;
+
+type LoginCheckStatus = 'idle' | 'checking' | 'available' | 'taken' | 'invalid' | 'unchanged';
 
 /**
  * Gera uma variação de login para alternar sugestões
@@ -225,6 +235,20 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [isAssigningLogin, setIsAssigningLogin] = useState(false);
   const [assignLoginError, setAssignLoginError] = useState('');
   const [assignLoginSuccess, setAssignLoginSuccess] = useState('');
+
+  // Editar Login e Senha de um membro que já tem acesso (só aparece ao clicar em "Editar login e senha")
+  const [isEditCredentialsOpen, setIsEditCredentialsOpen] = useState(false);
+  const [editCredLogin, setEditCredLogin] = useState('');
+  const [editCredPassword, setEditCredPassword] = useState('');
+  const [showEditCredPassword, setShowEditCredPassword] = useState(false);
+  const [isSavingCredentials, setIsSavingCredentials] = useState(false);
+  const [editCredError, setEditCredError] = useState('');
+  const [editCredSuccess, setEditCredSuccess] = useState('');
+
+  // Validação em tempo real do login digitado (vale para "Atribuir" e para "Editar")
+  const [credLoginStatus, setCredLoginStatus] = useState<LoginCheckStatus>('idle');
+  const [credLoginMessage, setCredLoginMessage] = useState('');
+  const [credLoginSuggestion, setCredLoginSuggestion] = useState('');
 
   // Resetar Senha de um membro que já tem login (membro esqueceu a senha), dentro da edição
   const [isResettingPassword, setIsResettingPassword] = useState(false);
@@ -1305,6 +1329,200 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     );
   }, [cells, cell]);
 
+  const resetEditCredentialsState = () => {
+    setIsEditCredentialsOpen(false);
+    setEditCredLogin('');
+    setEditCredPassword('');
+    setShowEditCredPassword(false);
+    setEditCredError('');
+    setEditCredSuccess('');
+    setCredLoginStatus('idle');
+    setCredLoginMessage('');
+    setCredLoginSuggestion('');
+  };
+
+  // Login que está sendo digitado no painel aberto ("Editar" ou "Atribuir")
+  const credLoginTarget = isEditCredentialsOpen
+    ? editCredLogin
+    : isAssignLoginOpen
+      ? assignLoginValue
+      : '';
+
+  // Valida em tempo real se o login está em uso (com pequena espera para não consultar a cada tecla)
+  useEffect(() => {
+    if (!editingMember || (!isEditCredentialsOpen && !isAssignLoginOpen)) {
+      setCredLoginStatus('idle');
+      setCredLoginMessage('');
+      setCredLoginSuggestion('');
+      return;
+    }
+
+    const candidate = credLoginTarget.trim().toLowerCase();
+    const currentLogin = (editingMember.login || '').trim().toLowerCase();
+    setCredLoginSuggestion('');
+
+    if (!candidate) {
+      setCredLoginStatus('idle');
+      setCredLoginMessage('');
+      return;
+    }
+    if (currentLogin && candidate === currentLogin) {
+      setCredLoginStatus('unchanged');
+      setCredLoginMessage('Este é o login atual do membro.');
+      return;
+    }
+    if (candidate.length < MIN_LOGIN_LENGTH) {
+      setCredLoginStatus('invalid');
+      setCredLoginMessage(`O login deve ter pelo menos ${MIN_LOGIN_LENGTH} caracteres.`);
+      return;
+    }
+
+    let cancelled = false;
+    setCredLoginStatus('checking');
+    setCredLoginMessage('Verificando disponibilidade...');
+    const timer = setTimeout(async () => {
+      try {
+        const check = await AppChurchService.isLoginAvailable(candidate, editingMember.id);
+        if (cancelled) return;
+        if (check.available) {
+          setCredLoginStatus('available');
+          setCredLoginMessage('Login disponível.');
+          return;
+        }
+        setCredLoginStatus('taken');
+        setCredLoginMessage(check.error || 'Este login já está em uso. Por favor, escolha outro login.');
+        const suggestion = await AppChurchService.suggestAvailableLogin(candidate, editingMember.id).catch(
+          () => null
+        );
+        if (!cancelled && suggestion) setCredLoginSuggestion(suggestion);
+      } catch {
+        if (cancelled) return;
+        setCredLoginStatus('idle');
+        setCredLoginMessage('Não foi possível verificar agora — o login será validado ao salvar.');
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [credLoginTarget, isEditCredentialsOpen, isAssignLoginOpen, editingMember]);
+
+  const handleOpenEditCredentials = () => {
+    if (!editingMember) return;
+    setResetPasswordError('');
+    setResetPasswordResult('');
+    setEditCredError('');
+    setEditCredSuccess('');
+    setEditCredLogin(editingMember.login || '');
+    setEditCredPassword('');
+    setShowEditCredPassword(false);
+    setIsEditCredentialsOpen(true);
+  };
+
+  const handleSaveCredentials = async () => {
+    if (!editingMember) return;
+    setEditCredError('');
+    setEditCredSuccess('');
+
+    const cleanLogin = sanitizeLoginInput(editCredLogin.trim());
+    const currentLogin = (editingMember.login || '').trim().toLowerCase();
+    const loginChanged = Boolean(cleanLogin) && cleanLogin !== currentLogin;
+    const cleanPass = editCredPassword.trim();
+
+    if (!cleanLogin) {
+      setEditCredError('Informe o login do membro.');
+      return;
+    }
+    if (loginChanged && cleanLogin.length < MIN_LOGIN_LENGTH) {
+      setEditCredError(`O login deve ter pelo menos ${MIN_LOGIN_LENGTH} caracteres.`);
+      return;
+    }
+    if (cleanPass && cleanPass.length < MIN_PASSWORD_LENGTH) {
+      setEditCredError(`A senha deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.`);
+      return;
+    }
+    if (!loginChanged && !cleanPass) {
+      setEditCredError('Altere o login e/ou informe uma nova senha para salvar.');
+      return;
+    }
+    if (loginChanged && credLoginStatus === 'taken') {
+      setEditCredError(credLoginMessage || 'Este login já está em uso. Por favor, escolha outro login.');
+      return;
+    }
+
+    setIsSavingCredentials(true);
+    try {
+      // Revalida no momento de salvar (o servidor também valida)
+      if (loginChanged) {
+        const availability = await AppChurchService.isLoginAvailable(cleanLogin, editingMember.id);
+        if (!availability.available) {
+          setEditCredError(availability.error || 'Este login já está em uso. Por favor, escolha outro login.');
+          setCredLoginStatus('taken');
+          return;
+        }
+      }
+
+      const result = await AppChurchService.updateMemberCredentials({
+        memberId: editingMember.id,
+        churchId: editingMember.churchId || cell.churchId,
+        ...(loginChanged ? { login: cleanLogin } : {}),
+        ...(cleanPass ? { password: cleanPass } : {}),
+      });
+
+      const updatedMember = { ...editingMember, login: result.login };
+      setEditingMember(updatedMember);
+      setIsEditCredentialsOpen(false);
+      setEditCredPassword('');
+      setEditCredLogin('');
+
+      const parts: string[] = [];
+      if (result.loginChanged) parts.push(`login alterado para "@${result.login}"`);
+      if (result.passwordChanged) parts.push('senha alterada');
+      setEditCredSuccess(
+        `${parts.join(' e ').replace(/^./, (c) => c.toUpperCase())}. Informe os novos dados ao membro.`
+      );
+
+      if (result.loginChanged && onUpdateMember) {
+        await onUpdateMember(updatedMember, cell.id);
+      }
+    } catch (err: any) {
+      setEditCredError(err?.message || 'Falha ao atualizar login e senha.');
+    } finally {
+      setIsSavingCredentials(false);
+    }
+  };
+
+  /** Linha de status da validação de login em tempo real + atalho para usar a sugestão. */
+  const renderCredLoginStatus = (applySuggestion: (login: string) => void) => {
+    if (credLoginStatus === 'idle' && !credLoginMessage) return null;
+    const color =
+      credLoginStatus === 'available'
+        ? 'text-emerald-600'
+        : credLoginStatus === 'taken' || credLoginStatus === 'invalid'
+          ? 'text-red-600'
+          : 'text-slate-500';
+    return (
+      <div className="mt-1 space-y-1">
+        <p className={`text-[11px] font-semibold flex items-center gap-1 ${color}`}>
+          {credLoginStatus === 'checking' && <Loader2 className="w-3 h-3 animate-spin" />}
+          {credLoginStatus === 'available' && <CheckCircle2 className="w-3 h-3" />}
+          {(credLoginStatus === 'taken' || credLoginStatus === 'invalid') && <AlertCircle className="w-3 h-3" />}
+          {credLoginMessage}
+        </p>
+        {credLoginStatus === 'taken' && credLoginSuggestion && (
+          <button
+            type="button"
+            onClick={() => applySuggestion(credLoginSuggestion)}
+            className="text-[11px] font-bold text-sky-700 hover:underline"
+          >
+            Usar sugestão disponível: @{credLoginSuggestion}
+          </button>
+        )}
+      </div>
+    );
+  };
+
   const handleOpenEditMemberModal = (member: CellMember) => {
     setEditingMember(member);
     setEditMemberName(member.name || '');
@@ -1342,6 +1560,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setAssignLoginSuccess('');
     setResetPasswordError('');
     setResetPasswordResult('');
+    resetEditCredentialsState();
   };
 
   const handleCloseEditMemberModal = () => {
@@ -1361,10 +1580,12 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setAssignLoginSuccess('');
     setResetPasswordError('');
     setResetPasswordResult('');
+    resetEditCredentialsState();
   };
 
   const handleResetMemberPassword = async () => {
     if (!editingMember) return;
+    resetEditCredentialsState();
     setResetPasswordError('');
     setIsResettingPassword(true);
     try {
@@ -1384,15 +1605,23 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     if (!editingMember) return;
     setAssignLoginError('');
 
-    const cleanLogin = assignLoginValue.trim().toLowerCase().replace(/[^a-z0-9.]/g, '');
+    const cleanLogin = sanitizeLoginInput(assignLoginValue.trim());
     if (!cleanLogin) {
       setAssignLoginError('Informe um login para o membro.');
       return;
     }
+    if (cleanLogin.length < MIN_LOGIN_LENGTH) {
+      setAssignLoginError(`O login deve ter pelo menos ${MIN_LOGIN_LENGTH} caracteres.`);
+      return;
+    }
+    if (credLoginStatus === 'taken') {
+      setAssignLoginError(credLoginMessage || 'Este login já está em uso. Por favor, escolha outro login.');
+      return;
+    }
 
     const cleanPass = assignPasswordValue.trim();
-    if (cleanPass && cleanPass.length < 6) {
-      setAssignLoginError('A senha deve ter no mínimo 6 caracteres.');
+    if (cleanPass && cleanPass.length < MIN_PASSWORD_LENGTH) {
+      setAssignLoginError(`A senha deve ter no mínimo ${MIN_PASSWORD_LENGTH} caracteres.`);
       return;
     }
 
@@ -2822,12 +3051,12 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                           <input
                             type="text"
                             value={assignLoginValue}
-                            onChange={(e) =>
-                              setAssignLoginValue(e.target.value.toLowerCase().replace(/[^a-z0-9.]/g, ''))
-                            }
+                            onChange={(e) => setAssignLoginValue(sanitizeLoginInput(e.target.value))}
                             placeholder="login.membro"
+                            autoComplete="off"
                             className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
                           />
+                          {renderCredLoginStatus((login) => setAssignLoginValue(login))}
                         </div>
                         <div>
                           <label className="block text-[11px] font-semibold text-slate-700 mb-1">Senha:</label>
@@ -2848,7 +3077,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       )}
                       <button
                         type="button"
-                        disabled={isAssigningLogin}
+                        disabled={isAssigningLogin || credLoginStatus === 'checking' || credLoginStatus === 'taken'}
                         onClick={handleAssignLogin}
                         className="w-full text-xs font-bold text-white bg-[#052447] rounded-xl py-2 disabled:opacity-60"
                       >
@@ -2868,6 +3097,18 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       <User className="w-3.5 h-3.5 text-[#052447] shrink-0" />
                       <span className="truncate">Login: @{editingMember.login}</span>
                     </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                    {!isEditingMemberSuperior && !isEditCredentialsOpen && (
+                      <button
+                        type="button"
+                        onClick={handleOpenEditCredentials}
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-[#052447] hover:bg-sky-50 transition shrink-0"
+                        title="Alterar o login e/ou definir uma nova senha para este membro"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                        Editar login e senha
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={isResettingPassword}
@@ -2882,7 +3123,91 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       )}
                       Resetar Senha
                     </button>
+                    </div>
                   </div>
+
+                  {isEditCredentialsOpen && (
+                    <div className="pt-2 border-t border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <KeyRound className="w-3.5 h-3.5 text-[#052447]" />
+                          Editar login e senha
+                        </span>
+                        <button
+                          type="button"
+                          onClick={resetEditCredentialsState}
+                          className="text-slate-400 hover:text-slate-600"
+                          title="Cancelar"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">Login:</label>
+                          <input
+                            type="text"
+                            value={editCredLogin}
+                            onChange={(e) => setEditCredLogin(sanitizeLoginInput(e.target.value))}
+                            placeholder="login.membro"
+                            autoComplete="off"
+                            className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                          />
+                          {renderCredLoginStatus((login) => setEditCredLogin(login))}
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nova senha:</label>
+                          <div className="relative">
+                            <input
+                              type={showEditCredPassword ? 'text' : 'password'}
+                              value={editCredPassword}
+                              onChange={(e) => setEditCredPassword(e.target.value)}
+                              placeholder={`Mín. ${MIN_PASSWORD_LENGTH} caracteres`}
+                              autoComplete="new-password"
+                              className="w-full text-xs sm:text-sm pl-3 pr-9 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowEditCredPassword((v) => !v)}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                              title={showEditCredPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                            >
+                              {showEditCredPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                            </button>
+                          </div>
+                          {editCredPassword.trim().length > 0 &&
+                          editCredPassword.trim().length < MIN_PASSWORD_LENGTH ? (
+                            <p className="mt-1 text-[11px] font-semibold text-red-600">
+                              Faltam {MIN_PASSWORD_LENGTH - editCredPassword.trim().length} caractere(s) — mínimo de{' '}
+                              {MIN_PASSWORD_LENGTH}.
+                            </p>
+                          ) : (
+                            <p className="mt-1 text-[11px] text-slate-500">Deixe em branco para manter a senha atual.</p>
+                          )}
+                        </div>
+                      </div>
+                      {editCredError && <p className="text-[11px] text-red-600 font-semibold">{editCredError}</p>}
+                      <button
+                        type="button"
+                        disabled={
+                          isSavingCredentials ||
+                          credLoginStatus === 'checking' ||
+                          credLoginStatus === 'taken' ||
+                          credLoginStatus === 'invalid' ||
+                          (editCredPassword.trim().length > 0 &&
+                            editCredPassword.trim().length < MIN_PASSWORD_LENGTH)
+                        }
+                        onClick={handleSaveCredentials}
+                        className="w-full text-xs font-bold text-white bg-[#052447] rounded-xl py-2 disabled:opacity-60"
+                      >
+                        {isSavingCredentials ? 'Salvando...' : 'Salvar login e senha'}
+                      </button>
+                    </div>
+                  )}
+
+                  {editCredSuccess && (
+                    <p className="text-[11px] text-emerald-600 font-semibold">{editCredSuccess}</p>
+                  )}
 
                   {resetPasswordError && (
                     <p className="text-[11px] text-red-600 font-semibold">{resetPasswordError}</p>
