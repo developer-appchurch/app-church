@@ -320,10 +320,11 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
     try {
       // Otimização antecipada local para preview rápido e validação EXIF em formato WebP
+      // optimizeImageToWebP já recorre a JPEG otimizado quando o navegador não
+      // sabe codificar WebP via Canvas (comum em iOS Safari mais antigo e alguns
+      // WebViews) — qualquer um dos dois formatos é válido aqui, e o upload para
+      // o Storage (uploadFeedImage) já trata os dois corretamente.
       const optimized = await optimizeImageToWebP(file, IMAGE_PRESETS.FEED_POST);
-      if (!optimized.dataUrl.startsWith('data:image/webp')) {
-        throw new Error('Falha ao converter para o formato WebP.');
-      }
       setSelectedFile(file);
       setPreviewDataUrl(optimized.dataUrl);
       setImageMeta({

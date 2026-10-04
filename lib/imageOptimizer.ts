@@ -104,10 +104,14 @@ export function validateImageForDatabase(
   }
 
   if (trimmed.startsWith('data:')) {
-    if (!trimmed.startsWith('data:image/webp')) {
+    // Aceita WebP (preferencial) e o fallback JPEG que optimizeImageToWebP já usa
+    // quando o navegador não sabe codificar WebP via Canvas (comum em iOS Safari
+    // mais antigo e alguns WebViews) — nesses casos a imagem já foi redimensionada
+    // e otimizada normalmente, só não está em WebP, então não há motivo para rejeitar.
+    if (!trimmed.startsWith('data:image/webp') && !trimmed.startsWith('data:image/jpeg')) {
       return {
         isValid: false,
-        error: `${fieldName} deve estar obrigatoriamente convertida no formato WebP (data:image/webp). Formato atual não permitido no banco.`,
+        error: `${fieldName} deve estar em WebP ou JPEG otimizado. Formato atual não permitido no banco.`,
       };
     }
     return { isValid: true };

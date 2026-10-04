@@ -149,10 +149,14 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Aceita WebP (preferencial) e o fallback JPEG que optimizeImageToWebP usa
+    // quando o navegador do cliente não sabe codificar WebP via Canvas (comum em
+    // iOS Safari mais antigo e alguns WebViews) — a imagem já foi otimizada, só
+    // não está em WebP, então não há motivo para rejeitar.
     if (avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim().startsWith('data:')) {
-      if (!avatarUrl.trim().startsWith('data:image/webp')) {
+      if (!avatarUrl.trim().startsWith('data:image/webp') && !avatarUrl.trim().startsWith('data:image/jpeg')) {
         return NextResponse.json(
-          { error: 'A foto do membro deve estar obrigatoriamente convertida no formato WebP.' },
+          { error: 'A foto do membro deve estar em WebP ou JPEG otimizado.' },
           { status: 400 }
         );
       }

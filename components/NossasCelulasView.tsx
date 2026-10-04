@@ -327,10 +327,10 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
 
     setIsOptimizingPhoto(true);
     try {
+      // optimizeImageToWebP já recorre a JPEG otimizado quando o navegador não
+      // sabe codificar WebP via Canvas (comum em iOS Safari mais antigo e alguns
+      // WebViews) — qualquer um dos dois formatos é válido aqui.
       const result = await optimizeImageToWebP(file, IMAGE_PRESETS.FEED_POST);
-      if (!result.dataUrl.startsWith('data:image/webp')) {
-        throw new Error('A foto não pôde ser convertida para WebP.');
-      }
       setEditFotoUrl(result.dataUrl);
       setPhotoStats({
         size: formatFileSize(result.optimizedSize),

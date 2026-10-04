@@ -259,10 +259,10 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
 
     setIsOptimizingLogo(true);
     try {
+      // optimizeImageToWebP já recorre a JPEG otimizado quando o navegador não
+      // sabe codificar WebP via Canvas (comum em iOS Safari mais antigo e alguns
+      // WebViews) — qualquer um dos dois formatos é válido aqui.
       const optimized = await optimizeImageToWebP(file, IMAGE_PRESETS.LOGO);
-      if (!optimized.dataUrl.startsWith('data:image/webp')) {
-        throw new Error('A imagem não pôde ser convertida para WebP.');
-      }
       setLogoPreview(optimized.dataUrl);
       setLogoStats({
         size: formatFileSize(optimized.optimizedSize),

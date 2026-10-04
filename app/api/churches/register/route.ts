@@ -51,10 +51,14 @@ export async function POST(req: NextRequest) {
     const cleanPastorLogin = input.pastorLogin.trim().toLowerCase();
     const cleanPastorPass = input.pastorPassword?.trim() || '123456';
 
+    // Aceita WebP (preferencial) e o fallback JPEG que optimizeImageToWebP usa
+    // quando o navegador do cliente não sabe codificar WebP via Canvas (comum em
+    // iOS Safari mais antigo e alguns WebViews). Na prática o logo chega aqui
+    // como URL do Storage (https), então este bloco é só uma rede de segurança.
     if (input.logoUrl && input.logoUrl.trim().startsWith('data:')) {
-      if (!input.logoUrl.trim().startsWith('data:image/webp')) {
+      if (!input.logoUrl.trim().startsWith('data:image/webp') && !input.logoUrl.trim().startsWith('data:image/jpeg')) {
         return NextResponse.json(
-          { error: 'O logotipo da igreja deve estar obrigatoriamente convertido no formato WebP.' },
+          { error: 'O logotipo da igreja deve estar em WebP ou JPEG otimizado.' },
           { status: 400 }
         );
       }
