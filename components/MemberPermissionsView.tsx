@@ -15,7 +15,6 @@ import {
   Lock,
   Unlock,
   Sliders,
-  ArrowLeft,
   Sparkles,
 } from 'lucide-react';
 import { UserProfile, MemberEffectivePermission } from '@/types';
@@ -336,37 +335,24 @@ export const MemberPermissionsView: React.FC<MemberPermissionsViewProps> = ({
 
       {/* Header com Navegação */}
       <div className="max-w-7xl mx-auto mb-3 sm:mb-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4 bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs">
-          <div className="flex items-center gap-2.5">
-            {onBack && (
-              <button
-                type="button"
-                onClick={onBack}
-                className="p-1.5 sm:p-2 -ml-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg sm:rounded-xl transition cursor-pointer"
-                title="Voltar"
-                aria-label="Voltar"
-              >
-                <ArrowLeft size={18} />
-              </button>
-            )}
+        <div className="bg-[#04213d] text-white rounded-xl sm:rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
+              <ShieldCheck size={24} />
+            </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-700 shrink-0">
-                  <ShieldCheck size={14} className="sm:w-[18px] sm:h-[18px]" />
-                </div>
-                <h1 className="text-base sm:text-xl lg:text-2xl font-black text-slate-900 tracking-tight truncate">
-                  Gestão de Permissões
-                </h1>
-              </div>
-              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 truncate max-w-xl">
+              <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight truncate">
+                Gestão de Permissões
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-300 mt-0.5 truncate">
                 Conceda ou revogue permissões individuais com prioridade sobre a função.
               </p>
             </div>
           </div>
 
           <div className="hidden sm:flex items-center gap-2 self-start sm:self-center">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-50 text-sky-800 border border-sky-200">
-              <Sparkles size={12} className="text-sky-600" />
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-sky-500/20 text-sky-200 border border-sky-400/30">
+              <Sparkles size={12} className="text-sky-300" />
               Prioridade: Indivíduo &gt; Papel
             </span>
           </div>
