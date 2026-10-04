@@ -14,7 +14,6 @@ import {
   YAxis,
 } from 'recharts';
 import {
-  ArrowLeft,
   Award,
   BarChart3,
   Flame,
@@ -193,17 +192,6 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
     <div className="min-h-screen bg-slate-50/70 p-2 sm:p-5 lg:p-6 pb-20">
       <div className="max-w-6xl mx-auto mb-3 sm:mb-5">
         <div className="bg-[#04213d] text-white rounded-xl sm:rounded-2xl p-4 sm:p-5 shadow-sm border border-slate-800 flex items-center gap-3.5">
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="p-1.5 sm:p-2 -ml-1 text-slate-300 hover:text-white hover:bg-white/10 rounded-lg sm:rounded-xl transition cursor-pointer shrink-0"
-              title="Voltar"
-              aria-label="Voltar"
-            >
-              <ArrowLeft size={18} />
-            </button>
-          )}
           <div className="w-12 h-12 rounded-xl bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0">
             <BarChart3 size={24} />
           </div>
