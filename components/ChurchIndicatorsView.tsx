@@ -159,19 +159,24 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
   const scopeIsReady =
     scopeTab === 'church' || (scopeTab === 'area' && !!selectedAreaId) || (scopeTab === 'sector' && !!selectedSectorId);
 
+  // O comparativo entre unidades só é calculado no banco quando a aba "Comparativo"
+  // está realmente ativa — antes era pedido em toda carga da tela (mesmo na aba
+  // "Gráficos", que nunca o exibe), dobrando o trabalho sem necessidade.
+  const effectiveCompareLevelId = viewMode === 'compare' ? compareLevelId : undefined;
+
   const loadIndicators = useCallback(async () => {
     if (!churchId || !scopeIsReady) return;
     setIsLoadingIndicators(true);
     setIndicatorsError('');
     try {
-      const data = await AppChurchService.getLeadershipTrackIndicators(churchId, effectiveUnitId, compareLevelId);
+      const data = await AppChurchService.getLeadershipTrackIndicators(churchId, effectiveUnitId, effectiveCompareLevelId);
       setIndicators(data);
     } catch (err: any) {
       setIndicatorsError(err?.message || 'Falha ao calcular os indicadores.');
     } finally {
       setIsLoadingIndicators(false);
     }
-  }, [churchId, scopeIsReady, effectiveUnitId, compareLevelId]);
+  }, [churchId, scopeIsReady, effectiveUnitId, effectiveCompareLevelId]);
 
   useEffect(() => {
     if (!isLoadingBase) loadIndicators();

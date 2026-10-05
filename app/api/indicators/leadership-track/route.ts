@@ -42,33 +42,46 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    // Nome da unidade de escopo, só para exibição — consulta pontual por id
-    // (índice de chave primária, custo desprezível).
-    let scopeUnitName: string | undefined;
-    if (unitId) {
-      const { data: unitRow, error: unitErr } = await supabase
-        .from('unidades')
-        .select('id, nome')
-        .eq('id', unitId)
-        .eq('igreja_id', churchId)
-        .maybeSingle();
+    // As três consultas abaixo (nome da unidade de escopo, resumo agregado e
+    // comparativo) são independentes entre si — nenhuma usa o resultado da
+    // outra — mas antes eram feitas em série (await um atrás do outro), o que
+    // soma 3 idas e vindas à rede em vez de 1. Rodando em paralelo com
+    // Promise.all, o tempo total passa a ser o da consulta mais lenta, não a
+    // soma de todas.
+    const unitNamePromise = unitId
+      ? supabase.from('unidades').select('id, nome').eq('id', unitId).eq('igreja_id', churchId).maybeSingle()
+      : Promise.resolve({ data: null, error: null } as const);
 
-      if (unitErr) {
-        return NextResponse.json({ error: unitErr.message }, { status: 500 });
-      }
-      if (!unitRow) {
-        return NextResponse.json({ error: 'Unidade não encontrada nesta igreja.' }, { status: 404 });
-      }
-      scopeUnitName = unitRow.nome;
-    }
-
-    // 1. Resumo agregado (total de membros, conclusão média, distribuição e
-    // estatísticas por etapa) — calculado inteiramente no banco.
-    const { data: resumo, error: resumoErr } = await supabase.rpc('indicators_trilho_resumo', {
+    const resumoPromise = supabase.rpc('indicators_trilho_resumo', {
       p_igreja_id: churchId,
       p_unidade_id: unitId,
     });
 
+    const comparativoPromise = compareLevelId
+      ? supabase.rpc('indicators_trilho_comparativo', {
+          p_igreja_id: churchId,
+          p_nivel_id: compareLevelId,
+          p_unidade_pai_id: unitId,
+        })
+      : Promise.resolve({ data: [], error: null } as const);
+
+    const [unitNameRes, resumoRes, comparativoRes] = await Promise.all([
+      unitNamePromise,
+      resumoPromise,
+      comparativoPromise,
+    ]);
+
+    if (unitId) {
+      if (unitNameRes.error) {
+        return NextResponse.json({ error: unitNameRes.error.message }, { status: 500 });
+      }
+      if (!unitNameRes.data) {
+        return NextResponse.json({ error: 'Unidade não encontrada nesta igreja.' }, { status: 404 });
+      }
+    }
+    const scopeUnitName: string | undefined = (unitNameRes.data as any)?.nome;
+
+    const { data: resumo, error: resumoErr } = resumoRes;
     if (resumoErr) {
       return NextResponse.json({ error: resumoErr.message }, { status: 500 });
     }
@@ -90,16 +103,10 @@ export async function GET(req: NextRequest) {
       if (!worstStep || s.completionPercent < worstStep.completionPercent) worstStep = s;
     });
 
-    // 2. Comparativo (opcional) — também calculado no banco, reaproveitando
-    // os mesmos critérios de escopo e etapas do resumo acima.
+    // Comparativo (opcional, já buscado em paralelo acima junto com o resumo)
     let compareUnits: { id: string; name: string; totalMembers: number; avgCompletionPercent: number }[] = [];
     if (compareLevelId) {
-      const { data: comparativo, error: compErr } = await supabase.rpc('indicators_trilho_comparativo', {
-        p_igreja_id: churchId,
-        p_nivel_id: compareLevelId,
-        p_unidade_pai_id: unitId,
-      });
-
+      const { data: comparativo, error: compErr } = comparativoRes;
       if (compErr) {
         return NextResponse.json({ error: compErr.message }, { status: 500 });
       }
