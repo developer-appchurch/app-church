@@ -52,7 +52,7 @@ interface MyCellViewProps {
   currentUser?: UserProfile;
   cells?: CellGroup[];
   onSelectCell?: (cellId: string) => void;
-  onOpenLeadershipTrack: (member: CellMember) => void;
+  onOpenLeadershipTrack: (member: CellMember, canEdit: boolean) => void;
   onAddMember: (newMember: Omit<CellMember, 'id'>) => Promise<void> | void;
   onUpdateAttendance: (
     memberId: string,
@@ -2187,7 +2187,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     <div className="w-9 sm:w-14 text-center shrink-0 flex items-center justify-center">
                       <button
                         type="button"
-                        onClick={() => onOpenLeadershipTrack(member)}
+                        onClick={() => onOpenLeadershipTrack(member, canEditCurrentCell)}
                         className="p-0.5 sm:p-1 rounded-lg text-[#0e3056] hover:bg-sky-50 hover:text-sky-700 active:scale-95 transition-all group cursor-pointer"
                         title={`Ver Trilho de Liderança de ${member.name}`}
                         aria-label={`Trilho de liderança de ${member.name}`}

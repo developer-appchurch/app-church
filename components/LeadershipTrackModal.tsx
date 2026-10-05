@@ -29,6 +29,11 @@ interface LeadershipTrackModalProps {
   cellName: string;
   currentUser?: UserProfile | null;
   userHierarchyLevel?: number;
+  // Permissão já resolvida pela tela de origem, considerando a célula ESPECÍFICA deste membro
+  // (líder direto da célula, líder superior na cadeia de cobertura, ou Pastor/Admin). Quando
+  // fornecida, tem prioridade sobre o cálculo interno de nível hierárquico global, que não sabe
+  // se o usuário logado realmente lidera a célula deste membro.
+  canEditOverride?: boolean;
   validatorName?: string;
   onClose: () => void;
   onSaveProgress?: (memberId: string, progress: LeadershipTrackProgress) => void;
@@ -41,6 +46,7 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
   cellName,
   currentUser,
   userHierarchyLevel: propHierarchyLevel,
+  canEditOverride,
   validatorName,
   onClose,
   onSaveProgress,
@@ -132,8 +138,12 @@ export const LeadershipTrackModal: React.FC<LeadershipTrackModalProps> = ({
     return 1;
   }, [currentUser, propHierarchyLevel, availableRoles]);
 
-  // Apenas níveis hierárquicos superiores a 1 têm permissão de concluir etapas e salvar
-  const canEdit = userHierarchyLevel > 1;
+  // Apenas o líder desta célula específica, seus líderes superiores na cadeia de cobertura, ou
+  // Pastor/Administrador têm permissão de concluir etapas e salvar — nunca um nível hierárquico
+  // global desacoplado da célula do membro (um Líder de Célula de OUTRA célula não pode validar
+  // aqui, por exemplo). Quando a tela de origem não informa essa permissão explicitamente (uso
+  // legado), cai de volta no nível hierárquico global como aproximação.
+  const canEdit = canEditOverride !== undefined ? canEditOverride : userHierarchyLevel > 1;
 
   // Carrega as etapas vinculadas à igreja específica e o status real do membro
   useEffect(() => {

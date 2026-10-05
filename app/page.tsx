@@ -136,6 +136,9 @@ export default function Home() {
 
   // Modal State for Member Leadership Track
   const [selectedMemberForTrack, setSelectedMemberForTrack] = useState<CellMember | null>(null);
+  // Permissão calculada pela tela de origem (MyCellView/LeadershipOverviewView), que tem acesso
+  // ao contexto de liderança da célula do membro — o modal não recalcula isso por conta própria.
+  const [selectedMemberForTrackCanEdit, setSelectedMemberForTrackCanEdit] = useState(false);
 
   // Sync state & connection feedback
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -819,7 +822,10 @@ export default function Home() {
               currentUser={user}
               cells={effectiveCells}
               onSelectCell={setSelectedCellId}
-              onOpenLeadershipTrack={(member) => setSelectedMemberForTrack(member)}
+              onOpenLeadershipTrack={(member, canEdit) => {
+                setSelectedMemberForTrack(member);
+                setSelectedMemberForTrackCanEdit(canEdit);
+              }}
               onAddMember={handleAddMember}
               onUpdateAttendance={handleUpdateAttendance}
               onUpdateMember={handleUpdateMember}
@@ -858,7 +864,10 @@ export default function Home() {
               currentUser={user}
               cells={effectiveCells}
               onSelectCell={setSelectedCellId}
-              onOpenMemberTrack={(member) => setSelectedMemberForTrack(member)}
+              onOpenMemberTrack={(member, canEdit) => {
+                setSelectedMemberForTrack(member);
+                setSelectedMemberForTrackCanEdit(canEdit);
+              }}
             />
           )}
 
@@ -956,6 +965,7 @@ export default function Home() {
           churchName={targetChurchContext?.name || user?.churchName}
           cellName={currentCell?.name || 'Célula'}
           currentUser={user}
+          canEditOverride={selectedMemberForTrackCanEdit}
           validatorName={user?.name || user?.role || 'Líder Responsável'}
           onClose={() => setSelectedMemberForTrack(null)}
           onSaveProgress={handleSaveLeadershipProgress}

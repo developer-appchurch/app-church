@@ -34,7 +34,7 @@ interface LeadershipOverviewViewProps {
   currentUser?: UserProfile | null;
   cells?: CellGroup[];
   onSelectCell?: (cellId: string) => void;
-  onOpenMemberTrack: (member: CellMember) => void;
+  onOpenMemberTrack: (member: CellMember, canEdit: boolean) => void;
 }
 
 export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
@@ -117,6 +117,61 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
       !!currentUser.isSystemAdmin
     );
   }, [currentUser]);
+
+  // Permissão de VALIDAÇÃO do trilho (diferente de isPrivilegedOrPastor acima, que é só para
+  // decidir exibição de filtros e "fail-abre" quando currentUser ainda não carregou).
+  // Aqui o padrão é o oposto — nega por padrão — porque isso decide quem pode marcar etapas
+  // como concluídas: apenas o líder DAQUELA célula específica, seus líderes superiores na
+  // mesma cadeia (Setor/Área, por aproximação de nome, já que esta tela não recebe a árvore
+  // completa de unidades) ou Pastor/Administrador/System Admin.
+  const canUserValidateMemberTrack = useCallback(
+    (targetCell?: CellGroup | null): boolean => {
+      if (!currentUser) return false;
+
+      const roleNorm = (currentUser.role || '').toLowerCase().trim();
+      if (
+        currentUser.isSystemAdmin ||
+        currentUser.login === 'admin' ||
+        roleNorm === 'administrador' ||
+        roleNorm === 'pastor' ||
+        roleNorm === 'pastor titular' ||
+        roleNorm === 'pastor(a)' ||
+        roleNorm === 'pastor de rede'
+      ) {
+        return true;
+      }
+
+      if (!targetCell) return false;
+
+      if (targetCell.leaderMemberIds?.includes(currentUser.id)) return true;
+
+      const userNameNorm = (currentUser.name || '').toLowerCase().trim();
+      if (
+        userNameNorm &&
+        ((targetCell.leaderName || '').toLowerCase().trim() === userNameNorm ||
+          targetCell.leaderNames?.some((n) => n.toLowerCase().trim() === userNameNorm))
+      ) {
+        return true;
+      }
+
+      // Aproximação por nome de Setor/Área (mesmo padrão de fallback usado em
+      // MyCellView.canEditCurrentCell quando a árvore completa de unidades não está disponível)
+      if (currentUser.sector) {
+        const userSec = currentUser.sector.trim().toLowerCase();
+        const cellSec = (targetCell.sectorName || '').trim().toLowerCase();
+        const cellArea = (targetCell.areaName || '').trim().toLowerCase();
+        if (cellSec && (userSec === cellSec || userSec.includes(cellSec) || cellSec.includes(userSec))) {
+          return true;
+        }
+        if (cellArea && (userSec === cellArea || userSec.includes(cellArea) || cellArea.includes(userSec))) {
+          return true;
+        }
+      }
+
+      return false;
+    },
+    [currentUser]
+  );
 
   // Identifica células lideradas pelo usuário
   const userLedCells = useMemo(() => {
@@ -478,7 +533,20 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
     setIsBatchSaving(true);
     setBatchErrorMessage(null);
     try {
-      const idsToComplete = [...selectedMemberIds];
+      // Defesa extra: revalida a permissão de cada selecionado no momento de salvar,
+      // caso a seleção tenha ficado desatualizada (ex: filtro trocado no meio do processo).
+      const allMembersById = new Map([...levelMembers, ...members].map((m) => [m.id, m]));
+      const idsToComplete = selectedMemberIds.filter((mId) => {
+        const m = allMembersById.get(mId);
+        const mCell = m ? cells.find((c) => c.id === m.cellId) : undefined;
+        return canUserValidateMemberTrack(mCell);
+      });
+
+      if (idsToComplete.length === 0) {
+        setBatchErrorMessage('Nenhum dos selecionados está sob sua liderança para validar esta etapa.');
+        setIsBatchSaving(false);
+        return;
+      }
       const resolvedChurchId =
         currentUser?.churchId ||
         currentCell?.churchId ||
@@ -1014,15 +1082,18 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
               // Célula do membro
               const memberCell = cells.find((c) => c.id === member.cellId);
               const isSelectedForBatch = isBatchModeActive && selectedMemberIds.includes(member.id);
+              // Só o líder desta célula específica (ou superior na cadeia, ou Pastor/Admin) pode
+              // validar/concluir etapas — nem toda pessoa que enxerga esta tela pode fazer isso.
+              const canValidateThis = canUserValidateMemberTrack(memberCell);
 
               return (
                 <div
                   key={member.id}
                   onClick={() => {
                     if (isBatchModeActive) {
-                      handleToggleSelectMember(member.id);
+                      if (canValidateThis) handleToggleSelectMember(member.id);
                     } else {
-                      onOpenMemberTrack(member);
+                      onOpenMemberTrack(member, canValidateThis);
                     }
                   }}
                   className={`rounded-xl sm:rounded-2xl border transition cursor-pointer px-3.5 py-2.5 sm:px-4 sm:py-3 group ${
@@ -1089,7 +1160,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
-                              onOpenMemberTrack(member);
+                              onOpenMemberTrack(member, canValidateThis);
                             }}
                             className="md:hidden p-1 rounded-lg text-[#0e3056] hover:bg-sky-50 hover:text-sky-700 active:scale-95 transition-all cursor-pointer shrink-0 ml-auto"
                             title={`Ver Trilho de Liderança de ${member.name}`}
@@ -1166,7 +1237,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onOpenMemberTrack(member);
+                          onOpenMemberTrack(member, canValidateThis);
                         }}
                         className="hidden md:inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-sky-50 group-hover:bg-[#052447] text-sky-800 group-hover:text-white border border-sky-200 group-hover:border-[#052447] text-xs font-bold transition shadow-2xs cursor-pointer shrink-0"
                       >
