@@ -2991,29 +2991,30 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 </div>
               </div>
 
-              {/* Grid 2 colunas: Telefone + Bairro (lado a lado, modal mais compacta) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Grid 2 colunas: Telefone + Bairro — sempre lado a lado, mesmo no
+                  mobile (campos mais estreitos nesse caso específico, a pedido). */}
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
                 {/* Telefone */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                <div className="min-w-0">
+                  <label className="block text-[11px] sm:text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1 truncate">
                     <Phone className="w-3.5 h-3.5 text-sky-700 shrink-0" />
-                    <span>Telefone:</span>
+                    <span className="truncate">Telefone:</span>
                   </label>
                   <input
                     type="tel"
                     id="input-edit-member-phone"
                     value={editMemberPhone}
                     onChange={(e) => setEditMemberPhone(e.target.value)}
-                    placeholder="(XX) XXXXX-XXXX"
-                    className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                    placeholder="(XX) XXXXX"
+                    className="w-full min-w-0 text-[11px] sm:text-sm px-2 sm:px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
                   />
                 </div>
 
                 {/* Bairro */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                <div className="min-w-0">
+                  <label className="block text-[11px] sm:text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1 truncate">
                     <MapPin className="w-3.5 h-3.5 text-sky-700 shrink-0" />
-                    <span>Bairro:</span>
+                    <span className="truncate">Bairro:</span>
                   </label>
                   <input
                     type="text"
@@ -3021,7 +3022,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     value={editMemberNeighborhood}
                     onChange={(e) => setEditMemberNeighborhood(e.target.value)}
                     placeholder="Ex: Centro"
-                    className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                    className="w-full min-w-0 text-[11px] sm:text-sm px-2 sm:px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
                   />
                 </div>
               </div>
