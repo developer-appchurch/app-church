@@ -43,6 +43,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  UserMinus,
 } from 'lucide-react';
 
 interface MyCellViewProps {
@@ -225,6 +226,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [editMemberFormError, setEditMemberFormError] = useState('');
   const [isSubmittingEditMember, setIsSubmittingEditMember] = useState(false);
   const [memberEditSuccessToast, setMemberEditSuccessToast] = useState('');
+  const [isConfirmingUnlinkMember, setIsConfirmingUnlinkMember] = useState(false);
+  const [isUnlinkingMember, setIsUnlinkingMember] = useState(false);
+  const [unlinkMemberError, setUnlinkMemberError] = useState('');
 
   // Atribuir Login e Senha a um membro que ainda não tem acesso ao app (ação independente, dentro da edição)
   const [isAssignLoginOpen, setIsAssignLoginOpen] = useState(false);
@@ -1550,6 +1554,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setAssignPasswordValue('');
     setAssignLoginError('');
     setAssignLoginSuccess('');
+    setIsConfirmingUnlinkMember(false);
+    setUnlinkMemberError('');
     resetEditCredentialsState();
   };
 
@@ -1568,7 +1574,48 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setAssignPasswordValue('');
     setAssignLoginError('');
     setAssignLoginSuccess('');
+    setIsConfirmingUnlinkMember(false);
+    setUnlinkMemberError('');
     resetEditCredentialsState();
+  };
+
+  // Remove o membro da célula atual (desvincula), devolvendo-o ao pool de
+  // membros sem vínculo — não recarrega a célula inteira, apenas tira esse
+  // membro da lista local e invalida o cache do pool para ele aparecer lá.
+  const handleUnlinkMember = async () => {
+    if (!editingMember) return;
+    setIsUnlinkingMember(true);
+    setUnlinkMemberError('');
+    try {
+      const updated = await AppChurchService.updateMember(editingMember.id, {
+        cellId: '',
+      });
+
+      // Remove o membro apenas da lista local da célula (sem refetch completo)
+      queryClient.setQueryData(['cell-members', cell.id], (old: CellMember[] | undefined) => {
+        if (!old) return old;
+        return old.filter((m) => m.id !== editingMember.id);
+      });
+
+      // Libera o cache do pool de membros para incluir esse membro na próxima leitura
+      queryClient.invalidateQueries({ queryKey: ['member-pool'] });
+
+      if (onUpdateMember) {
+        await onUpdateMember({ ...updated, cellId: '' }, cell.id);
+      }
+
+      setMemberEditSuccessToast(`${editingMember.name} foi desvinculado(a) da Célula ${cell.name} e está disponível no pool de membros.`);
+      setTimeout(() => setMemberEditSuccessToast(''), 4000);
+
+      setIsConfirmingUnlinkMember(false);
+      setEditingMember(null);
+    } catch (err: any) {
+      console.error('Erro ao desvincular membro da célula:', err);
+      setUnlinkMemberError(err?.message || 'Erro ao desvincular membro da célula.');
+      setIsConfirmingUnlinkMember(false);
+    } finally {
+      setIsUnlinkingMember(false);
+    }
   };
 
   const handleAssignLogin = async () => {
@@ -2891,7 +2938,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 />
               </div>
 
-              {/* Grid 2 colunas: Aniversário + Telefone */}
+              {/* Grid 2 colunas: Aniversário + E-mail */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Data de Aniversário (mostra o dado cadastrado, sem abrir datepicker) */}
                 <div>
@@ -2927,25 +2974,6 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   )}
                 </div>
 
-                {/* Telefone */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
-                    <Phone className="w-3.5 h-3.5 text-sky-700 shrink-0" />
-                    <span>Telefone:</span>
-                  </label>
-                  <input
-                    type="tel"
-                    id="input-edit-member-phone"
-                    value={editMemberPhone}
-                    onChange={(e) => setEditMemberPhone(e.target.value)}
-                    placeholder="(XX) XXXXX-XXXX"
-                    className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
-                  />
-                </div>
-              </div>
-
-              {/* Grid 2 colunas: E-mail + Bairro */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* E-mail */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
@@ -2958,6 +2986,25 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     value={editMemberEmail}
                     onChange={(e) => setEditMemberEmail(e.target.value)}
                     placeholder="membro@email.com"
+                    className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Grid 2 colunas: Telefone + Bairro (lado a lado, modal mais compacta) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Telefone */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                    <Phone className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                    <span>Telefone:</span>
+                  </label>
+                  <input
+                    type="tel"
+                    id="input-edit-member-phone"
+                    value={editMemberPhone}
+                    onChange={(e) => setEditMemberPhone(e.target.value)}
+                    placeholder="(XX) XXXXX-XXXX"
                     className="w-full text-xs sm:text-sm px-3 py-2 rounded-xl border border-slate-300 focus:outline-none focus:border-[#052447] font-medium text-slate-800"
                   />
                 </div>
@@ -3287,35 +3334,92 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                 </div>
               )}
 
+              {unlinkMemberError && (
+                <div className="p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-2">
+                  <AlertCircle size={15} className="shrink-0 text-rose-600" />
+                  <span>{unlinkMemberError}</span>
+                </div>
+              )}
+
               {/* Rodapé / Ações */}
-              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={handleCloseEditMemberModal}
-                  disabled={isSubmittingEditMember}
-                  className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  id="btn-confirm-save-member-edit"
-                  disabled={isSubmittingEditMember || !editMemberName.trim()}
-                  className="px-4 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#093563] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
-                >
-                  {isSubmittingEditMember ? (
-                    <>
-                      <Loader2 size={13} className="animate-spin" />
-                      <span>Salvando...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Check size={14} />
-                      <span>Salvar Alterações</span>
-                    </>
-                  )}
-                </button>
-              </div>
+              {isConfirmingUnlinkMember ? (
+                <div className="pt-2 border-t border-slate-100 space-y-2">
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold flex items-center gap-2">
+                    <AlertCircle size={15} className="shrink-0 text-amber-600" />
+                    <span>
+                      Desvincular <strong>{editingMember?.name}</strong> da Célula {cell.name}? Ele(a) deixará de
+                      aparecer aqui e ficará disponível no pool de membros sem célula.
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingUnlinkMember(false)}
+                      disabled={isUnlinkingMember}
+                      className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                    >
+                      Manter na célula
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleUnlinkMember}
+                      disabled={isUnlinkingMember}
+                      className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {isUnlinkingMember ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" />
+                          <span>Desvinculando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <UserMinus size={14} />
+                          <span>Confirmar Desvinculação</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={handleCloseEditMemberModal}
+                    disabled={isSubmittingEditMember}
+                    className="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmingUnlinkMember(true)}
+                    disabled={isSubmittingEditMember}
+                    className="px-3.5 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl transition cursor-pointer flex items-center gap-1.5"
+                    title="Retirar este membro desta célula (volta para o pool de membros)"
+                  >
+                    <UserMinus size={14} />
+                    <span>Desvincular</span>
+                  </button>
+                  <button
+                    type="submit"
+                    id="btn-confirm-save-member-edit"
+                    disabled={isSubmittingEditMember || !editMemberName.trim()}
+                    className="px-4 py-2 text-xs font-bold text-white bg-[#052447] hover:bg-[#093563] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {isSubmittingEditMember ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Salvando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check size={14} />
+                        <span>Salvar Alterações</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </form>
           </div>
         </div>
