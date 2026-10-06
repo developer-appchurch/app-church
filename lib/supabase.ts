@@ -2803,7 +2803,7 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
-        let { data, error } = await supabase
+        let { data, error }: { data: any[] | null; error: any } = await supabase
           .from('comentarios_postagem')
           .select('id, post_id, nome_autor, funcao_autor, avatar_autor, autor:membros!autor_membro_id(url_avatar), conteudo, criado_em')
           .eq('post_id', postId)
@@ -2817,7 +2817,7 @@ export const AppChurchService = {
             .eq('post_id', postId)
             .order('criado_em', { ascending: true })
             .range(offset, offset + limit - 1);
-          data = retry.data;
+          data = retry.data as any[] | null;
           error = retry.error;
         }
 
@@ -2828,7 +2828,7 @@ export const AppChurchService = {
             .eq('post_id', postId)
             .order('criado_em', { ascending: true })
             .range(offset, offset + limit - 1);
-          data = leg.data;
+          data = leg.data as any[] | null;
         }
 
         if (data) {
