@@ -6,13 +6,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile, Role, OrganizationalUnit } from '../types';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 import { AppChurchService } from '../lib/supabase';
-import {
-  optimizeImageToWebP,
-  validateImageFile,
-  validateImageForDatabase,
-  IMAGE_PRESETS,
-  formatFileSize,
-} from '../lib/imageOptimizer';
+import { validateImageFile, formatFileSize } from '../lib/imageOptimizer';
+import { uploadUnitPhoto, deleteUnitPhoto, isUnitStorageUrl } from '../lib/unitPhotoStorage';
 import {
   Search,
   Plus,
@@ -264,6 +259,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [isOptimizingCellPhoto, setIsOptimizingCellPhoto] = useState(false);
   const [cellPhotoStats, setCellPhotoStats] = useState<{ size: string; reduction: string } | null>(null);
   const [cellPhotoError, setCellPhotoError] = useState<string | null>(null);
+  // Foto já enviada ao Storage nesta edição mas ainda não salva na célula
+  // (apagada se o usuário trocar de novo, remover ou fechar sem salvar).
+  const pendingUploadedCellPhotoRef = useRef<string | null>(null);
   const [isSavingCell, setIsSavingCell] = useState(false);
   const [editCellSuccess, setEditCellSuccess] = useState(false);
   const [editCellError, setEditCellError] = useState<string | null>(null);
@@ -718,7 +716,22 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     units,
   ]);
 
+  const cellPhotoOwnerId = currentUser?.id || currentUser?.login || '';
+
+  const discardPendingCellPhoto = () => {
+    if (pendingUploadedCellPhotoRef.current) {
+      deleteUnitPhoto(pendingUploadedCellPhotoRef.current, cellPhotoOwnerId);
+      pendingUploadedCellPhotoRef.current = null;
+    }
+  };
+
+  const handleCloseEditCellModal = () => {
+    discardPendingCellPhoto();
+    setIsEditCellModalOpen(false);
+  };
+
   const handleOpenEditCellModal = () => {
+    discardPendingCellPhoto();
     setEditName(cell.name || '');
     setEditMeetingDay(cell.meetingDay || 'Quarta-feira');
     setEditMeetingTime(sanitizeTimeValue(cell.meetingTime));
@@ -747,19 +760,21 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
     setIsOptimizingCellPhoto(true);
     try {
-      // optimizeImageToWebP já recorre a JPEG otimizado quando o navegador não
-      // sabe codificar WebP via Canvas (comum em iOS Safari mais antigo e alguns
-      // WebViews) — qualquer um dos dois formatos é válido aqui.
-      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.FEED_POST);
-      setEditFotoUrl(result.dataUrl);
+      // Converte para WebP (ou JPEG leve, se o navegador não codificar WebP),
+      // reduz até ficar leve e envia direto ao Storage (bucket "units").
+      // Só a URL pública vai para unidades.foto_url — nunca o base64.
+      const result = await uploadUnitPhoto(file, cellPhotoOwnerId);
+      discardPendingCellPhoto();
+      pendingUploadedCellPhotoRef.current = result.publicUrl;
+      setEditFotoUrl(result.publicUrl);
       setCellPhotoStats({
         size: formatFileSize(result.optimizedSize),
         reduction: result.reductionLabel,
       });
       setCellPhotoError(null);
     } catch (err: any) {
-      console.error('Falha ao processar foto da célula:', err);
-      setCellPhotoError('Não foi possível converter a foto para WebP. Por favor, envie uma foto válida.');
+      console.error('Falha ao processar/enviar foto da célula:', err);
+      setCellPhotoError(err?.message || 'Não foi possível enviar a foto. Tente novamente com outra imagem.');
     } finally {
       setIsOptimizingCellPhoto(false);
     }
@@ -779,13 +794,17 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       return;
     }
 
-    if (editFotoUrl && editFotoUrl.startsWith('data:')) {
-      const dbValidation = validateImageForDatabase(editFotoUrl, 'Foto da célula');
-      if (!dbValidation.isValid) {
-        setEditCellError(dbValidation.error || 'A foto deve estar em formato WebP leve.');
-        return;
-      }
+    if (isOptimizingCellPhoto) {
+      setEditCellError('Aguarde o envio da foto terminar antes de salvar.');
+      return;
     }
+
+    if (editFotoUrl.trim().startsWith('data:')) {
+      setEditCellError('A foto precisa ser enviada novamente. Selecione a imagem outra vez.');
+      return;
+    }
+
+    const previousFotoUrl = cell.fotoUrl || '';
 
     setIsSavingCell(true);
     try {
@@ -797,9 +816,16 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
         meetingTime: editMeetingTime.trim(),
         neighborhood: editNeighborhood.trim(),
         address: editAddress.trim(),
-        fotoUrl: editFotoUrl.trim() || undefined,
+        // '' limpa a foto (botão "Remover"); URL do Storage substitui a anterior
+        fotoUrl: editFotoUrl.trim(),
         userMemberId: currentUser?.id,
       });
+
+      // Salvo: a foto enviada deixa de ser "pendente" e a antiga (se era do Storage) é removida
+      pendingUploadedCellPhotoRef.current = null;
+      if (previousFotoUrl && previousFotoUrl !== editFotoUrl.trim() && isUnitStorageUrl(previousFotoUrl)) {
+        deleteUnitPhoto(previousFotoUrl, cellPhotoOwnerId);
+      }
 
       if (onUpdateCell) {
         await onUpdateCell(updated);
@@ -2648,7 +2674,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               <button
                 type="button"
                 id="btn-close-edit-cell-modal"
-                onClick={() => setIsEditCellModalOpen(false)}
+                onClick={handleCloseEditCellModal}
                 className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
                 aria-label="Fechar modal"
               >
@@ -2821,6 +2847,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                           <button
                             type="button"
                             onClick={() => {
+                              discardPendingCellPhoto();
                               setEditFotoUrl('');
                               setCellPhotoStats(null);
                             }}
@@ -2844,7 +2871,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   {cellPhotoStats && (
                     <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold">
                       <Sparkles size={12} className="text-emerald-600" />
-                      <span>WebP Otimizado: {cellPhotoStats.size} ({cellPhotoStats.reduction})</span>
+                      <span>Foto otimizada e enviada: {cellPhotoStats.size} ({cellPhotoStats.reduction})</span>
                     </div>
                   )}
 
@@ -2860,7 +2887,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
               <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setIsEditCellModalOpen(false)}
+                  onClick={handleCloseEditCellModal}
                   className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition cursor-pointer"
                 >
                   Cancelar

@@ -11,6 +11,14 @@ export interface OptimizeImageOptions {
   maxHeight?: number;
   quality?: number; // 0.1 a 1.0 (padrão: 0.8)
   fallbackFormat?: 'image/jpeg';
+  /**
+   * Tamanho máximo desejado do arquivo final (bytes). Quando informado e a imagem
+   * passar disso, a qualidade é reduzida aos poucos e, se ainda não bastar, as
+   * dimensões também — vale tanto para WebP quanto para o fallback JPEG.
+   */
+  maxBytes?: number;
+  /** Menor lado permitido ao reduzir dimensões por causa do maxBytes (padrão: 320px). */
+  minDimension?: number;
 }
 
 export interface OptimizedImageResult {
@@ -142,11 +150,14 @@ export const IMAGE_PRESETS = {
     maxHeight: 600,
     quality: 0.85,
   },
-  // Foto de capa de Célula / unidade organizacional (cadastro rápido)
+  // Foto de capa de Célula / unidade organizacional (cadastro e edição).
+  // Os cards exibem até ~600px; maxBytes garante arquivo leve mesmo no fallback JPEG.
   UNIT_PHOTO: {
-    maxWidth: 480,
-    maxHeight: 480,
+    maxWidth: 800,
+    maxHeight: 800,
     quality: 0.8,
+    maxBytes: 150 * 1024,
+    minDimension: 320,
   },
 } as const;
 
@@ -222,6 +233,8 @@ export async function optimizeImageToWebP(
     maxWidth = 1280,
     maxHeight = 1280,
     quality = 0.8,
+    maxBytes,
+    minDimension = 320,
   } = options;
 
   let originalSize = 0;
@@ -274,22 +287,57 @@ export async function optimizeImageToWebP(
       throw new Error('Não foi possível obter contexto 2D do Canvas.');
     }
 
-    // Suavização de alta qualidade na redução
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(drawable, 0, 0, targetWidth, targetHeight);
+    const draw = (w: number, h: number) => {
+      canvas.width = w;
+      canvas.height = h;
+      // Suavização de alta qualidade na redução
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(drawable, 0, 0, w, h);
+    };
 
-    // Libera recursos se for ImageBitmap
-    cleanup?.();
-
-    // Tenta exportar primeiramente em image/webp
+    // Tenta exportar primeiramente em image/webp; se o navegador não suportar
+    // (retorna PNG), recorre a JPEG otimizado.
     let outputFormat: 'image/webp' | 'image/jpeg' = 'image/webp';
-    let dataUrl = canvas.toDataURL('image/webp', quality);
-
-    // Se o navegador não suportar WebP (retornando PNG), recorre a JPEG otimizado
-    if (!dataUrl.startsWith('data:image/webp')) {
+    const encode = (q: number) => {
+      let url = canvas.toDataURL('image/webp', q);
+      if (url.startsWith('data:image/webp')) {
+        outputFormat = 'image/webp';
+        return url;
+      }
       outputFormat = 'image/jpeg';
-      dataUrl = canvas.toDataURL('image/jpeg', quality);
+      url = canvas.toDataURL('image/jpeg', q);
+      return url;
+    };
+    const approxBytes = (url: string) => Math.round(((url.length - url.indexOf(',') - 1) * 3) / 4);
+
+    let currentQuality = quality;
+    draw(targetWidth, targetHeight);
+    let dataUrl: string;
+    try {
+      dataUrl = encode(currentQuality);
+
+      // Se ainda estiver pesada: primeiro baixa a qualidade (até 0.5), depois
+      // reduz as dimensões em 15% por passo, até caber no limite ou atingir o mínimo.
+      if (maxBytes && maxBytes > 0) {
+        for (let step = 0; step < 15 && approxBytes(dataUrl) > maxBytes; step++) {
+          if (currentQuality > 0.5) {
+            currentQuality = Math.max(0.5, Math.round((currentQuality - 0.1) * 100) / 100);
+          } else if (Math.min(targetWidth, targetHeight) * 0.85 >= minDimension) {
+            targetWidth = Math.round(targetWidth * 0.85);
+            targetHeight = Math.round(targetHeight * 0.85);
+            draw(targetWidth, targetHeight);
+          } else if (currentQuality > 0.35) {
+            currentQuality = Math.max(0.35, Math.round((currentQuality - 0.05) * 100) / 100);
+          } else {
+            break; // já está no menor tamanho aceitável
+          }
+          dataUrl = encode(currentQuality);
+        }
+      }
+    } finally {
+      // Libera recursos se for ImageBitmap
+      cleanup?.();
     }
 
     // Converte o dataUrl para Blob para obter métricas e precisão de bytes

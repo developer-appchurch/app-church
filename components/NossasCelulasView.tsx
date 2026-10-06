@@ -6,13 +6,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CelulaCardItem, UserProfile, CellGroup, OrganizationalUnit } from '@/types';
 import { getCelulasByIgreja } from '@/lib/celulasService';
 import { AppChurchService } from '@/lib/supabase';
-import {
-  validateImageFile,
-  validateImageForDatabase,
-  optimizeImageToWebP,
-  IMAGE_PRESETS,
-  formatFileSize,
-} from '@/lib/imageOptimizer';
+import { validateImageFile, formatFileSize } from '@/lib/imageOptimizer';
+import { uploadUnitPhoto, deleteUnitPhoto, isUnitStorageUrl } from '@/lib/unitPhotoStorage';
 import { CelulaCard } from './CelulaCard';
 import { CelulaSearchInput } from './CelulaSearchInput';
 import {
@@ -289,8 +284,20 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoStats, setPhotoStats] = useState<{ size: string; reduction: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Foto já enviada ao Storage nesta edição mas ainda não salva na célula
+  // (apagada se o usuário trocar de novo ou fechar sem salvar).
+  const pendingUploadedPhotoRef = useRef<string | null>(null);
+  const photoOwnerId = currentUser?.id || currentUser?.login || '';
+
+  const discardPendingPhoto = () => {
+    if (pendingUploadedPhotoRef.current) {
+      deleteUnitPhoto(pendingUploadedPhotoRef.current, photoOwnerId);
+      pendingUploadedPhotoRef.current = null;
+    }
+  };
 
   const handleOpenDetails = (cellItem: CelulaCardItem) => {
+    discardPendingPhoto();
     setSelectedCell(cellItem);
     setEditName(cellItem.nome || '');
     setEditMeetingDay(cellItem.diaSemana || 'Quarta-feira');
@@ -306,6 +313,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   };
 
   const handleCloseModal = () => {
+    discardPendingPhoto();
     setIsModalOpen(false);
     setSelectedCell(null);
     setSaveError(null);
@@ -327,19 +335,21 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
 
     setIsOptimizingPhoto(true);
     try {
-      // optimizeImageToWebP já recorre a JPEG otimizado quando o navegador não
-      // sabe codificar WebP via Canvas (comum em iOS Safari mais antigo e alguns
-      // WebViews) — qualquer um dos dois formatos é válido aqui.
-      const result = await optimizeImageToWebP(file, IMAGE_PRESETS.FEED_POST);
-      setEditFotoUrl(result.dataUrl);
+      // Converte para WebP (ou JPEG leve, se o navegador não codificar WebP),
+      // reduz até ficar leve e envia direto ao Storage (bucket "units").
+      // Só a URL pública vai para unidades.foto_url — nunca o base64.
+      const result = await uploadUnitPhoto(file, photoOwnerId);
+      discardPendingPhoto();
+      pendingUploadedPhotoRef.current = result.publicUrl;
+      setEditFotoUrl(result.publicUrl);
       setPhotoStats({
         size: formatFileSize(result.optimizedSize),
         reduction: result.reductionLabel,
       });
       setPhotoError(null);
     } catch (err: any) {
-      console.error('Falha ao processar foto da célula:', err);
-      setPhotoError('Não foi possível converter a foto para WebP. Por favor, envie uma foto válida.');
+      console.error('Falha ao processar/enviar foto da célula:', err);
+      setPhotoError(err?.message || 'Não foi possível enviar a foto. Tente novamente com outra imagem.');
     } finally {
       setIsOptimizingPhoto(false);
     }
@@ -360,13 +370,17 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
       return;
     }
 
-    if (editFotoUrl && editFotoUrl.startsWith('data:')) {
-      const dbValidation = validateImageForDatabase(editFotoUrl, 'Foto da célula');
-      if (!dbValidation.isValid) {
-        setSaveError(dbValidation.error || 'A foto deve estar em formato WebP leve.');
-        return;
-      }
+    if (isOptimizingPhoto) {
+      setSaveError('Aguarde o envio da foto terminar antes de salvar.');
+      return;
     }
+
+    if (editFotoUrl.trim().startsWith('data:')) {
+      setSaveError('A foto precisa ser enviada novamente. Selecione a imagem outra vez.');
+      return;
+    }
+
+    const previousFotoUrl = selectedCell.fotoUrl || '';
 
     setIsSaving(true);
     try {
@@ -378,9 +392,16 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
         meetingTime: editMeetingTime.trim(),
         neighborhood: editNeighborhood.trim(),
         address: editAddress.trim(),
-        fotoUrl: editFotoUrl.trim() || undefined,
+        // '' limpa a foto; URL do Storage substitui a anterior
+        fotoUrl: editFotoUrl.trim(),
         userMemberId: currentUser?.id,
       });
+
+      // Salvo: a foto enviada deixa de ser "pendente" e a antiga (se era do Storage) é removida
+      pendingUploadedPhotoRef.current = null;
+      if (previousFotoUrl && previousFotoUrl !== editFotoUrl.trim() && isUnitStorageUrl(previousFotoUrl)) {
+        deleteUnitPhoto(previousFotoUrl, photoOwnerId);
+      }
 
       // 1. Atualização seletiva e instantânea no estado local (sem recarregar o banco)
       const updatedCardItem: CelulaCardItem = {
@@ -676,7 +697,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
                     {photoStats && (
                       <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-semibold">
                         <Sparkles size={12} className="text-emerald-600" />
-                        <span>WebP Otimizado: {photoStats.size} ({photoStats.reduction})</span>
+                        <span>Foto otimizada e enviada: {photoStats.size} ({photoStats.reduction})</span>
                       </div>
                     )}
 

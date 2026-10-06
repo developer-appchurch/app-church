@@ -621,6 +621,13 @@ export async function POST(req: NextRequest) {
     if (!input.name?.trim()) {
       return NextResponse.json({ error: 'O nome da unidade é obrigatório.' }, { status: 400 });
     }
+    // unidades.foto_url guarda só a URL do Storage — imagem em base64 nunca vai para o banco
+    if (typeof input.fotoUrl === 'string' && input.fotoUrl.trim().startsWith('data:')) {
+      return NextResponse.json(
+        { error: 'A foto da unidade deve ser enviada ao Storage antes de salvar (base64 não é aceito).' },
+        { status: 400 }
+      );
+    }
 
     const supabase = getSupabaseServerClient();
     if (!supabase) {

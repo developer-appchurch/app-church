@@ -38,6 +38,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // unidades.foto_url guarda só a URL do Storage — imagem em base64 nunca vai para o banco
+    if (typeof fotoUrl === 'string' && fotoUrl.trim().startsWith('data:')) {
+      return NextResponse.json(
+        { error: 'A foto da célula deve ser enviada ao Storage antes de salvar (base64 não é aceito).' },
+        { status: 400 }
+      );
+    }
+
     const supabase = getSupabaseServerClient();
     if (!supabase) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });

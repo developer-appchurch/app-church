@@ -406,7 +406,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       // Upload real para o Supabase Storage (bucket "units") — só a URL pública
       // resultante é salva em unidades.foto_url, igual ao padrão usado no Feed.
-      const { publicUrl } = await uploadUnitPhoto(optimized.blob, user?.id || user?.login || '');
+      // Passa o resultado já otimizado para não reprocessar a imagem.
+      const { publicUrl } = await uploadUnitPhoto(optimized, user?.id || user?.login || '');
       setNewCellPhotoUrl(publicUrl);
 
       if (previousPhotoPath) {
