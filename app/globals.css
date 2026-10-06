@@ -1,1 +1,28 @@
 @import "tailwindcss";
+
+/* Animação do coração ao curtir via duplo clique na foto do post (estilo Instagram) */
+@keyframes heart-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  15% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  30% {
+    transform: scale(1);
+  }
+  75% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
+
+.animate-heart-pop {
+  animation: heart-pop 0.9s ease-out forwards;
+}

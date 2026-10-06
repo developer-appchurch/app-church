@@ -469,6 +469,15 @@ export const FeedView: React.FC<FeedViewProps> = ({
     setOptimisticPosts((prev) => prev.filter((p) => p.id !== postId));
   };
 
+  // Controla a animação do coração ao curtir via duplo clique na foto (estilo Instagram)
+  const [likeBurstPostId, setLikeBurstPostId] = useState<string | null>(null);
+  const likeBurstTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (likeBurstTimeoutRef.current) clearTimeout(likeBurstTimeoutRef.current);
+    };
+  }, []);
+
   // 4. Curtidas com Atualização Otimista
   const handleToggleLike = async (post: FeedPost) => {
     const nextLiked = !post.likedByCurrentUser;
@@ -509,6 +518,18 @@ export const FeedView: React.FC<FeedViewProps> = ({
           })),
         };
       });
+    }
+  };
+
+  // Duplo clique/toque na foto do post: sempre mostra a animação do coração,
+  // mas só curte se o post ainda não estiver curtido (nunca descurte, como no Instagram).
+  const handleDoubleTapLike = (post: FeedPost) => {
+    setLikeBurstPostId(post.id);
+    if (likeBurstTimeoutRef.current) clearTimeout(likeBurstTimeoutRef.current);
+    likeBurstTimeoutRef.current = setTimeout(() => setLikeBurstPostId(null), 900);
+
+    if (!post.likedByCurrentUser) {
+      handleToggleLike(post);
     }
   };
 
@@ -1071,13 +1092,14 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     {/* 8. Post Photo: loading=lazy, decoding=async, largura/altura reservadas para evitar layout shift */}
                     {post.imageUrl && (
                       <div
-                        className="w-full bg-slate-100 max-h-[500px] overflow-hidden flex items-center justify-center relative"
+                        className="w-full bg-slate-100 max-h-[500px] overflow-hidden flex items-center justify-center relative select-none"
                         style={{
                           aspectRatio:
                             post.imageWidth && post.imageHeight
                               ? `${post.imageWidth} / ${post.imageHeight}`
                               : '16 / 9',
                         }}
+                        onDoubleClick={() => handleDoubleTapLike(post)}
                       >
                         <Image
                           src={post.imageUrl}
@@ -1091,6 +1113,17 @@ export const FeedView: React.FC<FeedViewProps> = ({
                           unoptimized
                           referrerPolicy="no-referrer"
                         />
+
+                        {/* Coração animado ao curtir via duplo clique (estilo Instagram) */}
+                        {likeBurstPostId === post.id && (
+                          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <Heart
+                              size={100}
+                              className="text-white fill-white drop-shadow-lg animate-heart-pop"
+                              strokeWidth={0.5}
+                            />
+                          </div>
+                        )}
                       </div>
                     )}
 
