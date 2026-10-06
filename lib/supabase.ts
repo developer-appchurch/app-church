@@ -2646,8 +2646,11 @@ export const AppChurchService = {
 
     if (supabase) {
       try {
+        // "autor" é um join leve (indexado por autor_membro_id) para trazer a foto ATUAL
+        // do membro; avatar_autor continua sendo o retrato salvo no momento da publicação,
+        // usado como fallback para posts antigos ou membros sem vínculo/excluídos.
         const fullColumns =
-          'id, igreja_id, unidade_id, nome_celula, nome_autor, funcao_autor, avatar_autor, legenda, url_imagem, categoria, quantidade_curtidas, quantidade_comentarios, criado_em, imagem_largura, imagem_altura';
+          'id, igreja_id, unidade_id, nome_celula, nome_autor, funcao_autor, avatar_autor, autor:membros!autor_membro_id(url_avatar), legenda, url_imagem, categoria, quantidade_curtidas, quantidade_comentarios, criado_em, imagem_largura, imagem_altura';
         const fallbackColumns =
           'id, igreja_id, unidade_id, nome_celula, nome_autor, funcao_autor, avatar_autor, legenda, url_imagem, categoria, quantidade_curtidas, criado_em';
 
@@ -2712,7 +2715,7 @@ export const AppChurchService = {
             cellName: p.nome_celula,
             authorName: p.nome_autor,
             authorRole: p.funcao_autor,
-            authorAvatar: p.avatar_autor,
+            authorAvatar: (Array.isArray(p.autor) ? p.autor[0]?.url_avatar : p.autor?.url_avatar) || p.avatar_autor,
             caption: p.legenda,
             imageUrl: p.url_imagem,
             imageWidth: p.imagem_largura || undefined,
@@ -2802,10 +2805,21 @@ export const AppChurchService = {
       try {
         let { data, error } = await supabase
           .from('comentarios_postagem')
-          .select('id, post_id, nome_autor, funcao_autor, avatar_autor, conteudo, criado_em')
+          .select('id, post_id, nome_autor, funcao_autor, avatar_autor, autor:membros!autor_membro_id(url_avatar), conteudo, criado_em')
           .eq('post_id', postId)
           .order('criado_em', { ascending: true })
           .range(offset, offset + limit - 1);
+
+        if (error && (error.code === '42703' || error.message?.includes('does not exist') || error.code === 'PGRST204')) {
+          const retry = await supabase
+            .from('comentarios_postagem')
+            .select('id, post_id, nome_autor, funcao_autor, avatar_autor, conteudo, criado_em')
+            .eq('post_id', postId)
+            .order('criado_em', { ascending: true })
+            .range(offset, offset + limit - 1);
+          data = retry.data;
+          error = retry.error;
+        }
 
         if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
           const leg = await supabase
@@ -2823,7 +2837,7 @@ export const AppChurchService = {
             postId: c.post_id,
             authorName: c.nome_autor,
             authorRole: c.funcao_autor,
-            authorAvatar: c.avatar_autor,
+            authorAvatar: (Array.isArray(c.autor) ? c.autor[0]?.url_avatar : c.autor?.url_avatar) || c.avatar_autor,
             content: c.conteudo,
             createdAt: formatTime(c.criado_em),
           }));
@@ -2870,6 +2884,7 @@ export const AppChurchService = {
           igreja_id: post.churchId,
           unidade_id: post.cellId || null,
           nome_celula: post.cellName,
+          autor_membro_id: post.authorId || null,
           nome_autor: post.authorName,
           funcao_autor: post.authorRole,
           avatar_autor: post.authorAvatar && !post.authorAvatar.startsWith('data:') ? post.authorAvatar : null,
@@ -2888,6 +2903,7 @@ export const AppChurchService = {
           delete ptPayload.imagem_largura;
           delete ptPayload.imagem_altura;
           delete ptPayload.quantidade_comentarios;
+          delete ptPayload.autor_membro_id;
           const retryRes = await supabase.from('postagens_feed').insert(ptPayload);
           error = retryRes.error;
         }
@@ -3003,6 +3019,7 @@ export const AppChurchService = {
     const newComment: PostComment = {
       id: commentId,
       postId,
+      authorId: user.id,
       authorName: user.name,
       authorRole: user.role,
       authorAvatar: user.avatarUrl && !user.avatarUrl.startsWith('data:') ? user.avatarUrl : undefined,
@@ -3015,26 +3032,20 @@ export const AppChurchService = {
         const ptComment = {
           id: commentId,
           post_id: postId,
+          autor_membro_id: user.id || null,
           nome_autor: user.name,
           funcao_autor: user.role,
           avatar_autor: newComment.authorAvatar || null,
           conteudo: commentText,
         };
-        await supabase.from('comentarios_postagem').insert(ptComment);
-
-        // Atualiza contador em postagens_feed
-        const { data: postRow } = await supabase
-          .from('postagens_feed')
-          .select('quantidade_comentarios')
-          .eq('id', postId)
-          .maybeSingle();
-
-        if (postRow && typeof postRow.quantidade_comentarios === 'number') {
-          await supabase
-            .from('postagens_feed')
-            .update({ quantidade_comentarios: (postRow.quantidade_comentarios || 0) + 1 })
-            .eq('id', postId);
+        let { error } = await supabase.from('comentarios_postagem').insert(ptComment);
+        if (error && (error.code === '42703' || error.message?.includes('does not exist') || error.code === 'PGRST204')) {
+          const { autor_membro_id, ...legacyComment } = ptComment;
+          await supabase.from('comentarios_postagem').insert(legacyComment);
         }
+        // Não atualiza quantidade_comentarios aqui: o trigger sync_post_comments_count
+        // já incrementa automaticamente no INSERT acima. Atualizar manualmente aqui
+        // duplicava a contagem (+2 por comentário em vez de +1).
       } catch (e) {
         console.warn('Erro ao adicionar comentário no Supabase:', e);
       }
@@ -3066,19 +3077,8 @@ export const AppChurchService = {
           .delete()
           .eq('id', commentId);
 
-        // Decrementa contador atômico em postagens_feed
-        const { data: postRow } = await supabase
-          .from('postagens_feed')
-          .select('quantidade_comentarios')
-          .eq('id', postId)
-          .maybeSingle();
-
-        if (postRow && typeof postRow.quantidade_comentarios === 'number') {
-          await supabase
-            .from('postagens_feed')
-            .update({ quantidade_comentarios: Math.max(0, (postRow.quantidade_comentarios || 1) - 1) })
-            .eq('id', postId);
-        }
+        // Não decrementa quantidade_comentarios aqui: o trigger sync_post_comments_count
+        // já decrementa automaticamente no DELETE acima (ver nota em addComment).
       } catch (e) {
         console.warn('Erro ao excluir comentário no Supabase:', e);
       }

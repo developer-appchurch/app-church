@@ -237,6 +237,7 @@ export interface LeadershipTrackProgress {
 export interface PostComment {
   id: string;
   postId: string;
+  authorId?: string; // Vínculo com membros.id, usado para buscar a foto atual do autor
   authorName: string;
   authorRole: string;
   authorAvatar?: string;
@@ -249,6 +250,7 @@ export interface FeedPost {
   churchId: string; // Strictly isolates posts per church
   cellId: string;
   cellName: string;
+  authorId?: string; // Vínculo com membros.id, usado para buscar a foto atual do autor
   authorName: string;
   authorRole: string;
   authorAvatar?: string;
