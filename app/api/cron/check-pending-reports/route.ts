@@ -17,6 +17,7 @@ export interface PendingReportItem {
 export interface CheckPendingReportsResult {
   success: boolean;
   timestamp: string;
+  reminderStage: string;
   week: {
     startDate: string;
     endDate: string;
@@ -90,6 +91,12 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
   const customRefDateStr = req.nextUrl.searchParams.get('refDate');
   const refDate = customRefDateStr ? new Date(customRefDateStr) : new Date();
   const week = getPreviousWeekRange(refDate);
+
+  // Estágio do lembrete: '1' = segunda-feira (1º aviso), '2' = quarta-feira (2º aviso/cobrança).
+  // Cada estágio é independente: se o relatório continuar pendente, o líder recebe os dois
+  // avisos na mesma semana (a chave de idempotência abaixo inclui o estágio).
+  const reminderStageParam = req.nextUrl.searchParams.get('stage');
+  const reminderStage = reminderStageParam === '2' ? '2' : '1';
 
   const errors: string[] = [];
   let totalActiveCells = 0;
@@ -299,13 +306,16 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
     try {
       const { data: existingNotifications, error: notifErr } = await supabase
         .from('notificacoes_relatorios')
-        .select('usuario_id, unidade_id, ano_iso, numero_semana')
+        .select('usuario_id, unidade_id, ano_iso, numero_semana, tipo')
         .eq('ano_iso', week.isoYear)
         .eq('numero_semana', week.isoWeek);
 
       if (!notifErr && existingNotifications) {
         existingNotifications.forEach((n: any) => {
-          alreadyNotifiedKeys.add(`${n.usuario_id}_${n.unidade_id}_${n.ano_iso}_${n.numero_semana}`);
+          // O "tipo" guarda o estágio do lembrete (1º aviso de segunda vs 2º aviso/cobrança
+          // de quarta), então cada estágio controla sua própria idempotência: se o relatório
+          // continuar pendente, o líder pode receber os dois avisos na mesma semana.
+          alreadyNotifiedKeys.add(`${n.usuario_id}_${n.unidade_id}_${n.ano_iso}_${n.numero_semana}_${n.tipo}`);
         });
       }
     } catch (e: any) {
@@ -360,9 +370,11 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
       }
 
       for (const leader of leaders) {
-        const idempotencyKey = `${leader.id}_${cell.id}_${week.isoYear}_${week.isoWeek}`;
+        const notificationType = reminderStage === '2' ? 'relatorio_pendente_cobranca' : 'relatorio_pendente';
+        const idempotencyKey = `${leader.id}_${cell.id}_${week.isoYear}_${week.isoWeek}_${notificationType}`;
 
-        // Checa se já recebeu notificação para esta mesma pendência
+        // Checa se já recebeu este MESMO estágio de notificação para esta pendência
+        // (o 1º aviso de segunda e o 2º de quarta são independentes entre si)
         if (alreadyNotifiedKeys.has(idempotencyKey)) {
           notificationsSkippedDuplicate++;
           continue;
@@ -379,10 +391,14 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
           devicesCount: leaderDevices.length,
         });
 
-        // Monta a mensagem exata conforme os requisitos da especificação
+        // Monta a mensagem exata conforme os requisitos da especificação.
+        // No 2º aviso (quarta), o tom é de cobrança, já que o líder já tinha sido avisado na segunda.
         const cellNameLabel = cell.nome ? `da célula ${cell.nome}` : 'da sua célula';
-        const notificationTitle = '🔔 Relatório pendente';
-        const notificationBody = `O relatório ${cellNameLabel} referente à semana passada ainda não foi lançado. Clique para lançar agora!`;
+        const notificationTitle = reminderStage === '2' ? '⚠️ Relatório ainda pendente' : '🔔 Relatório pendente';
+        const notificationBody =
+          reminderStage === '2'
+            ? `O relatório ${cellNameLabel} referente à semana passada ainda não foi lançado. Por favor, lance o quanto antes!`
+            : `O relatório ${cellNameLabel} referente à semana passada ainda não foi lançado. Clique para lançar agora!`;
 
         // Deep link direto para a tela de relatórios com abertura imediata do formulário
         const deepLinkUrl = `/?screen=reports&cellId=${encodeURIComponent(cell.id)}&openModal=true&targetWeek=${week.startDate}`;
@@ -405,12 +421,12 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
               body: notificationBody,
               icon: '/android-chrome-192x192.png',
               badge: '/android-chrome-192x192.png',
-              tag: `pending-report-${cell.id}`,
+              tag: `pending-report-${cell.id}-${reminderStage}`,
               data: {
                 url: deepLinkUrl,
                 cellId: cell.id,
                 cellName: cell.nome,
-                type: 'relatorio_pendente',
+                type: notificationType,
                 targetWeek: week.startDate,
               },
             }
@@ -442,7 +458,7 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
               numero_semana: week.isoWeek,
               data_inicio_semana: week.startDate,
               data_fim_semana: week.endDate,
-              tipo: 'relatorio_pendente',
+              tipo: notificationType,
               canal: 'push',
               titulo: notificationTitle,
               mensagem: notificationBody,
@@ -465,12 +481,13 @@ async function handleCheckPendingReports(req: NextRequest): Promise<NextResponse
 
     const durationMs = Date.now() - startTime.getTime();
     console.log(
-      `[Cron] Verificação concluída em ${durationMs}ms: ${pendingCells.length} células pendentes, ${notificationsSent} lembretes gerados.`
+      `[Cron] Verificação concluída (estágio ${reminderStage}) em ${durationMs}ms: ${pendingCells.length} células pendentes, ${notificationsSent} lembretes gerados.`
     );
 
     const result: CheckPendingReportsResult = {
       success: true,
       timestamp: new Date().toISOString(),
+      reminderStage,
       week,
       totalActiveCells,
       cellsWithReport: cellsWithReportCount,

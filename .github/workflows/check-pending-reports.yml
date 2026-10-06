@@ -2,24 +2,48 @@ name: Verificar relatórios pendentes e enviar notificações
 
 # Horários em UTC. Fortaleza/Brasília = UTC-3 (sem horário de verão).
 # Para converter: hora_UTC = hora_Brasil + 3
-# Exemplo abaixo: segunda-feira às 08h00 (Brasil) = 11h00 UTC
+# - Segunda-feira às 08h00 (Brasil) = 11h00 UTC → 1º aviso (stage=1)
+# - Quarta-feira às 10h00 (Brasil) = 13h00 UTC → 2º aviso/cobrança, caso ainda esteja pendente (stage=2)
 on:
   schedule:
     - cron: '0 11 * * 1'
-  # Permite disparar manualmente pela aba "Actions" do GitHub, sem esperar o horário
+    - cron: '0 13 * * 3'
+  # Permite disparar manualmente pela aba "Actions" do GitHub, sem esperar o horário.
+  # O input "stage" permite simular qualquer um dos dois avisos no disparo manual.
   workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Estágio do lembrete (1 = segunda, 2 = quarta)'
+        required: false
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
 
 jobs:
   check-pending-reports:
     runs-on: ubuntu-latest
     steps:
+      - name: Determinar estágio do lembrete (a partir do horário do schedule ou do input manual)
+        id: stage
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ inputs.stage }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 13 * * 3" ]; then
+            echo "value=2" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=1" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Chamar endpoint de verificação de relatórios pendentes
         run: |
           response=$(curl -s -o response.json -w "%{http_code}" -X POST \
-            "${{ secrets.APP_URL }}/api/cron/check-pending-reports" \
+            "${{ secrets.APP_URL }}/api/cron/check-pending-reports?stage=${{ steps.stage.outputs.value }}" \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json")
 
+          echo "Estágio do lembrete: ${{ steps.stage.outputs.value }}"
           echo "HTTP status: $response"
           echo "--- Resposta do servidor ---"
           cat response.json
