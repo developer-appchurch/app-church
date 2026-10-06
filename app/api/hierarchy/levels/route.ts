@@ -71,10 +71,13 @@ export async function GET(req: NextRequest) {
       isLeaf: index === total - 1,
     }));
 
-    return NextResponse.json({
-      success: true,
-      levels: formattedLevels,
-    });
+    return NextResponse.json(
+      {
+        success: true,
+        levels: formattedLevels,
+      },
+      { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } }
+    );
   } catch (err: any) {
     console.error('Erro na rota /api/hierarchy/levels:', err);
     return NextResponse.json({ error: err?.message || 'Erro interno.' }, { status: 500 });

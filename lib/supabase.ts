@@ -700,6 +700,20 @@ export const AppChurchService = {
       cacheKey,
       5 * 60 * 1000,
       async () => {
+        // Rota com cache compartilhado (CDN) para evitar que cada aba/usuário repita a
+        // mesma consulta direto no Supabase — mesma lista para todos, baixa cardinalidade.
+        if (typeof window !== 'undefined') {
+          try {
+            const res = await fetch(`/api/reference/churches?limit=${limit}&offset=${offset}`);
+            const json = await safeJsonParseResponse(res);
+            if (res.ok && json?.churches && json.churches.length > 0) {
+              return json.churches;
+            }
+          } catch (err) {
+            console.warn('Falha ao buscar igrejas via API, tentando fallback direto:', err);
+          }
+        }
+
         const CHURCH_COLUMNS = 'id, nome, slug, cnpj, cidade, estado, url_logo';
         if (supabase) {
           try {
@@ -3859,6 +3873,19 @@ export const AppChurchService = {
    */
   async getRoles(force: boolean = false): Promise<Role[]> {
     return getCachedOrExecute('roles', 5 * 60 * 1000, async () => {
+      // Rota com cache compartilhado (CDN) — papéis são dados globais, raramente mudam.
+      if (typeof window !== 'undefined') {
+        try {
+          const res = await fetch('/api/reference/roles');
+          const json = await safeJsonParseResponse(res);
+          if (res.ok && json?.roles && json.roles.length > 0) {
+            return json.roles;
+          }
+        } catch (err) {
+          console.warn('Falha ao buscar papéis via API, tentando fallback direto:', err);
+        }
+      }
+
       if (supabase) {
         try {
           const ROLE_COLUMNS = 'id, nome, slug, descricao, nivel_hierarquia, cor_distintivo';
@@ -3970,6 +3997,22 @@ export const AppChurchService = {
    * Catálogo de Etapas do Trilho (etapas_trilha) filtradas por igreja_id
    */
   async getTrackSteps(churchId?: string): Promise<TrackStep[]> {
+    // Rota com cache compartilhado (CDN) — catálogo de etapas muda raramente.
+    if (typeof window !== 'undefined') {
+      try {
+        const url = churchId
+          ? `/api/reference/track-steps?churchId=${churchId}`
+          : '/api/reference/track-steps';
+        const res = await fetch(url);
+        const json = await safeJsonParseResponse(res);
+        if (res.ok && json?.trackSteps && json.trackSteps.length > 0) {
+          return json.trackSteps;
+        }
+      } catch (err) {
+        console.warn('Falha ao buscar etapas do trilho via API, tentando fallback direto:', err);
+      }
+    }
+
     if (supabase) {
       try {
         let query = supabase.from('etapas_trilha').select('*');
