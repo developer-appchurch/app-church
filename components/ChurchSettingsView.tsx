@@ -30,7 +30,9 @@ import {
   ArrowRightLeft,
   CheckSquare,
   Square,
+  CalendarCheck,
 } from 'lucide-react';
+import { TadelSettingsTab } from './TadelSettingsTab';
 import { UserProfile, Neighborhood, TrackStep, ChurchHierarchicalLevel, OrganizationalUnit } from '@/types';
 import { AppChurchService } from '@/lib/supabase';
 
@@ -42,7 +44,7 @@ interface ChurchSettingsViewProps {
   onNavigateToUnits?: () => void;
 }
 
-type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins';
+type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins' | 'tadel';
 
 interface TabDef {
   id: SettingsTab;
@@ -56,6 +58,7 @@ const TABS: TabDef[] = [
   { id: 'units', label: 'Setores e Células', icon: Layers, permissionCode: 'unit:transfer_delete' },
   { id: 'neighborhoods', label: 'Bairros', icon: MapPin, permissionCode: 'neighborhood:manage' },
   { id: 'logins', label: 'Gestão de Logins', icon: KeyRound, permissionCode: 'member:access_manage' },
+  { id: 'tadel', label: 'TADEL', icon: CalendarCheck, permissionCode: 'tadel:manage' },
 ];
 
 export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
@@ -108,7 +111,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
               Configurações da Igreja
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-0.5 truncate">
-              Trilho, Setores e Células, Bairros e Gestão de Logins em um só lugar.
+              Trilho, Setores e Células, Bairros, Gestão de Logins e TADEL em um só lugar.
             </p>
           </div>
         </div>
@@ -150,6 +153,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
           <UnitsTransferTab currentUser={currentUser} onNavigateToUnits={onNavigateToUnits} />
         )}
         {activeTab === 'logins' && <LoginsTab currentUser={currentUser} />}
+        {activeTab === 'tadel' && <TadelSettingsTab currentUser={currentUser} />}
       </div>
     </div>
   );

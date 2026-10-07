@@ -51,6 +51,11 @@ const WeeklyReportView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const TadelPresenceView = dynamic(
+  () => import('../components/TadelPresenceView').then((m) => m.TadelPresenceView),
+  { loading: ViewLoading, ssr: false }
+);
+
 const LeadershipTrackModal = dynamic(
   () => import('../components/LeadershipTrackModal').then((m) => m.LeadershipTrackModal),
   { ssr: false }
@@ -949,6 +954,8 @@ export default function Home() {
               onNavigateToUnits={() => setActiveScreen('hierarchy_units')}
             />
           )}
+
+          {activeScreen === 'tadel' && user && <TadelPresenceView currentUser={user} />}
 
           {activeScreen === 'church_indicators' && user && (
             <ChurchIndicatorsView currentUser={user} onBack={() => setActiveScreen('feed')} />

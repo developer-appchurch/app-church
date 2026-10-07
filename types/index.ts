@@ -303,7 +303,8 @@ export type ActiveScreen =
   | 'church_overview'
   | 'permissions_manage'
   | 'church_settings'
-  | 'church_indicators';
+  | 'church_indicators'
+  | 'tadel';
 
 export interface CelulaCardItem {
   id: string;
@@ -477,3 +478,87 @@ export interface WeeklyReport {
   observacao_texto?: string;
 }
 
+
+// ==============================================================================
+// TADEL — Presença dos líderes
+// ==============================================================================
+
+export interface TadelSchedule {
+  id: string;
+  dayOfWeek: number; // 0 = domingo ... 6 = sábado
+  startTime: string; // "HH:mm"
+  minutesBefore: number;
+  minutesAfter: number;
+  location: string;
+  active: boolean;
+}
+
+export type TadelOccurrenceStatus = 'upcoming' | 'open' | 'closed';
+
+export interface TadelOccurrence {
+  scheduleId: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // "HH:mm"
+  location: string;
+  opensAt: string; // ISO
+  closesAt: string; // ISO
+  status: TadelOccurrenceStatus;
+}
+
+export interface TadelWeek {
+  startDate: string; // domingo YYYY-MM-DD
+  endDate: string; // sábado YYYY-MM-DD
+  year: number;
+  week: number;
+  label: string;
+}
+
+export interface TadelAttendanceRecord {
+  date: string;
+  scheduleId: string | null;
+  startTime: string | null;
+  registeredAt: string;
+}
+
+export interface TadelHistoryItem {
+  week: TadelWeek;
+  attendance: TadelAttendanceRecord | null;
+}
+
+export interface TadelStatusResponse {
+  configured: boolean;
+  name: string;
+  eligible: boolean;
+  eligibleUnits: { id: string; name: string; levelName: string }[];
+  currentWeek: TadelWeek;
+  occurrences: TadelOccurrence[];
+  currentAttendance: TadelAttendanceRecord | null;
+  history: TadelHistoryItem[];
+  frequency: { present: number; total: number; percentage: number };
+  canSupervise: boolean;
+  canManage: boolean;
+}
+
+export interface TadelSupervisionLeader {
+  memberId: string;
+  name: string;
+  avatarUrl: string | null;
+  units: { id: string; name: string; levelName: string }[];
+  attendance: TadelAttendanceRecord | null;
+}
+
+export interface TadelSupervisionResponse {
+  name: string;
+  week: TadelWeek;
+  schedules: TadelSchedule[];
+  leaders: TadelSupervisionLeader[];
+  countsBySchedule: Record<string, number>;
+}
+
+export interface TadelConfigResponse {
+  name: string;
+  participatingLevelIds: string[];
+  usingDefaultLevels: boolean;
+  levels: { id: string; name: string; order: number }[];
+  schedules: TadelSchedule[];
+}
