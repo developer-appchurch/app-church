@@ -356,6 +356,7 @@ export default function Home() {
         queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
         queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
         queryClient.invalidateQueries({ queryKey: ['feed_posts'] }),
+        queryClient.invalidateQueries({ queryKey: ['rankings'] }),
       ]);
 
       // 2. Re-executa as células para atualizar seletores

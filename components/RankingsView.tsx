@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   ChevronLeft,
   ChevronRight,
@@ -94,10 +95,6 @@ export const RankingsView: React.FC<RankingsViewProps> = ({ currentUser }) => {
   const [ano, setAno] = useState<number>(anoAtual);
   const [completo, setCompleto] = useState(false);
 
-  const [rows, setRows] = useState<RankingRow[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
-
   // Mês/ano selecionado para o ranking mensal (o ranking só mostra o ano vigente)
   const mesSelecionado = useMemo(() => {
     const d = new Date(anoAtual, mesAtual0 - mesesAtras, 1);
@@ -113,15 +110,19 @@ export const RankingsView: React.FC<RankingsViewProps> = ({ currentUser }) => {
     return Math.max(0, mesAtual0 - inicioAno);
   }, [anoAtual, mesAtual0]);
 
-  const load = useCallback(async () => {
-    setIsLoading(true);
-    setError('');
-    try {
+  // Cache de ~5 min por combinação (aba, período, lista completa). Sem refetch automático:
+  // os dados só são buscados de novo ao arrastar a tela para baixo (a invalidação da
+  // chave ['rankings'] é feita no handleRefresh da página) ou depois que o cache expira.
+  const periodoKey =
+    tab === 'mensal' ? primeiroDiaDoMes(mesSelecionado.ano, mesSelecionado.mes0) : String(ano);
+  const { data, isLoading, isError, error: queryError } = useQuery<RankingRow[]>({
+    queryKey: ['rankings', currentUser.churchId, currentUser.id, tab, periodoKey, completo],
+    queryFn: async () => {
       const supabase = getBrowserSupabaseClient();
-      const { data, error: rpcError } =
+      const { data: rpcData, error: rpcError } =
         tab === 'mensal'
           ? await supabase.rpc('domingo_em_dia_ranking_mensal', {
-              p_mes: mesesAtras === 0 ? null : primeiroDiaDoMes(mesSelecionado.ano, mesSelecionado.mes0),
+              p_mes: mesesAtras === 0 ? null : periodoKey,
               p_completo: completo,
             })
           : await supabase.rpc('domingo_em_dia_ranking_anual', {
@@ -129,18 +130,17 @@ export const RankingsView: React.FC<RankingsViewProps> = ({ currentUser }) => {
               p_completo: completo,
             });
       if (rpcError) throw new Error(rpcError.message);
-      setRows((data || []) as RankingRow[]);
-    } catch (e: any) {
-      setRows([]);
-      setError(e?.message || 'Não foi possível carregar o ranking.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [tab, mesesAtras, mesSelecionado, completo, ano, anoAtual]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+      return (rpcData || []) as RankingRow[];
+    },
+    staleTime: Infinity,
+    gcTime: 1000 * 60 * 5,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    retry: false,
+  });
+  const rows: RankingRow[] = data ?? [];
+  const error = isError ? (queryError as Error)?.message || 'Não foi possível carregar o ranking.' : '';
 
   const podeVerCompleto = rows[0]?.pode_ver_completo === true;
   const anoAnteriorDisponivel = rows[0]?.ano_anterior_disponivel === true;
