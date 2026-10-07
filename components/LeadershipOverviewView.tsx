@@ -103,10 +103,45 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
     );
   }, [currentUser]);
 
+  // Líderes de Setor, Área, Distrito e Rede: enxergam apenas as células sob a sua cobertura
+  // (subárvore das unidades que lideram), nunca a igreja inteira. Pastor, Supervisor e
+  // Administrador continuam com visão total da congregação.
   const isSectorLeaderRole = useMemo(() => {
-    if (!currentUser) return false;
-    return currentUser.role === 'Líder de Setor' && !currentUser.isSystemAdmin;
+    if (!currentUser || currentUser.isSystemAdmin) return false;
+    const roleNorm = (currentUser.role || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+    if (
+      roleNorm.includes('pastor') ||
+      roleNorm.includes('supervisor') ||
+      roleNorm.includes('administrador')
+    ) {
+      return false;
+    }
+    return (
+      roleNorm.includes('setor') ||
+      roleNorm.includes('area') ||
+      roleNorm.includes('distrito') ||
+      roleNorm.includes('rede')
+    );
   }, [currentUser]);
+
+  // Células sob a cobertura hierárquica do usuário (mesma regra da tela de relatórios)
+  const { data: coveredCellsData } = useQuery({
+    queryKey: ['user-covered-cells', currentUser?.id, currentUser?.churchId],
+    queryFn: async () => {
+      if (!currentUser?.id || !currentUser?.churchId) return null;
+      const res = await fetch(
+        `/api/hierarchy/user-covered-cells?userId=${encodeURIComponent(currentUser.id)}&churchId=${encodeURIComponent(currentUser.churchId)}`
+      );
+      if (!res.ok) return null;
+      return res.json().catch(() => null);
+    },
+    enabled: Boolean(currentUser?.id && currentUser?.churchId && isSectorLeaderRole),
+    staleTime: 1000 * 60 * 5,
+  });
 
   const isPrivilegedOrPastor = useMemo(() => {
     if (!currentUser) return true;
@@ -145,6 +180,17 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
 
       if (targetCell.leaderMemberIds?.includes(currentUser.id)) return true;
 
+      // Líder de Setor/Área/Distrito/Rede: valida qualquer célula sob a sua cobertura hierárquica
+      if (
+        isSectorLeaderRole &&
+        coveredCellsData &&
+        !coveredCellsData.isAllCells &&
+        Array.isArray(coveredCellsData.cellIds) &&
+        coveredCellsData.cellIds.includes(targetCell.id)
+      ) {
+        return true;
+      }
+
       const userNameNorm = (currentUser.name || '').toLowerCase().trim();
       if (
         userNameNorm &&
@@ -170,7 +216,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
 
       return false;
     },
-    [currentUser]
+    [currentUser, isSectorLeaderRole, coveredCellsData]
   );
 
   // Identifica células lideradas pelo usuário
@@ -225,16 +271,28 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
       return userLedCells;
     }
 
-    // Para Líder de Setor
+    // Para Líder de Setor / Área / Distrito / Rede: apenas as células sob a sua cobertura
     if (isSectorLeaderRole) {
+      const coveredIds: string[] | null =
+        coveredCellsData && !coveredCellsData.isAllCells && Array.isArray(coveredCellsData.cellIds)
+          ? coveredCellsData.cellIds
+          : null;
+      if (coveredIds && coveredIds.length > 0) {
+        const allowed = new Set(coveredIds);
+        const covered = cells.filter((c) => allowed.has(c.id));
+        if (covered.length > 0) return covered;
+      }
+      // Fallback (cobertura ainda carregando ou indisponível): nunca abre a igreja inteira,
+      // restringe ao setor do cadastro e à própria célula.
       const userSector = (currentUser?.sector || '').trim().toLowerCase();
       const filtered = cells.filter((c) => {
         const sec = (c.sectorName || 'Geral').trim().toLowerCase();
-        return userSector
-          ? sec === userSector || sec.includes(userSector) || userSector.includes(sec)
-          : true;
+        return (
+          c.id === currentCell?.id ||
+          (userSector ? sec === userSector || sec.includes(userSector) || userSector.includes(sec) : false)
+        );
       });
-      return filtered.length > 0 ? filtered : cells;
+      return filtered.length > 0 ? filtered : currentCell ? [currentCell] : [];
     }
 
     // Para Pastor / Supervisor / Administrador
@@ -253,6 +311,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
     hasMultipleLedCells,
     userLedCells,
     isSectorLeaderRole,
+    coveredCellsData,
     currentUser?.sector,
     selectedSectorFilter,
   ]);
@@ -487,8 +546,8 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
   // Nome da célula ativa para exibição contextual
   const currentCellName = useMemo(() => {
     if (selectedCellIdState === 'todas') {
-      if (isSectorLeaderRole && currentUser?.sector) {
-        return `Todas as Células • Setor ${currentUser.sector}`;
+      if (isSectorLeaderRole) {
+        return 'Todas as Células sob sua cobertura';
       }
       if (selectedSectorFilter !== 'todos') {
         return `Todas as Células • Setor ${selectedSectorFilter}`;
@@ -709,7 +768,7 @@ export const LeadershipOverviewView: React.FC<LeadershipOverviewViewProps> = ({
                   {isCellLeaderRole
                     ? 'Suas Células sob Liderança'
                     : isSectorLeaderRole
-                    ? 'Seu Setor de Células'
+                    ? 'Suas Células sob Cobertura'
                     : 'Navegação Hierárquica'}
                 </h4>
                 <p className="text-[10px] sm:text-[11px] text-slate-500 truncate mt-0.5">
