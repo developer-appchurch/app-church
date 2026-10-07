@@ -128,7 +128,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition cursor-pointer ${
                   isActive
-                    ? 'bg-indigo-600 text-white shadow-sm'
+                    ? 'bg-[#052447] text-white shadow-sm'
                     : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
@@ -316,7 +316,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
   if (!sectorLevel || !cellLevel || sectors.length === 0) {
     return (
       <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-8 sm:p-12 text-center">
-        <div className="w-12 h-12 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center mx-auto mb-3">
+        <div className="w-12 h-12 rounded-xl bg-[#052447]/5 border border-[#052447]/15 text-[#052447] flex items-center justify-center mx-auto mb-3">
           <Layers size={22} />
         </div>
         <h3 className="text-sm sm:text-base font-bold text-slate-800">Setores e Células</h3>
@@ -327,7 +327,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
           <button
             type="button"
             onClick={onNavigateToUnits}
-            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition cursor-pointer"
+            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#052447] text-white text-sm font-semibold hover:bg-[#073366] transition cursor-pointer"
           >
             <Layers size={15} />
             Abrir Níveis Organizacionais
@@ -358,7 +358,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
 
       <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-4 sm:p-5">
         <div className="flex items-center gap-2 mb-1">
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-600 flex items-center justify-center shrink-0">
+          <div className="w-8 h-8 rounded-lg bg-[#052447]/5 border border-[#052447]/15 text-[#052447] flex items-center justify-center shrink-0">
             <ArrowRightLeft size={16} />
           </div>
           <div>
@@ -383,7 +383,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
             <select
               value={sourceSectorId}
               onChange={(e) => setSourceSectorId(e.target.value)}
-              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
+              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#052447]/30 focus:border-[#052447] outline-none bg-white"
             >
               <option value="">Selecione...</option>
               {sectors.map((s) => (
@@ -402,7 +402,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
               value={targetSectorId}
               onChange={(e) => setTargetSectorId(e.target.value)}
               disabled={!sourceSectorId}
-              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white disabled:bg-slate-50 disabled:text-slate-400"
+              className="w-full text-sm px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#052447]/30 focus:border-[#052447] outline-none bg-white disabled:bg-slate-50 disabled:text-slate-400"
             >
               <option value="">Selecione...</option>
               {targetSectorOptions.map((s) => (
@@ -424,7 +424,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
                 <button
                   type="button"
                   onClick={toggleSelectAll}
-                  className="flex items-center gap-1 text-[11px] font-semibold text-indigo-700 hover:text-indigo-900 cursor-pointer"
+                  className="flex items-center gap-1 text-[11px] font-semibold text-[#052447] hover:text-[#073366] cursor-pointer"
                 >
                   {selectedCellIds.size === cellsInSourceSector.length ? (
                     <CheckSquare size={13} />
@@ -449,7 +449,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
                         type="checkbox"
                         checked={selectedCellIds.has(c.id)}
                         onChange={() => toggleCell(c.id)}
-                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer shrink-0"
+                        className="w-4 h-4 rounded text-[#052447] focus:ring-[#052447]/30 cursor-pointer shrink-0"
                       />
                       <span className="flex-1 min-w-0 text-sm font-medium text-slate-800 truncate">
                         {c.name}
@@ -471,7 +471,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
           type="button"
           disabled={!targetSectorId || selectedCellIds.size === 0 || isTransferring}
           onClick={handleTransfer}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[#052447] text-white text-sm font-bold hover:bg-[#073366] disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
         >
           {isTransferring ? <Loader2 size={15} className="animate-spin" /> : <ArrowRightLeft size={15} />}
           Transferir {selectedCellIds.size > 0 ? `${selectedCellIds.size} célula(s)` : 'célula(s) selecionada(s)'}
@@ -484,7 +484,7 @@ const UnitsTransferTab: React.FC<{ currentUser: UserProfile; onNavigateToUnits?:
           <button
             type="button"
             onClick={onNavigateToUnits}
-            className="font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+            className="font-semibold text-[#052447] hover:text-[#073366] cursor-pointer"
           >
             Níveis Organizacionais
           </button>
@@ -648,13 +648,13 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
               if (e.key === 'Enter') handleCreate();
             }}
             placeholder="Ex: Centro, Jardim das Flores..."
-            className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+            className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#052447]/30 focus:border-[#052447] outline-none"
           />
           <button
             type="button"
             onClick={handleCreate}
             disabled={isCreating || !newName.trim()}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#052447] text-white text-sm font-semibold hover:bg-[#073366] disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
           >
             {isCreating ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}
             Adicionar
@@ -726,7 +726,7 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
                         if (e.key === 'Escape') cancelEditing();
                       }}
                       autoFocus
-                      className="flex-1 px-2.5 py-1.5 text-sm border border-indigo-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                      className="flex-1 px-2.5 py-1.5 text-sm border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#052447]/30"
                     />
                     <button
                       type="button"
@@ -982,7 +982,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
           <button
             type="button"
             onClick={openCreateModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-semibold hover:bg-indigo-700 transition cursor-pointer shrink-0"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#052447] text-white text-xs font-semibold hover:bg-[#073366] transition cursor-pointer shrink-0"
           >
             <Plus size={14} />
             Nova Etapa
@@ -1047,7 +1047,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
                       </button>
                     </div>
 
-                    <div className="w-6 h-6 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 flex items-center justify-center text-[11px] font-bold shrink-0">
+                    <div className="w-6 h-6 rounded-full bg-[#052447]/5 border border-[#052447]/15 text-[#052447] flex items-center justify-center text-[11px] font-bold shrink-0">
                       {step.stepNumber}
                     </div>
 
@@ -1056,7 +1056,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
                         <span className="text-sm font-semibold text-slate-800 truncate">{step.title}</span>
                         {step.required && (
                           <span
-                            className="text-indigo-500 shrink-0"
+                            className="text-[#052447] shrink-0"
                             title="Etapa obrigatória"
                           >
                             <ShieldCheck size={12} />
@@ -1131,7 +1131,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
                   value={modal.title}
                   onChange={(e) => setModal({ ...modal, title: e.target.value })}
                   autoFocus
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#052447]/30 focus:border-[#052447] outline-none"
                   placeholder="Ex: Batismo nas Águas"
                 />
               </div>
@@ -1141,7 +1141,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
                   value={modal.description}
                   onChange={(e) => setModal({ ...modal, description: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#052447]/30 focus:border-[#052447] outline-none resize-none"
                   placeholder="O que o membro precisa fazer nesta etapa?"
                 />
               </div>
@@ -1151,7 +1151,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
                 className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer"
               >
                 {modal.required ? (
-                  <CheckCircle2 size={18} className="text-indigo-600" />
+                  <CheckCircle2 size={18} className="text-[#052447]" />
                 ) : (
                   <Circle size={18} className="text-slate-300" />
                 )}
@@ -1170,7 +1170,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
                 type="button"
                 onClick={handleSaveModal}
                 disabled={isSavingModal || !modal.title.trim()}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 transition cursor-pointer"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#052447] text-white text-sm font-semibold hover:bg-[#073366] disabled:opacity-50 transition cursor-pointer"
               >
                 {isSavingModal && <Loader2 size={15} className="animate-spin" />}
                 Salvar
@@ -1321,7 +1321,7 @@ const LoginsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="Buscar membro por nome ou login..."
-            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-[#052447]/30 focus:border-[#052447] outline-none"
           />
         </div>
       </div>
@@ -1385,7 +1385,7 @@ const LoginsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) => {
                       type="button"
                       onClick={() => handleResetPassword(m)}
                       disabled={savingId === m.id}
-                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 disabled:opacity-50 transition cursor-pointer shrink-0"
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-[#052447] hover:bg-[#052447]/5 disabled:opacity-50 transition cursor-pointer shrink-0"
                       title="Gerar senha temporária"
                     >
                       {savingId === m.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
@@ -1446,7 +1446,7 @@ const LoginsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) => {
                   setResetResult(null);
                   setCopied(false);
                 }}
-                className="px-3.5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition cursor-pointer"
+                className="px-3.5 py-2 rounded-lg bg-[#052447] text-white text-sm font-semibold hover:bg-[#073366] transition cursor-pointer"
               >
                 Concluído
               </button>
