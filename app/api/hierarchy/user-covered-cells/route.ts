@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 
 /**
@@ -11,9 +12,21 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get('userId');
-    const churchId = searchParams.get('churchId');
+    // Membro só consulta a própria cobertura e a própria igreja; o Administrador do Sistema pode consultar qualquer uma.
+    const requestedUserId = searchParams.get('userId');
+    if (
+      !auth.actor.isSystemAdmin &&
+      requestedUserId &&
+      requestedUserId !== auth.actor.memberId
+    ) {
+      return forbiddenChurch();
+    }
+    const userId = requestedUserId || auth.actor.memberId;
+    const churchId = resolveChurchId(auth.actor, searchParams.get('churchId'));
+    if (!churchId) return forbiddenChurch();
 
     if (!userId || !churchId) {
       return NextResponse.json(

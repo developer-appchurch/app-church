@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { OrganizationalUnit, CreateUnitInput } from '@/types';
 import crypto from 'crypto';
@@ -137,8 +138,11 @@ function invalidateServerHierarchyUnitsCache(churchId?: string) {
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
-    const churchId = searchParams.get('churchId');
+    const churchId = resolveChurchId(auth.actor, searchParams.get('churchId'));
+    if (!churchId) return forbiddenChurch();
     const levelTypeId = searchParams.get('levelTypeId');
     const mode = searchParams.get('mode') || 'full'; // 'flat' | 'full'
 

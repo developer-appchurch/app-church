@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { CelulaCardItem } from '@/types';
 
@@ -31,13 +32,18 @@ function invalidateServerCelulasCache(churchId?: string) {
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const supabase = getSupabaseServerClient();
     if (!supabase) {
       return NextResponse.json({ error: 'Supabase não inicializado.' }, { status: 500 });
     }
 
     const { searchParams } = new URL(req.url);
-    const churchId = searchParams.get('churchId') || searchParams.get('igrejaId') || '';
+    const requestedChurchId = searchParams.get('churchId') || searchParams.get('igrejaId') || '';
+    const resolvedChurchId = resolveChurchId(auth.actor, requestedChurchId);
+    if (requestedChurchId && !resolvedChurchId) return forbiddenChurch();
+    const churchId = resolvedChurchId || '';
     const search = (searchParams.get('search') || '').trim();
     const diaSemana = (searchParams.get('diaSemana') || '').trim();
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { ChurchHierarchicalLevel } from '@/types';
 import crypto from 'crypto';
@@ -17,7 +18,10 @@ function generateUUID(): string {
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const churchId = searchParams.get('churchId');
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const churchId = resolveChurchId(auth.actor, searchParams.get('churchId'));
+    if (searchParams.get('churchId') && !churchId) return forbiddenChurch();
 
     if (!churchId) {
       return NextResponse.json({ error: 'Parâmetro churchId é obrigatório.' }, { status: 400 });
