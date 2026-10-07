@@ -460,10 +460,15 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     if (isAreaLeader) {
       if (units && units.length > 0) {
         const userAreas = units.filter((u) => {
+          // Normaliza acentos: o nível se chama "Área" (com acento) e 'área'.includes('area') é falso
+          const levelNorm = (u.levelTypeName || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
           const isAreaType =
-            u.levelTypeName?.toLowerCase().includes('area') ||
-            u.levelTypeName?.toLowerCase().includes('distrito') ||
-            u.levelTypeName?.toLowerCase().includes('rede');
+            levelNorm.includes('area') ||
+            levelNorm.includes('distrito') ||
+            levelNorm.includes('rede');
           const isLeader = u.leaders?.some(
             (l) => l.id === currentUser?.id || l.name?.toLowerCase() === currentUser?.name?.toLowerCase()
           );
