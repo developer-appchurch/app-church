@@ -286,7 +286,7 @@ export const RankingsView: React.FC<RankingsViewProps> = ({ currentUser }) => {
         <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
             <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-              {completo ? 'Lista completa' : 'Top 5'}
+              {completo ? 'Lista completa' : 'Top 7'}
             </p>
             {!isLoading && totalCelulas > 0 && (
               <p className="text-[11px] text-slate-400 flex items-center gap-1">
@@ -370,7 +370,7 @@ export const RankingsView: React.FC<RankingsViewProps> = ({ currentUser }) => {
                 className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-slate-300 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50"
               >
                 <Shield size={15} />
-                {completo ? 'Mostrar só o Top 5' : 'Ver lista completa'}
+                {completo ? 'Mostrar só o Top 7' : 'Ver lista completa'}
               </button>
             </div>
           )}
