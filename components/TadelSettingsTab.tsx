@@ -16,7 +16,7 @@ const EMPTY_DRAFT: ScheduleDraft = {
 };
 
 const inputClass =
-  'w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400';
+  'w-full border border-slate-200 rounded-lg px-2.5 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#052447]/20 focus:border-[#052447]';
 
 /** Aba "TADEL" em Configurações da Igreja: nome, níveis que registram presença e horários. */
 export const TadelSettingsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) => {
@@ -160,7 +160,7 @@ export const TadelSettingsTab: React.FC<{ currentUser: UserProfile }> = ({ curre
                   }
                   className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold border transition cursor-pointer ${
                     checked
-                      ? 'bg-indigo-600 border-indigo-600 text-white'
+                      ? 'bg-[#052447] border-[#052447] text-white'
                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -179,7 +179,7 @@ export const TadelSettingsTab: React.FC<{ currentUser: UserProfile }> = ({ curre
           type="button"
           onClick={handleSaveGeneral}
           disabled={!generalChanged || levelIds.length === 0 || !name.trim() || isSavingGeneral}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 cursor-pointer disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-[#052447] hover:bg-[#073366] disabled:bg-slate-300 cursor-pointer disabled:cursor-not-allowed"
         >
           {isSavingGeneral ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
           Salvar
@@ -202,14 +202,14 @@ export const TadelSettingsTab: React.FC<{ currentUser: UserProfile }> = ({ curre
         <div className="space-y-2">
           {config.schedules.map((s) =>
             editingId === s.id ? (
-              <div key={s.id} className="border border-indigo-200 bg-indigo-50/40 rounded-xl p-3 space-y-3">
+              <div key={s.id} className="border border-slate-300 bg-slate-50 rounded-xl p-3 space-y-3">
                 <ScheduleFields value={editDraft} onChange={setEditDraft} />
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={() => handleSaveEdit(s.id)}
                     disabled={busyId === s.id}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold text-white bg-[#052447] hover:bg-[#073366] cursor-pointer"
                   >
                     {busyId === s.id ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
                     Salvar
