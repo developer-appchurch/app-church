@@ -78,6 +78,13 @@ export const TadelClient = {
   },
 };
 
+/** Opções de query compartilhadas (tela + prefetch do menu) para reaproveitar o mesmo cache. */
+export const tadelStatusQueryOptions = (churchId?: string) => ({
+  queryKey: ['tadel-status', churchId || ''] as const,
+  queryFn: () => TadelClient.getStatus(churchId),
+  staleTime: 60_000,
+});
+
 export const WEEKDAY_NAMES = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
 export const WEEKDAY_SHORT_NAMES = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 

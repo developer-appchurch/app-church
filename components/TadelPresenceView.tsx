@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarCheck,
   CheckCircle2,
@@ -14,8 +15,8 @@ import {
   ChevronRight,
   Hand,
 } from 'lucide-react';
-import type { TadelStatusResponse, TadelSupervisionResponse, UserProfile } from '@/types';
-import { TadelClient, formatTadelDate, formatTadelTime } from '@/lib/tadelClient';
+import type { TadelAttendanceRecord, TadelOccurrence, TadelStatusResponse, UserProfile } from '@/types';
+import { TadelClient, formatTadelDate, formatTadelTime, tadelStatusQueryOptions } from '@/lib/tadelClient';
 
 interface TadelPresenceViewProps {
   currentUser: UserProfile;
@@ -25,43 +26,36 @@ type ViewTab = 'mine' | 'supervision';
 
 export const TadelPresenceView: React.FC<TadelPresenceViewProps> = ({ currentUser }) => {
   const churchId = currentUser.churchId;
-  const [status, setStatus] = useState<TadelStatusResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const queryClient = useQueryClient();
+  const statusQuery = tadelStatusQueryOptions(churchId);
+  const {
+    data: status,
+    isLoading,
+    error: loadError,
+  } = useQuery({
+    ...statusQuery,
+    // Revalida em segundo plano; a abertura/fechamento da janela é calculada no aparelho
+    refetchInterval: 5 * 60_000,
+  });
   const [isRegistering, setIsRegistering] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [tab, setTab] = useState<ViewTab>('mine');
-
-  const load = useCallback(async () => {
-    try {
-      const data = await TadelClient.getStatus(churchId);
-      setStatus(data);
-      setLoadError('');
-    } catch (err: any) {
-      setLoadError(err?.message || 'Falha ao carregar o TADEL.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [churchId]);
-
-  useEffect(() => {
-    load();
-    // Atualiza a cada minuto para abrir/fechar a janela de check-in sem recarregar a página
-    const timer = setInterval(load, 60_000);
-    return () => clearInterval(timer);
-  }, [load]);
 
   const handleRegister = async () => {
     setIsRegistering(true);
     setFeedback(null);
     try {
-      await TadelClient.checkIn();
+      const { attendance } = await TadelClient.checkIn();
+      // Mostra a confirmação na hora, sem esperar recarregar a tela
+      queryClient.setQueryData<TadelStatusResponse>(statusQuery.queryKey, (prev) =>
+        prev ? applyAttendance(prev, attendance) : prev
+      );
       setFeedback({ type: 'success', message: 'Presença registrada! Obrigado por estar no TADEL.' });
     } catch (err: any) {
       setFeedback({ type: 'error', message: err?.message || 'Não foi possível registrar a presença.' });
     } finally {
       setIsRegistering(false);
-      load();
+      queryClient.invalidateQueries({ queryKey: statusQuery.queryKey });
     }
   };
 
@@ -106,16 +100,12 @@ export const TadelPresenceView: React.FC<TadelPresenceViewProps> = ({ currentUse
           </div>
         )}
 
-        {isLoading && (
-          <div className="bg-white rounded-xl border border-slate-200/80 p-10 flex justify-center text-slate-400">
-            <Loader2 className="animate-spin" size={24} />
-          </div>
-        )}
+        {isLoading && <LoadingSkeleton />}
 
         {!isLoading && loadError && !status && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm flex items-start gap-2">
             <AlertCircle size={18} className="shrink-0 mt-0.5" />
-            {loadError}
+            {(loadError as Error).message || 'Falha ao carregar o TADEL.'}
           </div>
         )}
 
@@ -145,6 +135,7 @@ const MyAttendance: React.FC<{
   onRegister: () => void;
 }> = ({ status, isRegistering, feedback, onRegister }) => {
   const name = status.name;
+  const occurrences = useLiveOccurrences(status.occurrences);
 
   if (!status.configured) {
     return (
@@ -156,11 +147,11 @@ const MyAttendance: React.FC<{
     );
   }
 
-  const openOccurrence = status.occurrences.find((o) => o.status === 'open');
-  const nextOccurrence = status.occurrences.find((o) => o.status === 'upcoming');
+  const openOccurrence = occurrences.find((o) => o.status === 'open');
+  const nextOccurrence = occurrences.find((o) => o.status === 'upcoming');
   const attendance = status.currentAttendance;
   const attendedOccurrence = attendance
-    ? status.occurrences.find((o) => o.scheduleId === attendance.scheduleId)
+    ? occurrences.find((o) => o.scheduleId === attendance.scheduleId)
     : null;
 
   return (
@@ -219,7 +210,7 @@ const MyAttendance: React.FC<{
               Horários desta semana · basta ir a um
             </p>
             <div className="space-y-2">
-              {status.occurrences.map((o) => {
+              {occurrences.map((o) => {
                 const isAttended = attendedOccurrence?.scheduleId === o.scheduleId;
                 const label = isAttended
                   ? 'Você esteve aqui'
@@ -311,26 +302,14 @@ const MyAttendance: React.FC<{
 
 const SupervisionPanel: React.FC<{ churchId: string }> = ({ churchId }) => {
   const [weekOffset, setWeekOffset] = useState(0);
-  const [data, setData] = useState<TadelSupervisionResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | 'present' | 'absent'>('all');
-
-  useEffect(() => {
-    let active = true;
-    setIsLoading(true);
-    TadelClient.getSupervision(churchId, weekOffset)
-      .then((res) => {
-        if (!active) return;
-        setData(res);
-        setError('');
-      })
-      .catch((err) => active && setError(err?.message || 'Falha ao carregar acompanhamento.'))
-      .finally(() => active && setIsLoading(false));
-    return () => {
-      active = false;
-    };
-  }, [churchId, weekOffset]);
+  const { data, isLoading, isFetching, error } = useQuery({
+    queryKey: ['tadel-supervision', churchId, weekOffset],
+    queryFn: () => TadelClient.getSupervision(churchId, weekOffset),
+    staleTime: 60_000,
+    // Mantém a semana anterior na tela enquanto a próxima carrega (sem piscar)
+    placeholderData: keepPreviousData,
+  });
 
   const presentCount = data?.leaders.filter((l) => l.attendance).length || 0;
   const total = data?.leaders.length || 0;
@@ -369,10 +348,12 @@ const SupervisionPanel: React.FC<{ churchId: string }> = ({ churchId }) => {
         </div>
       )}
 
-      {!isLoading && error && <p className="text-sm text-red-600">{error}</p>}
+      {!isLoading && error && (
+        <p className="text-sm text-red-600">{(error as Error).message || 'Falha ao carregar acompanhamento.'}</p>
+      )}
 
       {!isLoading && data && (
-        <>
+        <div className={`space-y-4 transition-opacity ${isFetching ? 'opacity-60' : ''}`}>
           <div className="grid grid-cols-3 gap-2 text-center">
             <Stat label="Presentes" value={presentCount} className="text-emerald-700 bg-emerald-50" />
             <Stat label="Ausentes" value={total - presentCount} className="text-red-600 bg-red-50" />
@@ -440,7 +421,7 @@ const SupervisionPanel: React.FC<{ churchId: string }> = ({ churchId }) => {
               ))}
             </div>
           )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -467,5 +448,59 @@ const InfoCard: React.FC<{ icon: React.ElementType; title: string; children: Rea
     </div>
     <p className="font-bold text-slate-800">{title}</p>
     <p className="text-sm text-slate-500 mt-1">{children}</p>
+  </div>
+);
+
+// ------------------------------------------------------------------------------
+// Auxiliares
+// ------------------------------------------------------------------------------
+
+/** Recalcula no aparelho se cada horário está aberto/encerrado, atualizando a cada 30s. */
+function useLiveOccurrences(occurrences: TadelOccurrence[]): TadelOccurrence[] {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  return useMemo(
+    () =>
+      occurrences.map((o) => {
+        const opens = Date.parse(o.opensAt);
+        const closes = Date.parse(o.closesAt);
+        const status: TadelOccurrence['status'] = now < opens ? 'upcoming' : now > closes ? 'closed' : 'open';
+        return { ...o, status };
+      }),
+    [occurrences, now]
+  );
+}
+
+function applyAttendance(status: TadelStatusResponse, attendance: TadelAttendanceRecord): TadelStatusResponse {
+  const history = status.history.map((h, i) => (i === 0 ? { ...h, attendance } : h));
+  const wasCounted = status.history[0]?.attendance !== null;
+  const present = status.frequency.present + (wasCounted ? 0 : 1);
+  const total = status.frequency.total + (wasCounted ? 0 : 1);
+  return {
+    ...status,
+    currentAttendance: attendance,
+    history,
+    frequency: { present, total, percentage: total > 0 ? Math.round((present / total) * 100) : 0 },
+  };
+}
+
+const LoadingSkeleton: React.FC = () => (
+  <div className="space-y-3 animate-pulse" aria-busy="true" aria-label="Carregando">
+    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 p-5 space-y-4">
+      <div className="h-14 w-full sm:w-72 mx-auto rounded-2xl bg-slate-200" />
+      <div className="h-3 w-48 mx-auto rounded bg-slate-100" />
+      <div className="space-y-2 pt-2">
+        <div className="h-12 rounded-xl bg-slate-100" />
+        <div className="h-12 rounded-xl bg-slate-100" />
+      </div>
+    </div>
+    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 p-5 space-y-2">
+      {Array.from({ length: 4 }, (_, i) => (
+        <div key={i} className="h-6 rounded bg-slate-100" />
+      ))}
+    </div>
   </div>
 );

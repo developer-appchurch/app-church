@@ -66,16 +66,17 @@ export async function getTadelSessionMember(
     },
   });
 
-  const {
-    data: { user: authUser },
-  } = await ssrClient.auth.getUser();
-  if (!authUser) return null;
+  // getClaims() valida a assinatura do JWT localmente (chaves assimétricas), sem ida ao
+  // servidor de Auth a cada requisição; só recorre ao Auth quando não consegue validar localmente.
+  const { data: claimsData } = await ssrClient.auth.getClaims();
+  const claims: any = claimsData?.claims;
+  if (!claims?.sub) return null;
 
   const { data: profileRows, error } = await supabaseAdmin.rpc('get_session_profile', {
-    p_membro_id: authUser.app_metadata?.membro_id || null,
-    p_auth_user_id: authUser.id,
-    p_login: authUser.user_metadata?.login || null,
-    p_email: authUser.email ? authUser.email.toLowerCase() : null,
+    p_membro_id: claims.app_metadata?.membro_id || null,
+    p_auth_user_id: claims.sub,
+    p_login: claims.user_metadata?.login || null,
+    p_email: claims.email ? String(claims.email).toLowerCase() : null,
   });
   if (error) {
     console.error('[tadel] Erro ao resolver sessão:', error);
@@ -105,29 +106,26 @@ export async function canManageTadel(
   if (roleNorm.includes('pastor') || roleNorm.includes('administrador')) return true;
   if (!member.id) return false;
 
-  const { data: perms } = await supabase
-    .from('permissoes')
-    .select('id')
-    .in('codigo', ['church:admin', 'tadel:manage']);
-  const permIds = (perms || []).map((p: any) => p.id);
-  if (permIds.length === 0) return false;
-
-  const { data: overrides } = await supabase
-    .from('membro_permissoes')
-    .select('permissao_id, concedida')
-    .eq('membro_id', member.id)
-    .in('permissao_id', permIds);
+  // Overrides do membro e permissões do papel em paralelo (uma ida ao banco)
+  const codes = ['church:admin', 'tadel:manage'];
+  const [{ data: overrides }, { data: rolePerms }] = await Promise.all([
+    supabase
+      .from('membro_permissoes')
+      .select('permissao_id, concedida, permissao:permissoes!inner(codigo)')
+      .eq('membro_id', member.id)
+      .in('permissao.codigo', codes),
+    member.roleId
+      ? supabase
+          .from('papel_permissoes')
+          .select('permissao_id, permissao:permissoes!inner(codigo)')
+          .eq('papel_id', member.roleId)
+          .in('permissao.codigo', codes)
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
 
   const overrideMap = new Map<string, boolean>();
   (overrides || []).forEach((o: any) => overrideMap.set(o.permissao_id, Boolean(o.concedida)));
   if (Array.from(overrideMap.values()).some(Boolean)) return true;
-
-  if (!member.roleId) return false;
-  const { data: rolePerms } = await supabase
-    .from('papel_permissoes')
-    .select('permissao_id')
-    .eq('papel_id', member.roleId)
-    .in('permissao_id', permIds);
 
   return (rolePerms || []).some((rp: any) => overrideMap.get(rp.permissao_id) !== false);
 }
