@@ -34,6 +34,7 @@ import {
   Plus,
   MapPin,
   Clock,
+  CalendarCheck,
 } from 'lucide-react';
 import {
   optimizeImageToWebP,
@@ -305,7 +306,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     AppChurchService.hasPermission(user, 'track:manage', userPermissions) ||
     AppChurchService.hasPermission(user, 'unit:transfer_delete', userPermissions) ||
     AppChurchService.hasPermission(user, 'neighborhood:manage', userPermissions) ||
-    AppChurchService.hasPermission(user, 'member:access_manage', userPermissions);
+    AppChurchService.hasPermission(user, 'member:access_manage', userPermissions) ||
+    AppChurchService.hasPermission(user, 'tadel:manage', userPermissions);
 
   // Restrito a Líder de Célula ou funções acima (Setor, Área, Rede, Distrito, Pastor, Supervisor, Admin) —
   // deliberadamente mais estrito que canAccessLeadershipFeatures, que também libera Discipulador/Anfitrião/etc.
@@ -496,6 +498,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             label: 'Relatório Semanal',
             sublabel: 'Lançar relatório de presença',
             icon: FileText,
+          },
+          {
+            id: 'tadel' as ActiveScreen,
+            label: 'Presença no TADEL',
+            sublabel: 'Registro semanal do líder',
+            icon: CalendarCheck,
           },
           {
             id: 'leadership_track' as ActiveScreen,
