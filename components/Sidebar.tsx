@@ -326,6 +326,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
     userRoleNorm.includes('administrador') ||
     userRoleNorm.includes('líder de');
 
+  // Indicadores, Níveis Organizacionais e Visão Geral: somente níveis hierárquicos acima de
+  // Líder de Célula (Setor, Área, Distrito, Supervisor), pastores e quem tem permissão de administrador.
+  const canAccessChurchManagementScreens =
+    isSystemAdmin ||
+    userRoleNorm.includes('pastor') ||
+    userRoleNorm.includes('supervisor') ||
+    userRoleNorm.includes('administrador') ||
+    userRoleNorm.includes('líder de setor') ||
+    userRoleNorm.includes('líder de área') ||
+    userRoleNorm.includes('líder de distrito') ||
+    AppChurchService.hasPermission(user, 'church:admin', userPermissions);
+
   // --- Criação Rápida de Célula (modal disparado direto pelo menu lateral) ---
   const [isNewCellModalOpen, setIsNewCellModalOpen] = useState(false);
   const [newCellSetorId, setNewCellSetorId] = useState('');
@@ -537,24 +549,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
             sublabel: 'Galeria & busca de todas as células',
             icon: Compass,
           },
-          {
-            id: 'church_indicators' as ActiveScreen,
-            label: 'Indicadores da Igreja',
-            sublabel: 'Trilho de Liderança em gráficos',
-            icon: BarChart3,
-          },
-          {
-            id: 'hierarchy_units' as ActiveScreen,
-            label: 'Níveis Organizacionais',
-            sublabel: 'Cadastro por nível (Área, Setor, Célula)',
-            icon: Layers,
-          },
-          {
-            id: 'church_overview' as ActiveScreen,
-            label: 'Visão Geral da Igreja',
-            sublabel: 'Organograma & árvore hierárquica',
-            icon: Network,
-          },
+          ...(isCellLeaderOrAbove
+            ? [
+                {
+                  id: 'rankings' as ActiveScreen,
+                  label: 'Rankings',
+                  sublabel: 'Domingo em Dia & Guardiões da Constância',
+                  icon: Trophy,
+                },
+              ]
+            : []),
+          ...(canAccessChurchManagementScreens
+            ? [
+                {
+                  id: 'church_indicators' as ActiveScreen,
+                  label: 'Indicadores da Igreja',
+                  sublabel: 'Trilho de Liderança em gráficos',
+                  icon: BarChart3,
+                },
+                {
+                  id: 'hierarchy_units' as ActiveScreen,
+                  label: 'Níveis Organizacionais',
+                  sublabel: 'Cadastro por nível (Área, Setor, Célula)',
+                  icon: Layers,
+                },
+                {
+                  id: 'church_overview' as ActiveScreen,
+                  label: 'Visão Geral da Igreja',
+                  sublabel: 'Organograma & árvore hierárquica',
+                  icon: Network,
+                },
+              ]
+            : []),
         ]
       : [
           {
@@ -564,16 +590,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             icon: Compass,
           },
         ]),
-    ...(isCellLeaderOrAbove
-      ? [
-          {
-            id: 'rankings' as ActiveScreen,
-            label: 'Rankings',
-            sublabel: 'Domingo em Dia & Guardiões da Constância',
-            icon: Trophy,
-          },
-        ]
-      : []),
     ...(canManagePermissions
       ? [
           {
