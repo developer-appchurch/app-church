@@ -304,7 +304,8 @@ export type ActiveScreen =
   | 'permissions_manage'
   | 'church_settings'
   | 'church_indicators'
-  | 'tadel';
+  | 'tadel'
+  | 'rankings';
 
 export interface CelulaCardItem {
   id: string;
