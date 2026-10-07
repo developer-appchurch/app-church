@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSystemAdmin } from '@/lib/requireSystemAdmin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 
 /**
@@ -9,6 +10,9 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
  * 4. Extensão pg_trgm e índice trigram em membros(nome)
  */
 export async function POST(req: NextRequest) {
+  const denied = requireSystemAdmin(req);
+  if (denied) return denied;
+
   try {
     const supabase = getSupabaseServerClient();
     if (!supabase) {

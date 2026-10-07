@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSystemAdmin } from '@/lib/requireSystemAdmin';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 
@@ -8,6 +9,9 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
  * POST /api/setup-unidades-schema
  */
 export async function POST(req: NextRequest) {
+  const denied = requireSystemAdmin(req);
+  if (denied) return denied;
+
   try {
     const supabase = getSupabaseAdminClient() || getSupabaseServerClient();
     if (!supabase) {
