@@ -35,6 +35,7 @@ import {
   MapPin,
   Clock,
   CalendarCheck,
+  Trophy,
 } from 'lucide-react';
 import {
   optimizeImageToWebP,
@@ -563,6 +564,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             icon: Compass,
           },
         ]),
+    ...(isCellLeaderOrAbove
+      ? [
+          {
+            id: 'rankings' as ActiveScreen,
+            label: 'Rankings',
+            sublabel: 'Domingo em Dia & Guardiões da Constância',
+            icon: Trophy,
+          },
+        ]
+      : []),
     ...(canManagePermissions
       ? [
           {

@@ -106,6 +106,11 @@ const ChurchIndicatorsView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const RankingsView = dynamic(
+  () => import('../components/RankingsView').then((m) => m.RankingsView),
+  { loading: ViewLoading, ssr: false }
+);
+
 const NotificationPermissionBanner = dynamic(
   () => import('../components/NotificationPermissionBanner').then((m) => m.NotificationPermissionBanner),
   { ssr: false }
@@ -959,6 +964,9 @@ export default function Home() {
 
           {activeScreen === 'church_indicators' && user && (
             <ChurchIndicatorsView currentUser={user} onBack={() => setActiveScreen('feed')} />
+          )}
+          {activeScreen === 'rankings' && user && (
+            <RankingsView currentUser={user} onBack={() => setActiveScreen('feed')} />
           )}
         </main>
       </PullToRefresh>
