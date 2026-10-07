@@ -37,25 +37,30 @@ export async function GET(req: NextRequest) {
     const weekOffset = Math.min(0, Math.max(-52, parseInt(params.get('weekOffset') || '0', 10) || 0));
     const week = shiftWeek(getTadelWeek(localDateStr()), weekOffset);
 
-    const [config, levels, canManage] = await Promise.all([
+    // Uma rodada em paralelo: todos os vínculos de liderança (filtrados por nível em memória),
+    // árvore de unidades e presenças da semana
+    const [config, levels, canManage, allLinks, unitsRes, attendanceRes] = await Promise.all([
       loadTadelConfig(supabase, churchId, true),
       loadChurchLevels(supabase, churchId),
       canManageTadel(supabase, member),
+      loadLeaderLinks(supabase, churchId),
+      supabase.from('unidades').select('id, pai_id').eq('igreja_id', churchId).eq('ativo', true),
+      supabase
+        .from('tadel_presencas')
+        .select('membro_id, horario_id, data_encontro, registrado_em')
+        .eq('igreja_id', churchId)
+        .eq('ano_semana', week.year)
+        .eq('numero_semana', week.week),
     ]);
 
-    const levelIds = resolveParticipatingLevelIds(levels, config.configuredLevelIds);
-    let links = await loadLeaderLinks(supabase, churchId, { levelIds });
+    const levelIds = new Set(resolveParticipatingLevelIds(levels, config.configuredLevelIds));
+    let links = allLinks.filter((l) => levelIds.has(l.levelId));
 
     if (!canManage) {
-      const ownLinks = member.id ? await loadLeaderLinks(supabase, churchId, { memberId: member.id }) : [];
-      const { data: units } = await supabase
-        .from('unidades')
-        .select('id, pai_id')
-        .eq('igreja_id', churchId)
-        .eq('ativo', true);
+      const ownLinks = member.id ? allLinks.filter((l) => l.memberId === member.id) : [];
 
       const childrenOf = new Map<string, string[]>();
-      (units || []).forEach((u: any) => {
+      (unitsRes.data || []).forEach((u: any) => {
         if (!u.pai_id) return;
         childrenOf.set(u.pai_id, [...(childrenOf.get(u.pai_id) || []), u.id]);
       });
@@ -79,17 +84,11 @@ export async function GET(req: NextRequest) {
     const memberIds = Array.from(new Set(links.map((l) => l.memberId)));
     const levelName = new Map(levels.map((l) => [l.id, l.name]));
 
-    const [{ data: members }, { data: attendanceRows }] = await Promise.all([
+    const { data: members } =
       memberIds.length > 0
-        ? supabase.from('membros').select('id, nome, url_avatar').in('id', memberIds)
-        : Promise.resolve({ data: [] as any[] }),
-      supabase
-        .from('tadel_presencas')
-        .select('membro_id, horario_id, data_encontro, registrado_em')
-        .eq('igreja_id', churchId)
-        .eq('ano_semana', week.year)
-        .eq('numero_semana', week.week),
-    ]);
+        ? await supabase.from('membros').select('id, nome, url_avatar').in('id', memberIds)
+        : { data: [] as any[] };
+    const attendanceRows = attendanceRes.data;
 
     const memberById = new Map((members || []).map((m: any) => [m.id, m]));
     const attendanceByMember = new Map((attendanceRows || []).map((r: any) => [r.membro_id, r]));

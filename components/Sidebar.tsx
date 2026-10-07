@@ -50,6 +50,7 @@ import { uploadUnitPhoto, deleteUnitPhoto } from '../lib/unitPhotoStorage';
 import { uploadAvatarPhoto, deleteAvatarPhoto } from '../lib/avatarPhotoStorage';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { tadelStatusQueryOptions } from '../lib/tadelClient';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -109,6 +110,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const queryClient = useQueryClient();
 
   const handlePrefetchItem = (screenId: ActiveScreen) => {
+    if (screenId === 'tadel' && user) {
+      // Pré-carrega o chunk da tela e a situação do TADEL no cache do React Query
+      import('./TadelPresenceView').catch(() => {});
+      queryClient.prefetchQuery(tadelStatusQueryOptions(user.churchId)).catch(() => {});
+      return;
+    }
     if (screenId === 'reports' && currentCell?.id) {
       // 1. Pré-carrega o chunk do componente WeeklyReportView
       import('./WeeklyReportView').catch(() => {});

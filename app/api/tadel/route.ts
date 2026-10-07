@@ -38,46 +38,43 @@ export async function GET(req: NextRequest) {
     const churchId = member.churchId;
     const nowMs = Date.now();
 
-    const [config, levels, canManage] = await Promise.all([
+    const currentWeek = getTadelWeek(localDateStr(nowMs));
+    const weeks = Array.from({ length: HISTORY_WEEKS }, (_, i) => shiftWeek(currentWeek, -i));
+    const oldest = weeks[weeks.length - 1];
+
+    // Todas as consultas dependem só da sessão: uma única rodada em paralelo ao banco
+    const [config, levels, canManage, ownLinks, unitsRes, attendanceRes] = await Promise.all([
       loadTadelConfig(supabase, churchId, true),
       loadChurchLevels(supabase, churchId),
       canManageTadel(supabase, member),
+      member.id ? loadLeaderLinks(supabase, churchId, { memberId: member.id }) : Promise.resolve([]),
+      supabase.from('unidades').select('pai_id').eq('igreja_id', churchId).eq('ativo', true).not('pai_id', 'is', null),
+      member.id
+        ? supabase
+            .from('tadel_presencas')
+            .select('horario_id, ano_semana, numero_semana, data_encontro, registrado_em')
+            .eq('membro_id', member.id)
+            .gte('data_encontro', oldest.startDate)
+        : Promise.resolve({ data: [] as any[] }),
     ]);
 
     const activeSchedules = config.schedules.filter((s) => s.active);
     const levelIds = resolveParticipatingLevelIds(levels, config.configuredLevelIds);
     const levelName = new Map(levels.map((l) => [l.id, l.name]));
 
-    const [ownLinks, unitsRes] = await Promise.all([
-      member.id ? loadLeaderLinks(supabase, churchId, { memberId: member.id }) : Promise.resolve([]),
-      supabase.from('unidades').select('pai_id').eq('igreja_id', churchId).eq('ativo', true),
-    ]);
-
     const eligibleUnits = ownLinks
       .filter((l) => levelIds.includes(l.levelId))
       .map((l) => ({ id: l.unitId, name: l.unitName, levelName: levelName.get(l.levelId) || '' }));
 
     const ownUnitIds = new Set(ownLinks.map((l) => l.unitId));
-    const leadsUnitWithChildren = (unitsRes.data || []).some((u: any) => u.pai_id && ownUnitIds.has(u.pai_id));
+    const leadsUnitWithChildren = (unitsRes.data || []).some((u: any) => ownUnitIds.has(u.pai_id));
 
-    const currentWeek = getTadelWeek(localDateStr(nowMs));
     const occurrences = activeSchedules
       .map((s) => buildOccurrence(s, currentWeek, nowMs))
       .sort((a, b) => a.opensAt.localeCompare(b.opensAt));
 
-    // Histórico: semana atual + 7 anteriores
-    const weeks = Array.from({ length: HISTORY_WEEKS }, (_, i) => shiftWeek(currentWeek, -i));
-    const oldest = weeks[weeks.length - 1];
-
     const attendanceByWeek = new Map<string, any>();
-    if (member.id) {
-      const { data: rows } = await supabase
-        .from('tadel_presencas')
-        .select('horario_id, ano_semana, numero_semana, data_encontro, registrado_em')
-        .eq('membro_id', member.id)
-        .gte('data_encontro', oldest.startDate);
-      (rows || []).forEach((r: any) => attendanceByWeek.set(`${r.ano_semana}-${r.numero_semana}`, r));
-    }
+    (attendanceRes.data || []).forEach((r: any) => attendanceByWeek.set(`${r.ano_semana}-${r.numero_semana}`, r));
 
     const history: TadelHistoryItem[] = weeks.map((week) => {
       const row = attendanceByWeek.get(`${week.year}-${week.week}`);
@@ -135,14 +132,14 @@ export async function POST(req: NextRequest) {
     }
 
     const churchId = member.churchId;
-    const [config, levels] = await Promise.all([
+    const [config, levels, ownLinks] = await Promise.all([
       loadTadelConfig(supabase, churchId),
       loadChurchLevels(supabase, churchId),
+      loadLeaderLinks(supabase, churchId, { memberId: member.id }),
     ]);
 
     const levelIds = resolveParticipatingLevelIds(levels, config.configuredLevelIds);
-    const links = await loadLeaderLinks(supabase, churchId, { memberId: member.id, levelIds });
-    if (links.length === 0) {
+    if (!ownLinks.some((l) => levelIds.includes(l.levelId))) {
       return NextResponse.json(
         { error: `Somente os líderes participantes podem registrar presença no ${config.name}.` },
         { status: 403 }
