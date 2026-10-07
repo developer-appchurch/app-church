@@ -96,7 +96,7 @@ export const TadelPresenceView: React.FC<TadelPresenceViewProps> = ({ currentUse
                 type="button"
                 onClick={() => setTab(id)}
                 className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold transition cursor-pointer ${
-                  tab === id ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                  tab === id ? 'bg-[#052447] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
                 <Icon size={15} />
