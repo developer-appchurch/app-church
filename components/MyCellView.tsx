@@ -456,8 +456,47 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       return sortAZ(cells);
     }
 
+    // Cobertura pela árvore de unidades: células abaixo de qualquer unidade (Área, Setor,
+    // Distrito, Rede) que o usuário lidera em unidade_lideres. Não depende de nomes de nível
+    // nem do setor do cadastro. (O modo 'flat' da API não devolve o nome do nível.)
+    const treeCoveredCells = (): CellGroup[] => {
+      if (!units || units.length === 0 || !currentUser) return [];
+      const uId = (currentUser.id || '').toLowerCase().trim();
+      if (!uId) return [];
+      const childrenOf = new Map<string, string[]>();
+      units.forEach((u) => {
+        if (u.parentId) {
+          const list = childrenOf.get(u.parentId) || [];
+          list.push(u.id);
+          childrenOf.set(u.parentId, list);
+        }
+      });
+      const ledNonLeaf = units.filter(
+        (u) =>
+          childrenOf.has(u.id) &&
+          u.leaders?.some((l) => (l.id || '').toLowerCase().trim() === uId)
+      );
+      if (ledNonLeaf.length === 0) return [];
+      const descendants = new Set<string>();
+      const stack = ledNonLeaf.map((u) => u.id);
+      while (stack.length > 0) {
+        const id = stack.pop() as string;
+        (childrenOf.get(id) || []).forEach((childId) => {
+          if (!descendants.has(childId)) {
+            descendants.add(childId);
+            stack.push(childId);
+          }
+        });
+      }
+      return cells.filter((c) => descendants.has(c.id));
+    };
+
+
     // 2. Líder de Área: Todas as células da sua área
     if (isAreaLeader) {
+      const treeCells = treeCoveredCells();
+      if (treeCells.length > 0) return sortAZ(treeCells);
+
       if (units && units.length > 0) {
         const userAreas = units.filter((u) => {
           // Normaliza acentos: o nível se chama "Área" (com acento) e 'área'.includes('area') é falso
@@ -509,6 +548,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
     // 3. Líder de Setor: Cada uma das células do seu setor
     if (isSectorLeader) {
+      const treeCells = treeCoveredCells();
+      if (treeCells.length > 0) return sortAZ(treeCells);
+
       if (units && units.length > 0) {
         const userSectors = units.filter((u) => {
           const isSecType = u.levelTypeName?.toLowerCase().includes('setor');
