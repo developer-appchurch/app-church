@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireLevel, unitInChurch } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { CellGroup } from '@/types';
 import crypto from 'crypto';
@@ -31,7 +32,14 @@ export interface CreateCellPayload {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedLevel = requireLevel(auth.actor, 2);
+    if (deniedLevel) return deniedLevel;
     const body: CreateCellPayload = await req.json();
+    const sessionChurchId = resolveChurchId(auth.actor, body.churchId);
+    if (body.churchId && !sessionChurchId) return forbiddenChurch();
+    if (sessionChurchId) body.churchId = sessionChurchId;
 
     if (!body.churchId) {
       return NextResponse.json(

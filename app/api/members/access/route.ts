@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireCanAssignRole, loadMemberInChurch } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { createServerClient } from '@supabase/ssr';
 import { createAuthUserForMember, getSyntheticMemberEmail } from '@/lib/supabase/authAdmin';
@@ -14,8 +15,13 @@ import { hasValidAdminSession } from '@/lib/adminSession';
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedList = await requireAnyPermission(auth.actor, ['member:access_manage', 'member:edit']);
+    if (deniedList) return deniedList;
     const { searchParams } = new URL(req.url);
-    const churchId = searchParams.get('churchId');
+    const churchId = resolveChurchId(auth.actor, searchParams.get('churchId'));
+    if (searchParams.get('churchId') && !churchId) return forbiddenChurch();
     const search = (searchParams.get('search') || '').trim();
 
     if (!churchId) {
@@ -74,8 +80,20 @@ export async function GET(req: NextRequest) {
  */
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedAccess = await requireAnyPermission(auth.actor, ['member:access_manage']);
+    if (deniedAccess) return deniedAccess;
     const body = await req.json();
-    const { memberId, churchId, accessActive } = body || {};
+    const { memberId, accessActive } = body || {};
+    if (memberId) {
+      const targetCheck = await loadMemberInChurch(auth.actor, memberId);
+      if (targetCheck.error) return targetCheck.error;
+      if (!auth.actor.isSystemAdmin && targetCheck.member.level > auth.actor.level) {
+        return NextResponse.json({ error: 'Este membro tem um nível acima do seu.' }, { status: 403 });
+      }
+    }
+    const churchId = resolveChurchId(auth.actor, body?.churchId);
 
     if (!memberId || typeof accessActive !== 'boolean') {
       return NextResponse.json(
@@ -132,11 +150,20 @@ function generateTemporaryPassword(): string {
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedLogin = await requireAnyPermission(auth.actor, ['member:access_manage', 'member:edit']);
+    if (deniedLogin) return deniedLogin;
     const body = await req.json();
     const { memberId, churchId, login, password } = body || {};
 
     if (!memberId) {
       return NextResponse.json({ error: 'memberId é obrigatório.' }, { status: 400 });
+    }
+    const targetCheck = await loadMemberInChurch(auth.actor, memberId);
+    if (targetCheck.error) return targetCheck.error;
+    if (!auth.actor.isSystemAdmin && targetCheck.member.level > auth.actor.level) {
+      return NextResponse.json({ error: 'Este membro tem um nível acima do seu.' }, { status: 403 });
     }
 
     const supabase = getSupabaseServerClient();

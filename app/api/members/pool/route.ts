@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireCanAssignRole, loadMemberInChurch } from '@/lib/requireSession';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { createAuthUserForMember, deleteAuthUserForMember } from '@/lib/supabase/authAdmin';
@@ -68,8 +69,11 @@ async function getCachedUnits(supabase: any, churchId: string) {
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
-    const churchId = searchParams.get('churchId');
+    const churchId = resolveChurchId(auth.actor, searchParams.get('churchId'));
+    if (searchParams.get('churchId') && !churchId) return forbiddenChurch();
     const filter = searchParams.get('filter') || 'all'; // 'all' | 'unlinked' | 'linked'
     const rawSearch = (searchParams.get('search') || '').trim();
     // Sanitiza contra quebra de sintaxe PostgREST (.or(...) utiliza vírgulas e aspas)
@@ -265,9 +269,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedCreate = await requireAnyPermission(auth.actor, ['member:create']);
+    if (deniedCreate) return deniedCreate;
     const body = await req.json();
     const {
-      churchId,
+      churchId: requestedChurchId,
       name,
       phone,
       email,
@@ -277,9 +285,13 @@ export async function POST(req: NextRequest) {
       notes,
     } = body;
 
+    const churchId = resolveChurchId(auth.actor, requestedChurchId);
+    if (requestedChurchId && !churchId) return forbiddenChurch();
     if (!churchId) {
       return NextResponse.json({ error: 'churchId é obrigatório.' }, { status: 400 });
     }
+    const deniedRole = await requireCanAssignRole(auth.actor, role, null);
+    if (deniedRole) return deniedRole;
     if (!name?.trim()) {
       return NextResponse.json({ error: 'O nome do membro é obrigatório.' }, { status: 400 });
     }
@@ -389,8 +401,14 @@ export async function POST(req: NextRequest) {
 // Vincular / Desvincular membro da Célula
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedEdit = await requireAnyPermission(auth.actor, ['member:edit']);
+    if (deniedEdit) return deniedEdit;
     const body = await req.json();
-    const { memberId, cellId, churchId } = body;
+    const { memberId, cellId, churchId: requestedChurchId } = body;
+    const churchId = resolveChurchId(auth.actor, requestedChurchId);
+    if (requestedChurchId && !churchId) return forbiddenChurch();
 
     if (!memberId) {
       return NextResponse.json({ error: 'memberId é obrigatório.' }, { status: 400 });
@@ -514,11 +532,23 @@ export async function PATCH(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedDelete = await requireAnyPermission(auth.actor, ['member:delete']);
+    if (deniedDelete) return deniedDelete;
     const { searchParams } = new URL(req.url);
     const memberId = searchParams.get('memberId') || searchParams.get('id');
 
     if (!memberId) {
       return NextResponse.json({ error: 'memberId é obrigatório.' }, { status: 400 });
+    }
+    const target = await loadMemberInChurch(auth.actor, memberId);
+    if (target.error) return target.error;
+    if (!auth.actor.isSystemAdmin && target.member.level > auth.actor.level) {
+      return NextResponse.json(
+        { error: 'Este membro tem um nível acima do seu.' },
+        { status: 403 }
+      );
     }
 
     const supabaseAdmin = getSupabaseAdminClient();

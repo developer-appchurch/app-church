@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireCanAssignRole, loadMemberInChurch } from '@/lib/requireSession';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { createAuthUserForMember, deleteAuthUserForMember } from '@/lib/supabase/authAdmin';
@@ -21,9 +22,13 @@ function generateUUID(): string {
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedCreate = await requireAnyPermission(auth.actor, ['member:create']);
+    if (deniedCreate) return deniedCreate;
     const body = await req.json().catch(() => ({}));
     const {
-      churchId,
+      churchId: requestedChurchId,
       name,
       login,
       password = '123456',
@@ -40,6 +45,11 @@ export async function POST(req: NextRequest) {
       notes = null,
       assignLogin = true,
     } = body;
+
+    const churchId = resolveChurchId(auth.actor, requestedChurchId);
+    if (requestedChurchId && !churchId) return forbiddenChurch();
+    const deniedRole = await requireCanAssignRole(auth.actor, role, roleId);
+    if (deniedRole) return deniedRole;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: 'O nome do membro é obrigatório.' }, { status: 400 });
@@ -331,18 +341,27 @@ export async function POST(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedDelete = await requireAnyPermission(auth.actor, ['member:delete']);
+    if (deniedDelete) return deniedDelete;
     const { searchParams } = new URL(req.url);
     const memberId = searchParams.get('memberId') || searchParams.get('id');
+    const rawBody: any = memberId ? {} : await req.json().catch(() => ({}));
 
     if (!memberId) {
-      const body = await req.json().catch(() => ({}));
-      const bodyMemberId = body.memberId || body.id;
+      const bodyMemberId = rawBody.memberId || rawBody.id;
       if (!bodyMemberId) {
         return NextResponse.json({ error: 'memberId é obrigatório para exclusão.' }, { status: 400 });
       }
     }
 
-    const targetMemberId = memberId || (await req.json().catch(() => ({}))).memberId;
+    const targetMemberId = memberId || rawBody.memberId || rawBody.id;
+    const target = await loadMemberInChurch(auth.actor, targetMemberId);
+    if (target.error) return target.error;
+    if (!auth.actor.isSystemAdmin && target.member.level > auth.actor.level) {
+      return NextResponse.json({ error: 'Este membro tem um nível acima do seu.' }, { status: 403 });
+    }
     const supabaseAdmin = getSupabaseAdminClient();
     const supabase = supabaseAdmin || getSupabaseServerClient();
 

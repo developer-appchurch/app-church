@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireLevel, unitInChurch } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { CellGroup } from '@/types';
 
@@ -14,10 +15,12 @@ import { CellGroup } from '@/types';
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const body = await req.json();
     const {
       cellId,
-      churchId,
+      churchId: requestedChurchId,
       name,
       meetingDay,
       meetingTime,
@@ -25,11 +28,20 @@ export async function POST(req: NextRequest) {
       address,
       fotoUrl,
       parentUnitId,
-      userMemberId,
+      userMemberId: requestedUserMemberId,
       ativo,
       motherCellId,
       unidade_criadora_id,
     } = body;
+
+    // Igreja e usuário vêm da sessão (o Administrador do Sistema pode agir em qualquer igreja)
+    const churchId = resolveChurchId(auth.actor, requestedChurchId);
+    if (requestedChurchId && !churchId) return forbiddenChurch();
+    const userMemberId = auth.actor.memberId || requestedUserMemberId;
+    if (!auth.actor.isSystemAdmin) {
+      const deniedManage = await requireAnyPermission(auth.actor, ['cell:manage']);
+      if (deniedManage) return deniedManage;
+    }
 
     if (!cellId || !churchId) {
       return NextResponse.json(
@@ -292,9 +304,14 @@ export async function POST(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedManage = await requireAnyPermission(auth.actor, ['cell:manage']);
+    if (deniedManage) return deniedManage;
     const { searchParams } = new URL(req.url);
     const cellId = searchParams.get('cellId');
-    const churchId = searchParams.get('churchId');
+    const churchId = resolveChurchId(auth.actor, searchParams.get('churchId'));
+    if (searchParams.get('churchId') && !churchId) return forbiddenChurch();
     const hardDelete = searchParams.get('hardDelete') === 'true';
 
     if (!cellId || !churchId) {

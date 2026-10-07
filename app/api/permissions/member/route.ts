@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireCanAssignRole, loadMemberInChurch } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { INITIAL_PERMISSIONS, INITIAL_ROLE_PERMISSIONS, ROLE_UUIDS } from '@/data/initialData';
 import { MemberEffectivePermission } from '@/types';
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
     const memberId = searchParams.get('memberId');
     const churchId = searchParams.get('churchId');
@@ -12,6 +15,9 @@ export async function GET(req: NextRequest) {
     if (!memberId) {
       return NextResponse.json({ error: 'Parâmetro memberId é obrigatório.' }, { status: 400 });
     }
+    // O membro consultado precisa ser da igreja do usuário logado (inclui a consulta das próprias permissões)
+    const targetCheck = await loadMemberInChurch(auth.actor, memberId);
+    if (targetCheck.error) return targetCheck.error;
 
     const supabase = getSupabaseServerClient();
     if (!supabase) {
@@ -172,12 +178,18 @@ export async function GET(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const deniedManage = await requireAnyPermission(auth.actor, ['permissions:manage', 'church:admin']);
+    if (deniedManage) return deniedManage;
     const body = await req.json();
     const { memberId, permissionId, permissionCode, concedida } = body;
 
     if (!memberId) {
       return NextResponse.json({ error: 'memberId é obrigatório.' }, { status: 400 });
     }
+    const targetCheck = await loadMemberInChurch(auth.actor, memberId);
+    if (targetCheck.error) return targetCheck.error;
 
     if (!permissionId && !permissionCode) {
       return NextResponse.json(

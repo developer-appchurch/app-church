@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireLevel, unitInChurch } from '@/lib/requireSession';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 
@@ -76,9 +77,12 @@ function invalidateServerReportsCache(cellId?: string) {
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
     const cellId = searchParams.get('cellId');
-    const churchId = searchParams.get('churchId');
+    const churchId = resolveChurchId(auth.actor, searchParams.get('churchId'));
+    if (searchParams.get('churchId') && !churchId) return forbiddenChurch();
     const mode = searchParams.get('mode') || (searchParams.get('all') === 'true' ? 'all' : 'recent');
     const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10));
     const limit = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') || '10', 10)));
@@ -86,6 +90,8 @@ export async function GET(req: NextRequest) {
     if (!cellId) {
       return NextResponse.json({ error: 'cellId é obrigatório' }, { status: 400 });
     }
+    const unitDenied = await unitInChurch(auth.actor, cellId);
+    if (unitDenied) return unitDenied;
 
     // 1. Verifica cache em memória no servidor
     const cacheKey = `reports:${cellId}:${churchId || 'all'}:${mode}:${offset}:${limit}`;
@@ -342,13 +348,15 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const body = await req.json().catch(() => ({}));
     const {
       reportId: explicitReportId,
       allowOverwrite = false,
-      churchId,
+      churchId: requestedChurchId,
       cellId,
-      memberId,
+      memberId: requestedMemberId,
       authorName,
       reportDate,
       membersCount = 0,
@@ -361,6 +369,14 @@ export async function POST(req: NextRequest) {
       presentMemberIds = [],
     } = body;
 
+    // A igreja e o autor do lançamento vêm da sessão, nunca do corpo da requisição
+    const churchId = resolveChurchId(auth.actor, requestedChurchId);
+    if (requestedChurchId && !churchId) return forbiddenChurch();
+    const memberId = auth.actor.memberId || requestedMemberId;
+    if (cellId) {
+      const unitDenied = await unitInChurch(auth.actor, cellId);
+      if (unitDenied) return unitDenied;
+    }
     if (!cellId) {
       return NextResponse.json({ error: 'cellId (unidade_id) é obrigatório' }, { status: 400 });
     }
@@ -700,6 +716,8 @@ export async function POST(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const supabase = getSupabaseAdminClient() || getSupabaseServerClient();
     if (!supabase) {
       return NextResponse.json({ error: 'Banco de dados não configurado' }, { status: 500 });
@@ -738,6 +756,8 @@ export async function DELETE(req: NextRequest) {
     if (!existingReport) {
       return NextResponse.json({ error: 'Relatório não encontrado' }, { status: 404 });
     }
+    const reportUnitDenied = await unitInChurch(auth.actor, existingReport.unidade_id);
+    if (reportUnitDenied) return reportUnitDenied;
 
     if (existingReport.tesouraria_recebido) {
       return NextResponse.json(
