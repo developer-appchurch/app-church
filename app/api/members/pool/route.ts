@@ -573,23 +573,17 @@ export async function DELETE(req: NextRequest) {
     const authUserId = memberData?.auth_user_id;
     const oldUnitId = memberData?.unidade_id;
 
+    // Relatórios lançados/conferidos por este membro: repassa a autoria antes de excluir
+    // (lancado_por é obrigatório). Prioriza o líder atual da célula do relatório; sem líder,
+    // fica com quem está excluindo.
+    const reassignError = await reassignReportAuthorship(supabase, memberId, auth.actor.memberId);
+    if (reassignError) return reassignError;
+
     // Exclui da tabela membros
     let { error: delErr } = await supabase.from('membros').delete().eq('id', memberId);
     if (delErr && (delErr.code === '42P01' || delErr.message?.includes('does not exist'))) {
       const legDel = await supabase.from('members').delete().eq('id', memberId);
       delErr = legDel.error;
-    }
-
-    if (delErr?.code === '23503') {
-      // Membro aparece como "lançado por"/tesoureiro em relatórios semanais: o histórico
-      // dos relatórios é preservado e a exclusão é recusada com uma mensagem clara.
-      return NextResponse.json(
-        {
-          error:
-            'Este membro lançou ou conferiu relatórios semanais e não pode ser excluído para preservar o histórico. Use "Desvincular" para tirá-lo da célula.',
-        },
-        { status: 409 }
-      );
     }
 
     if (delErr) {
@@ -621,4 +615,74 @@ export async function DELETE(req: NextRequest) {
     console.error('Erro na rota /api/members/pool DELETE:', err);
     return NextResponse.json({ error: err?.message || 'Erro interno.' }, { status: 500 });
   }
+}
+
+/**
+ * Antes de excluir um membro, transfere a autoria dos relatórios semanais que ele lançou
+ * (lancado_por, obrigatório) para o líder ativo atual da célula de cada relatório; se a
+ * célula não tiver outro líder, para quem está excluindo. Relatórios que ele conferiu como
+ * tesoureiro passam para quem está excluindo (ou ficam sem tesoureiro, se for o admin do sistema).
+ */
+async function reassignReportAuthorship(
+  supabase: any,
+  memberId: string,
+  actorMemberId: string | null
+): Promise<NextResponse | null> {
+  const { data: reports, error } = await supabase
+    .from('relatorios_semanais')
+    .select('unidade_id')
+    .eq('lancado_por', memberId);
+  if (error) {
+    return NextResponse.json({ error: `Falha ao verificar relatórios do membro: ${error.message}` }, { status: 500 });
+  }
+
+  const unitIds = Array.from(new Set((reports || []).map((r: any) => r.unidade_id).filter(Boolean))) as string[];
+  if (unitIds.length > 0) {
+    const { data: leaders } = await supabase
+      .from('unidade_lideres')
+      .select('unidade_id, pessoa_id, papel')
+      .in('unidade_id', unitIds)
+      .eq('ativo', true)
+      .neq('pessoa_id', memberId);
+
+    for (const unitId of unitIds) {
+      const unitLeaders = (leaders || []).filter((l: any) => l.unidade_id === unitId);
+      const newAuthor =
+        unitLeaders.find((l: any) => (l.papel || '').toLowerCase() === 'líder')?.pessoa_id ||
+        unitLeaders[0]?.pessoa_id ||
+        actorMemberId;
+      if (!newAuthor) {
+        return NextResponse.json(
+          {
+            error:
+              'Este membro lançou relatórios de uma célula sem outro líder. Defina o novo líder da célula antes de excluir.',
+          },
+          { status: 409 }
+        );
+      }
+      const { error: updErr } = await supabase
+        .from('relatorios_semanais')
+        .update({ lancado_por: newAuthor })
+        .eq('lancado_por', memberId)
+        .eq('unidade_id', unitId);
+      if (updErr) {
+        return NextResponse.json({ error: `Falha ao transferir relatórios: ${updErr.message}` }, { status: 500 });
+      }
+    }
+  }
+
+  // Relatórios sem célula definida ficam com quem está excluindo
+  if (actorMemberId) {
+    await supabase.from('relatorios_semanais').update({ lancado_por: actorMemberId }).eq('lancado_por', memberId);
+  }
+
+  const { error: tesErr } = await supabase
+    .from('relatorios_semanais')
+    .update({ tesoureiro_id: actorMemberId })
+    .eq('tesoureiro_id', memberId);
+  if (tesErr) {
+    return NextResponse.json({ error: `Falha ao transferir conferências: ${tesErr.message}` }, { status: 500 });
+  }
+
+  return null;
 }
