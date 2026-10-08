@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { requireSession, resolveChurchId, forbiddenChurch, unitInChurch } from '@/lib/requireSession';
 
 /**
  * GET /api/indicators/leadership-track
@@ -28,10 +29,17 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
     const churchId = searchParams.get('churchId');
     const unitId = searchParams.get('unitId') || null;
     const compareLevelId = searchParams.get('compareLevelId') || null;
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
+    if (unitId) {
+      const unitErr = await unitInChurch(auth.actor, unitId);
+      if (unitErr) return unitErr;
+    }
 
     if (!churchId) {
       return NextResponse.json({ error: 'Parâmetro churchId é obrigatório.' }, { status: 400 });

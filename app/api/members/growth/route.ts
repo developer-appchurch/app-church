@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { requireSession, resolveChurchId, forbiddenChurch } from '@/lib/requireSession';
 
 export interface MonthlyGrowthStat {
   monthKey: string; // '2026-09'
@@ -33,8 +34,11 @@ const growthCache = new Map<string, { data: any; expiry: number }>();
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
     const churchId = searchParams.get('churchId');
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
 
     if (!churchId) {
       return NextResponse.json({ error: 'churchId é obrigatório.' }, { status: 400 });

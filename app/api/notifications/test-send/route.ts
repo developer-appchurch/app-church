@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { sendPushNotification } from '@/lib/pushService';
+import { requireSession, requireLevel } from '@/lib/requireSession';
 
 /**
  * POST /api/notifications/test-send
@@ -9,6 +10,15 @@ import { sendPushNotification } from '@/lib/pushService';
  */
 export async function POST(req: NextRequest) {
   try {
+    // Disparo de teste: somente Pastor/Administrador, e sempre limitado à própria igreja.
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const lvlErr = requireLevel(auth.actor, 6);
+    if (lvlErr) return lvlErr;
+    const actorChurchId = auth.actor.isSystemAdmin ? null : auth.actor.churchId;
+    if (!auth.actor.isSystemAdmin && !actorChurchId) {
+      return NextResponse.json({ error: 'Acesso negado a esta igreja.' }, { status: 403 });
+    }
     const body = await req.json().catch(() => ({}));
     const cellName = body.cellName;
     const cellId = body.cellId;
@@ -28,6 +38,12 @@ export async function POST(req: NextRequest) {
 
     // 1. Caso seja teste direto para um usuário específico (ex: admin logado)
     if (targetUserId) {
+      if (actorChurchId) {
+        const { data: tgt } = await supabase.from('membros').select('igreja_id').eq('id', targetUserId).maybeSingle();
+        if (!tgt || tgt.igreja_id !== actorChurchId) {
+          return NextResponse.json({ error: 'Acesso negado a esta igreja.' }, { status: 403 });
+        }
+      }
       const { data: userDevices } = await supabase
         .from('dispositivos_push')
         .select('*')
@@ -45,6 +61,7 @@ export async function POST(req: NextRequest) {
         .from('unidades')
         .select('id, nome, igreja_id');
 
+      if (actorChurchId) unitsQuery = unitsQuery.eq('igreja_id', actorChurchId);
       if (cellId) {
         unitsQuery = unitsQuery.eq('id', cellId);
       } else if (cellName) {
@@ -80,10 +97,18 @@ export async function POST(req: NextRequest) {
 
     // 3. Fallback: Se ainda não tiver nenhum dispositivo, busca todos os dispositivos ativos da congregação
     if (devices.length === 0) {
-      const { data: allActiveDevices } = await supabase
-        .from('dispositivos_push')
-        .select('*')
-        .eq('ativo', true)
+      let churchMemberIds: string[] | null = null;
+      if (actorChurchId) {
+        const { data: churchMembers } = await supabase
+          .from('membros')
+          .select('id')
+          .eq('igreja_id', actorChurchId)
+          .limit(5000);
+        churchMemberIds = (churchMembers || []).map((m: any) => m.id);
+      }
+      let fallbackQuery = supabase.from('dispositivos_push').select('*').eq('ativo', true);
+      if (churchMemberIds) fallbackQuery = fallbackQuery.in('membro_id', churchMemberIds);
+      const { data: allActiveDevices } = await fallbackQuery
         .order('criado_em', { ascending: false })
         .limit(10);
 

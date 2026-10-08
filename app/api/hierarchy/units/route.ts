@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession, resolveChurchId, forbiddenChurch } from '@/lib/requireSession';
+import { requireSession, resolveChurchId, forbiddenChurch, requireLevel, requireAnyPermission } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { OrganizationalUnit, CreateUnitInput } from '@/types';
 import crypto from 'crypto';
@@ -614,7 +614,13 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const lvlErr = requireLevel(auth.actor, 2);
+    if (lvlErr) return lvlErr;
+
     const input: CreateUnitInput = await req.json();
+    if (input.churchId && !resolveChurchId(auth.actor, input.churchId)) return forbiddenChurch();
 
     if (!input.churchId) {
       return NextResponse.json({ error: 'Identificador da igreja (churchId) é obrigatório.' }, { status: 400 });
@@ -910,8 +916,14 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const lvlErr = requireLevel(auth.actor, 2);
+    if (lvlErr) return lvlErr;
+
     const body = await req.json();
     const { unitId, churchId, leaderMemberIds, setAsHomeCell } = body;
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
 
     if (!unitId || !churchId) {
       return NextResponse.json(
@@ -1193,9 +1205,15 @@ export async function PATCH(req: NextRequest) {
  */
 export async function DELETE(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const permErr = await requireAnyPermission(auth.actor, ['unit:transfer_delete', 'church:admin']);
+    if (permErr) return permErr;
+
     const { searchParams } = new URL(req.url);
     const unitId = searchParams.get('unitId');
     const churchId = searchParams.get('churchId');
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
     const hardDelete = searchParams.get('hardDelete') === 'true';
 
     if (!unitId || !churchId) {

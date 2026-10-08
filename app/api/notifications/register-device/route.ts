@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { requireSession } from '@/lib/requireSession';
 
 /**
  * POST /api/notifications/register-device
@@ -9,8 +10,12 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const body = await req.json().catch(() => ({}));
-    const { membroId, endpoint, p256dh, auth, plataforma } = body;
+    const { membroId: bodyMembroId, endpoint, p256dh, auth: pushAuth, plataforma } = body;
+    // O dispositivo sempre é vinculado a quem está logado (não ao id enviado no corpo).
+    const membroId = auth.actor.memberId || (auth.actor.isSystemAdmin ? bodyMembroId : null);
 
     if (!membroId) {
       return NextResponse.json(
@@ -19,7 +24,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!endpoint || !p256dh || !auth) {
+    if (!endpoint || !p256dh || !pushAuth) {
       return NextResponse.json(
         { error: 'endpoint, p256dh e auth são obrigatórios para a assinatura push.' },
         { status: 400 }
@@ -38,7 +43,7 @@ export async function POST(req: NextRequest) {
       membro_id: membroId,
       endpoint: endpoint.trim(),
       p256dh: p256dh.trim(),
-      auth: auth.trim(),
+      auth: pushAuth.trim(),
       plataforma: plataforma || 'Web / PWA',
       ativo: true,
       atualizado_em: new Date().toISOString(),

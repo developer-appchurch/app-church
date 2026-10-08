@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission } from '@/lib/requireSession';
 
 function normalizeKey(value: string): string {
   return (value || '').trim().toLowerCase();
@@ -14,8 +15,11 @@ function normalizeKey(value: string): string {
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
     const churchId = searchParams.get('churchId');
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
 
     if (!churchId) {
       return NextResponse.json({ error: 'Parâmetro churchId é obrigatório.' }, { status: 400 });
@@ -90,8 +94,13 @@ export async function GET(req: NextRequest) {
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const permErr = await requireAnyPermission(auth.actor, ['neighborhood:manage', 'church:admin']);
+    if (permErr) return permErr;
     const body = await req.json();
     const { churchId, name } = body || {};
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
 
     const cleanName = (name || '').trim();
     if (!churchId) {
@@ -149,6 +158,10 @@ export async function POST(req: NextRequest) {
  */
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const permErr = await requireAnyPermission(auth.actor, ['neighborhood:manage', 'church:admin']);
+    if (permErr) return permErr;
     const body = await req.json();
     const { id, name, active } = body || {};
 
@@ -177,10 +190,12 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Supabase não configurado.' }, { status: 500 });
     }
 
-    const { data, error } = await supabase
-      .from('bairros')
-      .update(updates)
-      .eq('id', id)
+    let updateQuery = supabase.from('bairros').update(updates).eq('id', id);
+    if (!auth.actor.isSystemAdmin) {
+      if (!auth.actor.churchId) return forbiddenChurch();
+      updateQuery = updateQuery.eq('igreja_id', auth.actor.churchId);
+    }
+    const { data, error } = await updateQuery
       .select('id, igreja_id, nome, ativo, criado_em')
       .single();
 

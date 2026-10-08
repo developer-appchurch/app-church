@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission } from '@/lib/requireSession';
 
 /**
  * PATCH /api/units/move
@@ -20,8 +21,14 @@ import { getSupabaseServerClient } from '@/lib/supabaseServer';
  */
 export async function PATCH(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const permErr = await requireAnyPermission(auth.actor, ['unit:transfer_delete', 'church:admin']);
+    if (permErr) return permErr;
+
     const body = await req.json();
     const { unitId, unitIds, churchId, newParentId } = body || {};
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
 
     // ===== Modo EM LOTE: várias células de uma vez (unitIds) =====
     if (Array.isArray(unitIds) && unitIds.length > 0) {

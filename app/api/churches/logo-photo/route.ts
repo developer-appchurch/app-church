@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import crypto from 'crypto';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission } from '@/lib/requireSession';
 
 interface LogoPhotoRequestBody {
   action: 'upload' | 'excluir';
@@ -20,6 +21,10 @@ interface LogoPhotoRequestBody {
  */
 export async function POST(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
+    const permErr = await requireAnyPermission(auth.actor, ['church:admin']);
+    if (permErr) return permErr;
     const supabaseAdmin = getSupabaseServerClient();
     if (!supabaseAdmin) {
       return NextResponse.json(
@@ -30,6 +35,7 @@ export async function POST(req: NextRequest) {
 
     const body: LogoPhotoRequestBody = await req.json();
     const { action, churchId, imagePath, imageUrl } = body;
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
 
     if (!churchId) {
       return NextResponse.json({ error: 'churchId é obrigatório.' }, { status: 400 });

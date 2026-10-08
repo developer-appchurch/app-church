@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
+import { requireSession, resolveChurchId, forbiddenChurch } from '@/lib/requireSession';
 
 export interface UnitDetailResponse {
   id: string;
@@ -40,9 +41,12 @@ export interface UnitDetailResponse {
  */
 export async function GET(req: NextRequest) {
   try {
+    const auth = await requireSession(req);
+    if (auth.error) return auth.error;
     const { searchParams } = new URL(req.url);
     const unitId = searchParams.get('unitId');
     const churchId = searchParams.get('churchId');
+    if (churchId && !resolveChurchId(auth.actor, churchId)) return forbiddenChurch();
 
     if (!unitId || !churchId) {
       return NextResponse.json(
