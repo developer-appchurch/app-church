@@ -553,7 +553,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ? [
                 {
                   id: 'rankings' as ActiveScreen,
-                  label: 'Rankings',
+                  label: 'Conquistas',
                   sublabel: 'Fiel no Pouco & Guardiões da Constância',
                   icon: Trophy,
                 },

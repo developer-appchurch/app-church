@@ -169,7 +169,7 @@ export const RankingsView: React.FC<RankingsViewProps> = ({ currentUser }) => {
             <Trophy size={24} />
           </div>
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate">Rankings</h1>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight truncate">Conquistas</h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-0.5">
               Quem lança o relatório em dia, sobe no ranking.
             </p>
