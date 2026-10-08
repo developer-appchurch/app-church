@@ -476,6 +476,8 @@ export interface WeeklyReport {
   presentes_ids?: string[];
   presentes_nomes?: Record<string, string>;
   presentes_membros?: { id: string; nome: string }[];
+  /** Nomes de quem estava presente mas depois foi excluído do cadastro */
+  presentes_excluidos?: string[];
   observacao_texto?: string;
 }
 
