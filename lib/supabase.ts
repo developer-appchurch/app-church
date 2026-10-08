@@ -9,7 +9,6 @@ import {
   CellMember,
   FeedPost,
   PostComment,
-  ChurchAnnouncement,
   LeadershipTrackProgress,
   LeadershipTrackStep,
   AttendanceStatus,
@@ -2690,8 +2689,10 @@ export const AppChurchService = {
           const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
           const postIds = pageRows.map((p: any) => p.id);
 
-          // Verifica curtidas do usuário logado (via tabela curtidas se existir, com fallback para cache local)
-          const userLikedSet = new Set<string>(localLikedPosts);
+          // Curtidas do usuário logado vêm só do banco (fonte da verdade). O cache local do
+          // aparelho não entra aqui: ele podia ficar desatualizado e mostrar o coração
+          // vermelho em posts que o usuário não curtiu.
+          const userLikedSet = new Set<string>();
           if (userId && postIds.length > 0) {
             try {
               const { data: curtidas } = await supabase
@@ -2971,8 +2972,13 @@ export const AppChurchService = {
           });
 
           if (!rpcError && rpcData && rpcData.length > 0) {
-            finalLikesCount = rpcData[0].likes_count;
-            nextLiked = rpcData[0].liked;
+            nextLiked = Boolean(rpcData[0].liked);
+            // Mantém o cache local alinhado com o banco
+            if (typeof window !== 'undefined') {
+              const withoutPost = userLikedPosts.filter((id) => id !== postId);
+              saveToStorage(userLikesKey, nextLiked ? [...withoutPost, postId] : withoutPost);
+            }
+            finalLikesCount = rpcData[0].likes_count ?? 0;
             return { liked: nextLiked, likesCount: finalLikesCount };
           }
         }
@@ -2990,19 +2996,15 @@ export const AppChurchService = {
           }
         }
 
-        let { data: postRow } = await supabase
+        // O contador do post é mantido pelo gatilho do banco (trg_sync_curtidas_count);
+        // aqui só lemos o valor já atualizado.
+        const { data: postRow } = await supabase
           .from('postagens_feed')
           .select('quantidade_curtidas')
           .eq('id', postId)
           .maybeSingle();
 
-        const currentDbLikes = postRow?.quantidade_curtidas ?? 0;
-        finalLikesCount = nextLiked ? currentDbLikes + 1 : Math.max(0, currentDbLikes - 1);
-
-        await supabase
-          .from('postagens_feed')
-          .update({ quantidade_curtidas: finalLikesCount })
-          .eq('id', postId);
+        finalLikesCount = postRow?.quantidade_curtidas ?? finalLikesCount;
       } catch (e) {
         console.warn('Erro ao atualizar curtida no Supabase:', e);
       }
@@ -3135,167 +3137,6 @@ export const AppChurchService = {
     const allPosts = loadFromStorage(STORAGE_KEYS.POSTS, INITIAL_FEED_POSTS);
     const updated = allPosts.filter((p) => p.id !== postId);
     saveToStorage(STORAGE_KEYS.POSTS, updated);
-  },
-
-  /**
-   * Get Announcements - filtered by churchId
-   * Utiliza range pagination, projeção explícita de colunas e cache em memória para otimizar queries
-   */
-  async getAnnouncements(
-    churchId: string,
-    options?: { limit?: number; offset?: number; force?: boolean }
-  ): Promise<ChurchAnnouncement[]> {
-    const limit = options?.limit ?? 25;
-    const offset = options?.offset ?? 0;
-    const cacheKey = `announcements:${churchId || 'all'}:${offset}:${limit}`;
-
-    return getCachedOrExecute(
-      cacheKey,
-      2 * 60 * 1000,
-      async () => {
-        const ANNOUNCEMENT_COLUMNS = 'id, igreja_id, titulo, conteudo, url_imagem, nome_autor, funcao_autor, avatar_autor, data_evento, horario_evento, localizacao, categoria, importante, quantidade_confirmados, criado_em';
-        if (supabase) {
-          try {
-            let { data, error } = await supabase
-              .from('avisos')
-              .select(ANNOUNCEMENT_COLUMNS)
-              .eq('igreja_id', churchId)
-              .order('criado_em', { ascending: false })
-              .range(offset, offset + limit - 1);
-
-            if (error && (error.code === '42P01' || error.message?.includes('does not exist') || error.code === '42703')) {
-              const legRes = await supabase
-                .from('announcements')
-                .select(ANNOUNCEMENT_COLUMNS)
-                .eq('igreja_id', churchId)
-                .order('criado_em', { ascending: false })
-                .range(offset, offset + limit - 1);
-              data = legRes.data;
-              error = legRes.error;
-            }
-
-            if (!error && data) {
-              return data.map((a: any) => ({
-                id: a.id,
-                churchId: a.igreja_id,
-                title: a.titulo,
-                content: a.conteudo,
-                imageUrl: a.url_imagem,
-                authorName: a.nome_autor,
-                authorRole: a.funcao_autor,
-                authorAvatar: a.avatar_autor,
-                eventDate: a.data_evento,
-                eventTime: a.horario_evento,
-                location: a.localizacao,
-                category: a.categoria || 'Geral',
-                isImportant: a.importante ?? false,
-                confirmedAttendeesCount: a.quantidade_confirmados || 0,
-                isConfirmedByCurrentUser: false,
-                createdAt: 'Recente',
-              }));
-            }
-          } catch (e) {
-            console.warn('Erro ao buscar avisos no Supabase:', e);
-          }
-        }
-
-        const allAnnouncements = loadFromStorage(STORAGE_KEYS.ANNOUNCEMENTS, INITIAL_ANNOUNCEMENTS);
-        return allAnnouncements.filter((a) => a.churchId === churchId).slice(offset, offset + limit);
-      },
-      options?.force ?? false
-    );
-  },
-
-  /**
-   * Create Church Announcement with UUID
-   */
-  async createAnnouncement(
-    announcement: Omit<ChurchAnnouncement, 'id' | 'createdAt' | 'confirmedAttendeesCount' | 'isConfirmedByCurrentUser'>
-  ): Promise<ChurchAnnouncement> {
-    const newId = generateUUID();
-    const newAnnouncement: ChurchAnnouncement = {
-      ...announcement,
-      id: newId,
-      createdAt: 'Agora mesmo',
-      confirmedAttendeesCount: 1,
-      isConfirmedByCurrentUser: true,
-    };
-
-    if (supabase) {
-      try {
-        const payload = {
-          id: newId,
-          igreja_id: announcement.churchId,
-          titulo: announcement.title,
-          conteudo: announcement.content,
-          url_imagem: announcement.imageUrl || null,
-          nome_autor: announcement.authorName,
-          funcao_autor: announcement.authorRole,
-          avatar_autor: announcement.authorAvatar || null,
-          data_evento: announcement.eventDate || null,
-          horario_evento: announcement.eventTime || null,
-          localizacao: announcement.location || null,
-          categoria: announcement.category || 'Geral',
-          importante: announcement.isImportant || false,
-          quantidade_confirmados: 1,
-        };
-        let { error } = await supabase.from('avisos').insert(payload);
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          await supabase.from('announcements').insert(payload);
-        }
-      } catch (e) {
-        console.warn('Erro ao criar aviso no Supabase:', e);
-      }
-    }
-
-    const allAnnouncements = loadFromStorage(STORAGE_KEYS.ANNOUNCEMENTS, INITIAL_ANNOUNCEMENTS);
-    saveToStorage(STORAGE_KEYS.ANNOUNCEMENTS, [newAnnouncement, ...allAnnouncements]);
-    invalidateMemoryCache(`announcements:${newAnnouncement.churchId}`);
-    return newAnnouncement;
-  },
-
-  /**
-   * Toggle Attendee RSVP on Announcement
-   */
-  async toggleAnnouncementRSVP(announcementId: string): Promise<ChurchAnnouncement[]> {
-    const allAnnouncements = loadFromStorage(STORAGE_KEYS.ANNOUNCEMENTS, INITIAL_ANNOUNCEMENTS);
-    let newCount = 0;
-
-    const updated = allAnnouncements.map((item) => {
-      if (item.id === announcementId) {
-        const isConfirmed = item.isConfirmedByCurrentUser;
-        newCount = isConfirmed
-          ? Math.max(0, (item.confirmedAttendeesCount || 1) - 1)
-          : (item.confirmedAttendeesCount || 0) + 1;
-        return {
-          ...item,
-          isConfirmedByCurrentUser: !isConfirmed,
-          confirmedAttendeesCount: newCount,
-        };
-      }
-      return item;
-    });
-    saveToStorage(STORAGE_KEYS.ANNOUNCEMENTS, updated);
-    invalidateMemoryCache('announcements:');
-
-    if (supabase) {
-      try {
-        let { error } = await supabase
-          .from('avisos')
-          .update({ quantidade_confirmados: newCount })
-          .eq('id', announcementId);
-        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-          await supabase
-            .from('announcements')
-            .update({ quantidade_confirmados: newCount })
-            .eq('id', announcementId);
-        }
-      } catch (e) {
-        console.warn('Erro ao atualizar RSVP no Supabase:', e);
-      }
-    }
-
-    return updated;
   },
 
   /**

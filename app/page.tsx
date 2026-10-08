@@ -10,7 +10,6 @@ import {
   CellGroup,
   CellMember,
   FeedPost,
-  ChurchAnnouncement,
   LeadershipTrackProgress,
   UserProfile,
 } from '../types';
@@ -142,7 +141,6 @@ export default function Home() {
   });
   const [members, setMembers] = useState<CellMember[]>([]);
   const [posts, setPosts] = useState<FeedPost[]>([]);
-  const [announcements, setAnnouncements] = useState<ChurchAnnouncement[]>([]);
 
   // Modal State for Member Leadership Track
   const [selectedMemberForTrack, setSelectedMemberForTrack] = useState<CellMember | null>(null);
@@ -412,7 +410,6 @@ export default function Home() {
     setCells([]);
     setMembers([]);
     setPosts([]);
-    setAnnouncements([]);
     setSelectedCellId('');
     setActiveScreen('feed');
     setIsSidebarOpen(false);
@@ -619,22 +616,6 @@ export default function Home() {
     setPosts((prev) => prev.filter((p) => p.id !== postId));
   };
 
-  // Announcement Actions
-  const handleCreateAnnouncement = async (
-    newAnnouncementData: Omit<
-      ChurchAnnouncement,
-      'id' | 'createdAt' | 'confirmedAttendeesCount' | 'isConfirmedByCurrentUser'
-    >
-  ) => {
-    const created = await AppChurchService.createAnnouncement(newAnnouncementData);
-    setAnnouncements((prev) => [created, ...prev]);
-  };
-
-  const handleToggleRSVP = async (announcementId: string) => {
-    const updated = await AppChurchService.toggleAnnouncementRSVP(announcementId);
-    setAnnouncements(updated.filter((a) => a.churchId === user?.churchId));
-  };
-
   const handleUpdateAvatar = async (newAvatarUrl: string) => {
     if (!user) return;
     try {
@@ -811,7 +792,6 @@ export default function Home() {
           {activeScreen === 'feed' && (
             <FeedView
               posts={posts}
-              announcements={announcements}
               currentUser={user}
               currentCell={currentCell}
               churchName={user.churchName}
@@ -820,8 +800,6 @@ export default function Home() {
               onDeleteComment={handleDeleteComment}
               onDeletePost={handleDeletePost}
               onCreatePost={handleCreatePost}
-              onCreateAnnouncement={handleCreateAnnouncement}
-              onToggleRSVP={handleToggleRSVP}
             />
           )}
 

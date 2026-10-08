@@ -31,17 +31,12 @@ export interface UnitDetailResponse {
     avatarUrl?: string;
     phone?: string;
   }>;
-  cobertura?: Array<{
-    id: string;
-    name: string;
-    role?: string;
-  }>;
 }
 
 /**
  * GET /api/hierarchy/unit-details?unitId=...&churchId=...
  * Carregamento sob demanda (lazy) de detalhes pesados:
- * endereço, coordenadas, líderes, membros vinculados e cobertura
+ * endereço, coordenadas, líderes e membros vinculados
  */
 export async function GET(req: NextRequest) {
   try {
@@ -81,7 +76,6 @@ export async function GET(req: NextRequest) {
       parentRes,
       leadersRes,
       membersRes,
-      coverageRes,
     ] = await Promise.all([
       supabase.from('nivel_tipo').select('nome, ordem').eq('id', unit.nivel_tipo_id).maybeSingle(),
       unit.pai_id ? supabase.from('unidades').select('nome').eq('id', unit.pai_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -94,34 +88,8 @@ export async function GET(req: NextRequest) {
         .from('membros')
         .select('id, nome, funcao, url_avatar, telefone')
         .eq('unidade_id', unitId),
-      supabase
-        .from('unidade_cobertura')
-        .select('unidade_principal_id, unidade_cobertura_id')
-        .or(`unidade_principal_id.eq.${unitId},unidade_cobertura_id.eq.${unitId}`)
-        .maybeSingle(),
     ]);
 
-    // Resolução de cobertura
-    let coberturaList: Array<{ id: string; name: string; role?: string }> = [];
-    if (coverageRes?.data) {
-      const cov = coverageRes.data as { unidade_principal_id?: string; unidade_cobertura_id?: string };
-      const otherUnitId = cov.unidade_principal_id === unitId ? cov.unidade_cobertura_id : cov.unidade_principal_id;
-      if (otherUnitId) {
-        const { data: cUnit } = await supabase
-          .from('unidades')
-          .select('nome')
-          .eq('id', otherUnitId)
-          .maybeSingle();
-
-        coberturaList = [
-          {
-            id: otherUnitId,
-            name: cUnit?.nome || 'Unidade Cobertura',
-            role: 'Cobertura Ministerial',
-          },
-        ];
-      }
-    }
 
     // Resolução de nomes dos líderes
     const leaderIds = (leadersRes.data || []).map((l: any) => l.pessoa_id);
@@ -186,7 +154,6 @@ export async function GET(req: NextRequest) {
       memberCount: finalMemberCount,
       leaders: leaderDetails,
       members: membersList,
-      cobertura: coberturaList,
     };
 
     return NextResponse.json({ success: true, details: response });

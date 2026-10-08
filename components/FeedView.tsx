@@ -8,7 +8,6 @@ import {
   PostComment,
   UserProfile,
   CellGroup,
-  ChurchAnnouncement,
 } from '../types';
 import {
   Heart,
@@ -40,7 +39,6 @@ import { AdminNotificationTestModal } from './AdminNotificationTestModal';
 
 interface FeedViewProps {
   posts?: FeedPost[];
-  announcements?: ChurchAnnouncement[];
   currentUser: UserProfile;
   currentCell: CellGroup;
   churchName: string;
@@ -51,13 +49,6 @@ interface FeedViewProps {
   onCreatePost?: (
     newPost: Omit<FeedPost, 'id' | 'likes' | 'likedByCurrentUser' | 'comments' | 'createdAt'>
   ) => void;
-  onCreateAnnouncement?: (
-    newAnnouncement: Omit<
-      ChurchAnnouncement,
-      'id' | 'createdAt' | 'confirmedAttendeesCount' | 'isConfirmedByCurrentUser'
-    >
-  ) => void;
-  onToggleRSVP?: (announcementId: string) => void;
 }
 
 const generateOptimisticId = (): string => {
@@ -480,6 +471,9 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
   // 4. Curtidas com Atualização Otimista
   const handleToggleLike = async (post: FeedPost) => {
+    // Post ainda sendo publicado (id provisório): não existe no banco para receber curtida
+    if (post.isPending || post.isError || post.id.startsWith('optimistic-')) return;
+
     const nextLiked = !post.likedByCurrentUser;
     const nextLikes = nextLiked ? post.likes + 1 : Math.max(0, post.likes - 1);
 
@@ -500,7 +494,20 @@ export const FeedView: React.FC<FeedViewProps> = ({
     });
 
     try {
-      await AppChurchService.toggleLikePost(post.id, currentUser.id, currentUser.churchId);
+      const result = await AppChurchService.toggleLikePost(post.id, currentUser.id, currentUser.churchId);
+      // Alinha a tela com o que o banco realmente gravou (estado e contagem reais)
+      queryClient.setQueryData(queryKey, (oldData: any) => {
+        if (!oldData?.pages) return oldData;
+        return {
+          ...oldData,
+          pages: oldData.pages.map((page: any) => ({
+            ...page,
+            posts: page.posts.map((p: FeedPost) =>
+              p.id === post.id ? { ...p, likedByCurrentUser: result.liked, likes: result.likesCount } : p
+            ),
+          })),
+        };
+      });
     } catch (err) {
       console.error('Erro ao curtir post, revertendo:', err);
       // Reverte em caso de erro
@@ -1130,10 +1137,18 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     {/* Interaction Stats Row */}
                     <div className="px-4 py-2 flex items-center justify-between text-xs text-slate-500 border-b border-slate-100">
                       <div className="flex items-center gap-1.5">
-                        <span className="w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center text-[9px]">
-                          ❤️
-                        </span>
-                        <span>{post.likes} curtidas</span>
+                        {post.likes > 0 ? (
+                          <>
+                            <span className="w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center">
+                              <Heart size={9} className="fill-white text-white" />
+                            </span>
+                            <span>
+                              {post.likes} {post.likes === 1 ? 'curtida' : 'curtidas'}
+                            </span>
+                          </>
+                        ) : (
+                          <span>Nenhuma curtida ainda</span>
+                        )}
                       </div>
                       <div className="flex items-center gap-3">
                         <span>{post.commentsCount ?? post.comments?.length ?? 0} comentários</span>
