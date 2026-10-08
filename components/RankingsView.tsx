@@ -41,7 +41,7 @@ interface RankingRow {
   ano?: number;
 }
 
-// Primeiro mês em que o Domingo em Dia vale (a pontuação começa em outubro/2026)
+// Primeiro mês em que o Fiel no Pouco vale (a pontuação começa em outubro/2026)
 const PRIMEIRO_MES = { ano: 2026, mes: 9 }; // mês 0-based: 9 = outubro
 
 const MESES = [
@@ -178,7 +178,7 @@ export const RankingsView: React.FC<RankingsViewProps> = ({ currentUser }) => {
 
         <div className="flex gap-1 mt-2 bg-white p-1 rounded-xl border border-slate-200/90 shadow-2xs">
           {([
-            { id: 'mensal', label: 'Domingo em Dia', icon: Flame },
+            { id: 'mensal', label: 'Fiel no Pouco', icon: Flame },
             { id: 'anual', label: 'Guardiões da Constância', icon: Sparkles },
           ] as { id: RankingTab; label: string; icon: React.ElementType }[]).map((t) => {
             const Icon = t.icon;
