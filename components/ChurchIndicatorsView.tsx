@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { UserProfile, ChurchHierarchicalLevel, OrganizationalUnit } from '../types';
 import { AppChurchService } from '../lib/supabase';
+import { THRESHOLD_COLORS, colorForPercent } from '@/lib/trackColors';
 
 interface ChurchIndicatorsViewProps {
   currentUser: UserProfile;
@@ -39,18 +40,6 @@ type IndicatorsTab = 'track';
 const TABS: { id: IndicatorsTab; label: string; icon: React.ElementType }[] = [
   { id: 'track', label: 'Trilho de Liderança', icon: Award },
 ];
-
-const THRESHOLD_COLORS = {
-  high: '#059669', // emerald-600 — ≥ 65%
-  mid: '#d97706', // amber-600 — 30% a 65%
-  low: '#dc2626', // red-600 — < 30%
-};
-
-function colorForPercent(percent: number): string {
-  if (percent >= 65) return THRESHOLD_COLORS.high;
-  if (percent >= 30) return THRESHOLD_COLORS.mid;
-  return THRESHOLD_COLORS.low;
-}
 
 interface IndicatorsData {
   scopeUnit: { id: string; name?: string } | null;
