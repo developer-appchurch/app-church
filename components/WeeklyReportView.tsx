@@ -1153,16 +1153,19 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                 </div>
 
                 {/* Membros Presentes */}
-                {selectedReportForDetail.presentes_ids &&
-                  selectedReportForDetail.presentes_ids.length > 0 && (
+                {((selectedReportForDetail.presentes_ids?.length || 0) > 0 ||
+                  (selectedReportForDetail.presentes_excluidos?.length || 0) > 0) && (
                     <div className="bg-sky-50/50 rounded-xl p-2.5 sm:p-3 border border-sky-200/80">
                       <div className="text-[10px] sm:text-[11px] font-bold text-sky-900 uppercase mb-1.5 flex items-center justify-between">
                         <span>
-                          Membros Presentes ({selectedReportForDetail.presentes_ids.length})
+                          Membros Presentes (
+                          {(selectedReportForDetail.presentes_ids?.length || 0) +
+                            (selectedReportForDetail.presentes_excluidos?.length || 0)}
+                          )
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {selectedReportForDetail.presentes_ids.map((mId) => {
+                        {(selectedReportForDetail.presentes_ids || []).map((mId) => {
                           const memberName =
                             selectedReportForDetail.presentes_nomes?.[mId] ||
                             selectedReportForDetail.presentes_membros?.find((x) => x.id === mId)?.nome ||
@@ -1181,6 +1184,16 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                             </span>
                           );
                         })}
+                        {(selectedReportForDetail.presentes_excluidos || []).map((nome, idx) => (
+                          <span
+                            key={`excluido-${idx}`}
+                            title="Membro excluído do cadastro depois deste relatório"
+                            className="bg-slate-50 border border-slate-200 text-slate-500 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1 leading-tight"
+                          >
+                            <Check size={10} className="text-slate-400 shrink-0 stroke-[2.5]" />
+                            <span className="truncate max-w-[140px] sm:max-w-none">{nome} (excluído)</span>
+                          </span>
+                        ))}
                       </div>
                     </div>
                   )}

@@ -113,7 +113,7 @@ export async function GET(req: NextRequest) {
 
     // Query otimizada com embedding direto (1 única ida ao PostgreSQL)
     const EMBEDDED_SELECT =
-      '*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome), presencas:relatorio_presencas(membro_id, membro:membros(id, nome))';
+      '*, lancador:membros!relatorios_semanais_lancado_por_fkey(id, nome), presencas:relatorio_presencas(membro_id, nome_membro, membro:membros(id, nome))';
 
     let query = supabase
       .from('relatorios_semanais')
@@ -194,6 +194,12 @@ export async function GET(req: NextRequest) {
 
     let lancadorMap = new Map<string, string>();
     let presencasByReport: Record<string, string[]> = {};
+    // Presenças de membros que foram excluídos do cadastro (membro_id nulo): o histórico
+    // do relatório é preservado e o nome guardado no momento do lançamento é exibido.
+    const excluidosByReport: Record<string, string[]> = {};
+    const addExcluido = (reportId: string, nome?: string | null) => {
+      (excluidosByReport[reportId] ||= []).push(nome || 'Membro');
+    };
     let memberNamesMap = new Map<string, string>();
 
     if (!usesEmbedding) {
@@ -205,7 +211,7 @@ export async function GET(req: NextRequest) {
           ? supabase.from('membros').select('id, nome').in('id', lancadorIds)
           : Promise.resolve({ data: [] }),
         reportIds.length > 0
-          ? supabase.from('relatorio_presencas').select('relatorio_id, membro_id, membro:membros(id, nome)').in('relatorio_id', reportIds)
+          ? supabase.from('relatorio_presencas').select('relatorio_id, membro_id, nome_membro, membro:membros(id, nome)').in('relatorio_id', reportIds)
           : Promise.resolve({ data: [] }),
       ]);
 
@@ -217,6 +223,9 @@ export async function GET(req: NextRequest) {
 
       if (presencasResult.data) {
         for (const row of presencasResult.data) {
+          if (row.relatorio_id && !row.membro_id) {
+            addExcluido(row.relatorio_id, (row as any).nome_membro);
+          }
           if (row.relatorio_id && row.membro_id) {
             if (!presencasByReport[row.relatorio_id]) {
               presencasByReport[row.relatorio_id] = [];
@@ -233,6 +242,9 @@ export async function GET(req: NextRequest) {
       for (const row of reportRows) {
         if (Array.isArray(row.presencas)) {
           for (const p of row.presencas) {
+            if (!p.membro_id) {
+              addExcluido(row.id, (p as any).nome_membro);
+            }
             const membroObj: any = Array.isArray((p as any).membro) ? (p as any).membro[0] : (p as any).membro;
             if (p.membro_id && membroObj?.nome) {
               memberNamesMap.set(p.membro_id, membroObj.nome);
@@ -277,6 +289,7 @@ export async function GET(req: NextRequest) {
         presentes_ids: presentesIds,
         presentes_nomes: presentesNomes,
         presentes_membros: presentesMembros,
+        presentes_excluidos: excluidosByReport[row.id] || [],
       };
     });
 
@@ -632,12 +645,14 @@ export async function POST(req: NextRequest) {
         new Set([targetReportId, explicitReportId, existingReport?.id].filter(Boolean))
       );
 
-      // Passo A: Expurgar todas as presenças anteriores vinculadas a todos esses IDs
+      // Passo A: Expurgar as presenças anteriores vinculadas a todos esses IDs. Presenças de
+      // membros já excluídos do cadastro (membro_id nulo) são mantidas para preservar o histórico.
       for (const rId of idsToPurge) {
         const { error: purgeError } = await supabase
           .from('relatorio_presencas')
           .delete()
-          .eq('relatorio_id', rId);
+          .eq('relatorio_id', rId)
+          .not('membro_id', 'is', null);
 
         if (purgeError) {
           console.error(`[POST /api/reports] Erro ao expurgar presenças do relatório ${rId}:`, purgeError);
