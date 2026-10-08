@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireCanAssignRole, loadMemberInChurch } from '@/lib/requireSession';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireCanAssignRole, loadMemberInChurch, requireLevel } from '@/lib/requireSession';
 import { getSupabaseAdminClient } from '@/lib/supabase/admin';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { createAuthUserForMember, deleteAuthUserForMember } from '@/lib/supabase/authAdmin';
 import { AttendanceStatus } from '@/types';
 import crypto from 'crypto';
+
+/** Nível mínimo para excluir membros: 3 = Líder de Setor (2º nível de liderança). */
+const MIN_LEVEL_TO_DELETE_MEMBER = 3;
 
 function generateUUID(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -534,6 +537,9 @@ export async function DELETE(req: NextRequest) {
   try {
     const auth = await requireSession(req);
     if (auth.error) return auth.error;
+    // Somente Líder de Setor (nível 3, 2º nível de liderança) ou acima, e com a permissão member:delete
+    const deniedLevel = requireLevel(auth.actor, MIN_LEVEL_TO_DELETE_MEMBER);
+    if (deniedLevel) return deniedLevel;
     const deniedDelete = await requireAnyPermission(auth.actor, ['member:delete']);
     if (deniedDelete) return deniedDelete;
     const { searchParams } = new URL(req.url);
@@ -572,6 +578,18 @@ export async function DELETE(req: NextRequest) {
     if (delErr && (delErr.code === '42P01' || delErr.message?.includes('does not exist'))) {
       const legDel = await supabase.from('members').delete().eq('id', memberId);
       delErr = legDel.error;
+    }
+
+    if (delErr?.code === '23503') {
+      // Membro aparece como "lançado por"/tesoureiro em relatórios semanais: o histórico
+      // dos relatórios é preservado e a exclusão é recusada com uma mensagem clara.
+      return NextResponse.json(
+        {
+          error:
+            'Este membro lançou ou conferiu relatórios semanais e não pode ser excluído para preservar o histórico. Use "Desvincular" para tirá-lo da célula.',
+        },
+        { status: 409 }
+      );
     }
 
     if (delErr) {

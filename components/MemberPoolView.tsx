@@ -36,6 +36,9 @@ import {
 } from '../types';
 import { AppChurchService } from '../lib/supabase';
 
+
+/** Nível mínimo para excluir membros: 3 = Líder de Setor (2º nível de liderança). */
+const MIN_LEVEL_TO_DELETE_MEMBER = 3;
 interface MemberPoolViewProps {
   user: UserProfile;
   onNavigateUnits?: () => void;
@@ -233,11 +236,14 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
     staleTime: 1000 * 60 * 5,
   });
 
-  // Excluir membro exige a permissão "member:delete" (mesma regra do DELETE /api/members/pool);
-  // sem ela, o botão de lixeira nem aparece.
+  // Excluir membro: somente Líder de Setor (2º nível de liderança) ou acima E com a permissão
+  // "member:delete" — a mesma regra do DELETE /api/members/pool. Sem isso, a lixeira nem aparece.
   const canDeleteMembers = useMemo(
-    () => isPastorOrAdmin || AppChurchService.hasPermission(user, 'member:delete', userPermissions),
-    [isPastorOrAdmin, user, userPermissions]
+    () =>
+      isPastorOrAdmin ||
+      (userHierarchyLevel >= MIN_LEVEL_TO_DELETE_MEMBER &&
+        AppChurchService.hasPermission(user, 'member:delete', userPermissions)),
+    [isPastorOrAdmin, userHierarchyLevel, user, userPermissions]
   );
 
   // Verifica se uma unidade/célula está sob a cobertura direta ou indireta do usuário logado
