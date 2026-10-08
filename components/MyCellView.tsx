@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile, Role, OrganizationalUnit } from '../types';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
@@ -12,6 +13,7 @@ import {
   Search,
   Plus,
   HelpCircle,
+  BarChart3,
   X,
   MapPin,
   UserCheck,
@@ -58,6 +60,12 @@ interface MyCellViewProps {
   onUpdateMember?: (updatedMember: CellMember, previousCellId?: string) => Promise<void> | void;
   onUpdateCell?: (updatedCell: CellGroup) => Promise<void> | void;
 }
+
+// Modal de indicadores (Recharts) só é baixado quando o líder abre o modal
+const CellIndicatorsModal = dynamic(
+  () => import('./CellIndicatorsModal').then((m) => m.CellIndicatorsModal),
+  { ssr: false }
+);
 
 /** Mesmos caracteres aceitos pelo servidor (e pelo e-mail sintético do Supabase Auth). */
 const sanitizeLoginInput = (value: string) => value.toLowerCase().replace(/[^a-z0-9._-]/g, '');
@@ -202,6 +210,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [selectedStatus, setSelectedStatus] = useState<string>('todos');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [showLegend, setShowLegend] = useState(false);
+  const [showIndicators, setShowIndicators] = useState(false);
   const [selectedMemberForAttendance, setSelectedMemberForAttendance] = useState<CellMember | null>(
     null
   );
@@ -348,6 +357,9 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     if (roleLower.includes('célula') || roleLower.includes('celula')) return 2;
     return 1;
   }, [currentUser, availableRoles]);
+
+  // Indicadores da célula (modal com gráficos): Líder de Célula (nível 2) ou acima
+  const canSeeCellIndicators = userHierarchyLevel >= 2;
 
   // Lista de funções disponíveis para cadastro:
   // "o usuário só pode cadastrar alguém do seu nível de hierarquia para baixo (igual ou inferior)"
@@ -1931,7 +1943,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       <div className="max-w-6xl mx-auto px-2.5 sm:px-6 pt-3 sm:pt-4 pb-2 w-full">
         <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl shadow-xs border border-slate-200/80 mb-3 w-full">
           {/* Informações da Célula */}
-          <div className="min-w-0 flex-1 pr-10 lg:pr-0">
+          <div className={`min-w-0 flex-1 ${canSeeCellIndicators ? 'pr-20' : 'pr-10'} lg:pr-0`}>
             <h2 className={`${cellNameFontSizeClass} font-extrabold text-[#04213d] break-words`}>
               {cell.name}
             </h2>
@@ -1982,18 +1994,35 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             </p>
           </div>
 
-          {/* Botão Legenda (posicionado no canto superior direito no mobile; em linha no desktop) */}
-          <button
-            type="button"
-            id="btn-cell-frequency-legend"
-            onClick={() => setShowLegend(!showLegend)}
-            className="absolute top-3.5 right-3.5 lg:static p-2 lg:px-3 lg:py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-2xs"
-            title="Entenda as cores da frequência"
-            aria-label="Legenda de frequência"
-          >
-            <HelpCircle size={16} className="text-slate-500" />
-            <span className="hidden lg:inline">Legenda</span>
-          </button>
+          {/* Botões Indicadores + Legenda (canto superior direito no mobile; em linha no desktop) */}
+          <div className="absolute top-3.5 right-3.5 lg:static flex items-center gap-1.5 shrink-0">
+            {/* Indicadores da célula: Líder de Célula (nível 2) ou acima. O modal e os gráficos só carregam ao abrir. */}
+            {canSeeCellIndicators && (
+              <button
+                type="button"
+                id="btn-cell-indicators"
+                onClick={() => setShowIndicators(true)}
+                onMouseEnter={() => import('./CellIndicatorsModal').catch(() => {})}
+                className="p-2 lg:px-3 lg:py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-2xs"
+                title="Indicadores da célula"
+                aria-label="Indicadores da célula"
+              >
+                <BarChart3 size={16} className="text-slate-500" />
+                <span className="hidden lg:inline">Indicadores</span>
+              </button>
+            )}
+            <button
+              type="button"
+              id="btn-cell-frequency-legend"
+              onClick={() => setShowLegend(!showLegend)}
+              className="p-2 lg:px-3 lg:py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition flex items-center justify-center gap-1.5 cursor-pointer shrink-0 shadow-2xs"
+              title="Entenda as cores da frequência"
+              aria-label="Legenda de frequência"
+            >
+              <HelpCircle size={16} className="text-slate-500" />
+              <span className="hidden lg:inline">Legenda</span>
+            </button>
+          </div>
 
           {/* Seletor de Células (A-Z), Botão Editar Célula & Botão Novo Membro */}
           {(accessibleCells.length > 1 || userHierarchyLevel > 1 || canEditCurrentCell) && (
@@ -3502,6 +3531,11 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Modal: Indicadores da Célula (carregado sob demanda) */}
+      {showIndicators && canSeeCellIndicators && (
+        <CellIndicatorsModal cellId={cell.id} cellName={cell.name} onClose={() => setShowIndicators(false)} />
       )}
 
       {/* Toast flutuante de sucesso ao editar ou transferir membro */}
