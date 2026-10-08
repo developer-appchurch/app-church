@@ -89,7 +89,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
       }),
     initialPageParam: null as { criado_em: string; id: string } | null,
     getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.nextCursor : undefined),
-    staleTime: 1000 * 60 * 2, // 2 minutos stale-while-revalidate
+    staleTime: 1000 * 60 * 4, // 4 minutos stale-while-revalidate
   });
 
   const allFetchedPosts = useMemo(() => {

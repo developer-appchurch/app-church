@@ -225,6 +225,21 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
     );
   }, [user, userHierarchyLevel]);
 
+  // Permissões efetivas do usuário (mesma query/cache do menu lateral)
+  const { data: userPermissions } = useQuery({
+    queryKey: ['user-effective-permissions', user?.id],
+    queryFn: () => (user ? AppChurchService.getUserEffectivePermissions(user) : Promise.resolve({})),
+    enabled: !!user?.id,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // Excluir membro exige a permissão "member:delete" (mesma regra do DELETE /api/members/pool);
+  // sem ela, o botão de lixeira nem aparece.
+  const canDeleteMembers = useMemo(
+    () => isPastorOrAdmin || AppChurchService.hasPermission(user, 'member:delete', userPermissions),
+    [isPastorOrAdmin, user, userPermissions]
+  );
+
   // Verifica se uma unidade/célula está sob a cobertura direta ou indireta do usuário logado
   const isUnitInUserCoverage = useCallback(
     (unitId: string | null | undefined): boolean => {
@@ -929,14 +944,16 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                           </button>
                         )}
 
-                        <button
-                          type="button"
-                          onClick={() => setMemberToDelete(member)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200 cursor-pointer"
-                          title="Excluir membro e remover login"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        {canDeleteMembers && (
+                          <button
+                            type="button"
+                            onClick={() => setMemberToDelete(member)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200 cursor-pointer"
+                            title="Excluir membro e remover login"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1337,7 +1354,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       )}
 
       {/* Modal: Confirmar Exclusão */}
-      {memberToDelete && (
+      {memberToDelete && canDeleteMembers && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
             <div className="bg-red-600 text-white p-5 flex items-center justify-between">
