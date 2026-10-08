@@ -13,7 +13,7 @@ import {
   LeadershipTrackProgress,
   UserProfile,
 } from '../types';
-import { AppChurchService } from '../lib/supabase';
+import { AppChurchService, invalidateMemoryCache } from '../lib/supabase';
 import { AppChurchLogo } from '../components/AppChurchLogo';
 import { LoginScreen } from '../components/LoginScreen';
 import { Header } from '../components/Header';
@@ -347,27 +347,24 @@ export default function Home() {
     setRefreshErrorBanner('');
     setRefreshSuccessToast('');
     try {
-      // 1. Invalida as queries do React Query (mantém os dados na tela graças ao keepPreviousData)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['cell-members'] }),
-        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['feed_posts'] }),
-        queryClient.invalidateQueries({ queryKey: ['rankings'] }),
-      ]);
+      // 1. Limpa o cache em memória do serviço, para que as consultas abaixo busquem do banco
+      //    (e não devolvam a cópia guardada por alguns minutos).
+      invalidateMemoryCache();
 
-      // 2. Re-executa as células para atualizar seletores
-      const freshCells = await AppChurchService.getCells(user.churchId, true);
-      if (freshCells && freshCells.length > 0) {
-        setCells(freshCells);
-      }
+      // 2. Recarrega tudo o que está aberto na tela (qualquer tela, sem lista fixa) e marca o
+      //    restante como desatualizado, para ser recarregado ao ser aberto.
+      await Promise.all([
+        queryClient.invalidateQueries(),
+        AppChurchService.getCells(user.churchId, true).then((freshCells) => {
+          if (freshCells && freshCells.length > 0) setCells(freshCells);
+        }),
+      ]);
 
       const status = await AppChurchService.checkConnection(true);
       setConnectionStatus(status);
 
       // Notificação rápida (2s no máximo) em tom de verde claro
-      setRefreshSuccessToast('Dados Atualizados');
+      setRefreshSuccessToast('Recarregados os dados desta tela');
       setTimeout(() => {
         setRefreshSuccessToast('');
       }, 2000);

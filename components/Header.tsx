@@ -48,20 +48,17 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Right section: Botão de Refresh / Sincronização direta com o Banco */}
+          {/* Botão de recarregar (só no desktop; no celular, puxar a tela para baixo faz o mesmo) */}
           {onRefreshData && (
             <button
-              id="btn-header-logout"
               type="button"
               onClick={onRefreshData}
               disabled={isRefreshing}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-sky-200 hover:text-white bg-sky-500/20 hover:bg-sky-600/30 active:scale-95 border border-sky-400/30 transition-all cursor-pointer shadow-xs shrink-0 disabled:opacity-60"
-              title="Atualizar dados diretamente do banco de dados"
+              className="hidden md:flex items-center justify-center w-9 h-9 rounded-lg text-sky-200 hover:text-white bg-sky-500/20 hover:bg-sky-600/30 active:scale-95 border border-sky-400/30 transition-all cursor-pointer shadow-xs shrink-0 disabled:opacity-60"
+              title="Recarregar os dados desta tela"
+              aria-label="Recarregar os dados desta tela"
             >
-              <RotateCw size={15} className={isRefreshing ? 'animate-spin text-sky-300' : ''} />
-              <span className="hidden sm:inline">
-                {isRefreshing ? 'Atualizando...' : 'Atualizar Banco'}
-              </span>
+              <RotateCw size={16} className={isRefreshing ? 'animate-spin text-sky-300' : ''} />
             </button>
           )}
         </div>
