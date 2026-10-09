@@ -517,16 +517,16 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
   }, []);
 
   const load = useCallback(
-    async (force = false, silent = false) => {
+    async (force = false) => {
       if (!churchId) return;
-      if (!silent) setIsLoading(true);
+      setIsLoading(true);
       try {
         const data = await AppChurchService.getNeighborhoods(churchId, force);
         setNeighborhoods(data);
       } catch (err: any) {
         showToast('error', err?.message || 'Falha ao carregar bairros.');
       } finally {
-        if (!silent) setIsLoading(false);
+        setIsLoading(false);
       }
     },
     [churchId, showToast]
@@ -828,9 +828,9 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
   }, []);
 
   const load = useCallback(
-    async (force = false) => {
+    async (force = false, silent = false) => {
       if (!churchId) return;
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       try {
         const data = await AppChurchService.getTrackStepsDetailed(churchId, force);
         setSteps(data.steps.sort((a, b) => a.stepNumber - b.stepNumber));
@@ -838,7 +838,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
       } catch (err: any) {
         showToast('error', err?.message || 'Falha ao carregar o trilho.');
       } finally {
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
       }
     },
     [churchId, showToast]
