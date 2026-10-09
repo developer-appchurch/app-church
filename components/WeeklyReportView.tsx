@@ -37,6 +37,27 @@ interface WeeklyReportViewProps {
   initialReportDate?: string;
 }
 
+const NAME_PARTICLES = new Set(['da', 'de', 'do', 'das', 'dos', 'e', "d'"]);
+
+/** "Maria Luiza Pantaleão" → "Maria Luiza"; "Ana de Souza" → "Ana Souza" (pula da/de/do...). */
+function shortName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (parts.length <= 2) return parts.join(' ');
+  const second = parts.slice(1).find((w) => !NAME_PARTICLES.has(w.toLowerCase()));
+  return second ? `${parts[0]} ${second}` : parts[0];
+}
+
+/**
+ * Abrevia os nomes para os 2 primeiros (lista mais compacta). Se dois nomes ficarem iguais ao
+ * abreviar, esses continuam completos para não confundir.
+ */
+function compactNames(names: string[]): string[] {
+  const short = names.map(shortName);
+  const counts = new Map<string, number>();
+  short.forEach((n) => counts.set(n.toLowerCase(), (counts.get(n.toLowerCase()) || 0) + 1));
+  return short.map((n, i) => ((counts.get(n.toLowerCase()) || 0) > 1 ? names[i] : n));
+}
+
 /**
  * Junta o relatório devolvido ao salvar com o que já estava na tela. A resposta do salvamento não traz
  * as presenças de membros já excluídos do cadastro (que o servidor preserva), então elas são mantidas.
@@ -1088,17 +1109,20 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                       ) : (
                         <ShieldX size={14} className="text-rose-600" />
                       )}
-                      <span>
-                        {selectedReportForDetail.supervisao
-                          ? 'Supervisão Presente'
-                          : 'Sem Supervisão'}
+                      {/* No celular o texto é abreviado para caber numa linha */}
+                      <span className="sm:hidden">
+                        {selectedReportForDetail.supervisao ? 'Sup. Presente' : 'Sem Supervisão'}
+                      </span>
+                      <span className="hidden sm:inline">
+                        {selectedReportForDetail.supervisao ? 'Supervisão Presente' : 'Sem Supervisão'}
                       </span>
                     </div>
 
                     {selectedReportForDetail.tesouraria_recebido && (
                       <div className="px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-100 text-emerald-900 font-bold text-xs flex items-center gap-1.5 shrink-0">
                         <Check size={13} className="text-emerald-700 stroke-[2.5]" />
-                        <span>Validado pela Tesouraria</span>
+                        <span className="sm:hidden">Validado</span>
+                        <span className="hidden sm:inline">Validado pela Tesouraria</span>
                       </div>
                     )}
                   </div>
@@ -1186,35 +1210,44 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {(selectedReportForDetail.presentes_ids || []).map((mId) => {
-                          const memberName =
-                            selectedReportForDetail.presentes_nomes?.[mId] ||
-                            selectedReportForDetail.presentes_membros?.find((x) => x.id === mId)?.nome ||
-                            cellMembers.find((x) => x.id === mId)?.name ||
-                            directMembers?.find((x) => x.id === mId)?.name ||
-                            members.find((x) => x.id === mId)?.name ||
-                            'Membro';
-
+                        {(() => {
+                          const presentNames = (selectedReportForDetail.presentes_ids || []).map((mId) => ({
+                            id: mId,
+                            name:
+                              selectedReportForDetail.presentes_nomes?.[mId] ||
+                              selectedReportForDetail.presentes_membros?.find((x) => x.id === mId)?.nome ||
+                              cellMembers.find((x) => x.id === mId)?.name ||
+                              directMembers?.find((x) => x.id === mId)?.name ||
+                              members.find((x) => x.id === mId)?.name ||
+                              'Membro',
+                          }));
+                          const shortNames = compactNames([
+                            ...presentNames.map((p) => p.name),
+                            ...(selectedReportForDetail.presentes_excluidos || []),
+                          ]);
                           return (
-                            <span
-                              key={mId}
-                              className="bg-white border border-sky-200 text-slate-800 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md shadow-2xs flex items-center gap-1 leading-tight"
-                            >
-                              <Check size={10} className="text-emerald-600 shrink-0 stroke-[2.5]" />
-                              <span className="truncate max-w-[140px] sm:max-w-none">{memberName}</span>
-                            </span>
+                            <>
+                              {presentNames.map((p, idx) => (
+                                <span
+                                  key={p.id}
+                                  title={p.name}
+                                  className="bg-white border border-sky-200 text-slate-800 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md shadow-2xs leading-tight truncate max-w-[160px] sm:max-w-none"
+                                >
+                                  {shortNames[idx]}
+                                </span>
+                              ))}
+                              {(selectedReportForDetail.presentes_excluidos || []).map((nome, idx) => (
+                                <span
+                                  key={`excluido-${idx}`}
+                                  title={`${nome} — excluído do cadastro depois deste relatório`}
+                                  className="bg-slate-50 border border-slate-200 text-slate-500 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md leading-tight truncate max-w-[160px] sm:max-w-none"
+                                >
+                                  {shortNames[presentNames.length + idx]} (excluído)
+                                </span>
+                              ))}
+                            </>
                           );
-                        })}
-                        {(selectedReportForDetail.presentes_excluidos || []).map((nome, idx) => (
-                          <span
-                            key={`excluido-${idx}`}
-                            title="Membro excluído do cadastro depois deste relatório"
-                            className="bg-slate-50 border border-slate-200 text-slate-500 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1 leading-tight"
-                          >
-                            <Check size={10} className="text-slate-400 shrink-0 stroke-[2.5]" />
-                            <span className="truncate max-w-[140px] sm:max-w-none">{nome} (excluído)</span>
-                          </span>
-                        ))}
+                        })()}
                       </div>
                     </div>
                   )}
