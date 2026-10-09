@@ -31,8 +31,10 @@ import {
   CheckSquare,
   Square,
   CalendarCheck,
+  PowerOff,
 } from 'lucide-react';
 import { TadelSettingsTab } from './TadelSettingsTab';
+import { InactiveCellsTab } from './InactiveCellsTab';
 import { UserProfile, Neighborhood, TrackStep, ChurchHierarchicalLevel, OrganizationalUnit } from '@/types';
 import { AppChurchService } from '@/lib/supabase';
 
@@ -44,13 +46,15 @@ interface ChurchSettingsViewProps {
   onNavigateToUnits?: () => void;
 }
 
-type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins' | 'tadel';
+type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins' | 'tadel' | 'inactive';
 
 interface TabDef {
   id: SettingsTab;
   label: string;
   icon: React.ElementType;
   permissionCode: string;
+  /** Visível só para o Administrador do Sistema. */
+  systemAdminOnly?: boolean;
 }
 
 const TABS: TabDef[] = [
@@ -59,6 +63,7 @@ const TABS: TabDef[] = [
   { id: 'neighborhoods', label: 'Bairros', icon: MapPin, permissionCode: 'neighborhood:manage' },
   { id: 'logins', label: 'Gestão de Logins', icon: KeyRound, permissionCode: 'member:access_manage' },
   { id: 'tadel', label: 'TADEL', icon: CalendarCheck, permissionCode: 'tadel:manage' },
+  { id: 'inactive', label: 'Células Desativadas', icon: PowerOff, permissionCode: '', systemAdminOnly: true },
 ];
 
 export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
@@ -82,10 +87,11 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
 
   const visibleTabs = useMemo(
     () =>
-      TABS.filter(
-        (tab) =>
-          AppChurchService.hasPermission(currentUser, 'church:admin', userPermissions) ||
-          AppChurchService.hasPermission(currentUser, tab.permissionCode, userPermissions)
+      TABS.filter((tab) =>
+        tab.systemAdminOnly
+          ? Boolean(currentUser.isSystemAdmin || currentUser.login === 'admin')
+          : AppChurchService.hasPermission(currentUser, 'church:admin', userPermissions) ||
+            AppChurchService.hasPermission(currentUser, tab.permissionCode, userPermissions)
       ),
     [currentUser, userPermissions]
   );
@@ -154,6 +160,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
         )}
         {activeTab === 'logins' && <LoginsTab currentUser={currentUser} />}
         {activeTab === 'tadel' && <TadelSettingsTab currentUser={currentUser} />}
+        {activeTab === 'inactive' && <InactiveCellsTab currentUser={currentUser} />}
       </div>
     </div>
   );

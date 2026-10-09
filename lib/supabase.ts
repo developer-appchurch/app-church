@@ -26,6 +26,7 @@ import {
   UnitLeader,
   UpdateUnitLeadersInput,
   Neighborhood,
+  InactiveCell,
 } from '../types';
 import {
   INITIAL_CHURCHES,
@@ -1337,6 +1338,52 @@ export const AppChurchService = {
       };
     }
     throw new Error('Ambiente do cliente necessário.');
+  },
+
+  /**
+   * Desativa uma célula (Líder de Setor ou acima, sob a sua cobertura): desvincula os membros,
+   * encerra o vínculo dos líderes (quem não lidera outra unidade volta a ser Membro) e marca a
+   * célula como inativa. Relatórios e histórico são preservados.
+   */
+  async deactivateCell(
+    cellId: string,
+    churchId: string
+  ): Promise<{ unlinkedMemberIds: string[]; demotedLeaders: { id: string; name: string }[] }> {
+    const res = await fetch('/api/cells/deactivate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cellId }),
+    });
+    const data = await safeJsonParseResponse(res);
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || 'Falha ao desativar a célula.');
+    }
+    invalidateMemoryCache('units:');
+    invalidateMemoryCache(`cells:${churchId}`);
+    return { unlinkedMemberIds: data.unlinkedMemberIds || [], demotedLeaders: data.demotedLeaders || [] };
+  },
+
+  /** Células desativadas da igreja (somente Administrador do Sistema). */
+  async getInactiveCells(churchId: string): Promise<InactiveCell[]> {
+    const res = await fetch(`/api/cells/inactive?churchId=${encodeURIComponent(churchId)}`, { cache: 'no-store' });
+    const data = await safeJsonParseResponse(res);
+    if (!res.ok) throw new Error(data?.error || 'Falha ao carregar as células desativadas.');
+    return data?.cells || [];
+  },
+
+  /** Reativa uma célula desativada (somente Administrador do Sistema). Ela volta sem membros e sem líderes. */
+  async reactivateCell(cellId: string, churchId: string): Promise<void> {
+    const res = await fetch('/api/cells/inactive', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cellId }),
+    });
+    const data = await safeJsonParseResponse(res);
+    if (!res.ok || !data?.success) {
+      throw new Error(data?.error || 'Falha ao reativar a célula.');
+    }
+    invalidateMemoryCache('units:');
+    invalidateMemoryCache(`cells:${churchId}`);
   },
 
   /**

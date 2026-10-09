@@ -27,6 +27,7 @@ import {
   Lock,
   X,
   ArrowRightLeft,
+  PowerOff,
 } from 'lucide-react';
 import {
   ChurchHierarchicalLevel,
@@ -37,6 +38,7 @@ import {
   Role,
 } from '../types';
 import { AppChurchService } from '../lib/supabase';
+import { DeactivateCellModal, DeactivateCellResult, deactivateSuccessMessage } from './DeactivateCellModal';
 
 interface HierarchicalUnitsViewProps {
   user: UserProfile;
@@ -133,6 +135,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [moveTargetParentId, setMoveTargetParentId] = useState<string>('');
   const [isMovingUnit, setIsMovingUnit] = useState<boolean>(false);
   const [moveError, setMoveError] = useState<string>('');
+
+  // Modal de Desativar Célula (Líder de Setor ou acima, somente células sob a sua cobertura)
+  const [unitToDeactivate, setUnitToDeactivate] = useState<OrganizationalUnit | null>(null);
 
   // Permissões efetivas do usuário, usadas para liberar a ação de mover célula
   const [userPermissions, setUserPermissions] = useState<Record<string, boolean>>({});
@@ -1243,6 +1248,27 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     }
   };
 
+  // Depois de desativar: tira a célula desta tela e atualiza os membros afetados (o modal cuida dos caches)
+  const handleCellDeactivated = (cell: OrganizationalUnit, result: DeactivateCellResult) => {
+    setUnits((prev) => prev.filter((u) => u.id !== cell.id));
+    const unlinked = new Set(result.unlinkedMemberIds);
+    const demoted = new Set(result.demotedLeaders.map((l) => l.id));
+    if (unlinked.size > 0 || demoted.size > 0) {
+      setChurchMembers((prev) =>
+        prev.map((m) => {
+          if (!unlinked.has(m.id) && !demoted.has(m.id)) return m;
+          return {
+            ...m,
+            ...(unlinked.has(m.id) ? { cellId: '', cellName: undefined } : {}),
+            ...(demoted.has(m.id) ? { role: 'Membro' as UserRole } : {}),
+          };
+        })
+      );
+    }
+    setSuccessBanner(deactivateSuccessMessage(cell.name, result));
+    setUnitToDeactivate(null);
+  };
+
   const handleQuickAddLeader = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newLeaderName.trim()) {
@@ -2082,18 +2108,31 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                         </div>
                       )}
 
-                      {/* Ação de Mover para outro Setor */}
-                      {isLeafLevel && canTransferUnits && (
-                        <div className="pt-2 border-t border-slate-200/60 mt-2 flex items-center justify-end">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenMoveModal(unit)}
-                            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 flex items-center gap-1 cursor-pointer bg-indigo-50/60 hover:bg-indigo-100/80 px-2.5 py-1 rounded-lg border border-indigo-200/60 transition shrink-0"
-                            title="Mover esta célula para outro setor"
-                          >
-                            <ArrowRightLeft size={12} />
-                            <span>Mover para outro Setor</span>
-                          </button>
+                      {/* Ações da célula: Mover para outro Setor e Desativar */}
+                      {isLeafLevel && (canTransferUnits || (userHierarchyLevel >= 3 && canUserManageUnit(unit))) && (
+                        <div className="pt-2 border-t border-slate-200/60 mt-2 flex flex-wrap items-center justify-end gap-1.5">
+                          {canTransferUnits && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenMoveModal(unit)}
+                              className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 flex items-center gap-1 cursor-pointer bg-indigo-50/60 hover:bg-indigo-100/80 px-2.5 py-1 rounded-lg border border-indigo-200/60 transition shrink-0"
+                              title="Mover esta célula para outro setor"
+                            >
+                              <ArrowRightLeft size={12} />
+                              <span>Mover para outro Setor</span>
+                            </button>
+                          )}
+                          {userHierarchyLevel >= 3 && canUserManageUnit(unit) && (
+                            <button
+                              type="button"
+                              onClick={() => setUnitToDeactivate(unit)}
+                              className="text-[11px] font-bold text-red-700 hover:text-red-900 flex items-center gap-1 cursor-pointer bg-red-50/70 hover:bg-red-100/80 px-2.5 py-1 rounded-lg border border-red-200/70 transition shrink-0"
+                              title="Desativar esta célula"
+                            >
+                              <PowerOff size={12} />
+                              <span>Desativar</span>
+                            </button>
+                          )}
                         </div>
                       )}
                     </div>
@@ -2583,6 +2622,19 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal: Desativar Célula (alerta de confirmação) */}
+      {unitToDeactivate && (
+        <DeactivateCellModal
+          cellId={unitToDeactivate.id}
+          cellName={unitToDeactivate.name}
+          churchId={effectiveChurchId}
+          memberCount={unitToDeactivate.memberCount}
+          leaderNames={unitToDeactivate.leaders?.map((l) => l.name)}
+          onClose={() => setUnitToDeactivate(null)}
+          onDeactivated={(result) => handleCellDeactivated(unitToDeactivate, result)}
+        />
       )}
       </div>
     </div>

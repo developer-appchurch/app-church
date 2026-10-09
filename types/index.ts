@@ -364,6 +364,17 @@ export interface UnitLeader {
   phone?: string;
 }
 
+/** Célula desativada (Configurações da Igreja › Células Desativadas). */
+export interface InactiveCell {
+  id: string;
+  name: string;
+  parentName: string | null;
+  parentActive: boolean;
+  deactivatedAt: string | null;
+  reportCount: number;
+  lastReportDate: string | null;
+}
+
 export interface OrganizationalUnit {
   id: string;
   churchId: string;
