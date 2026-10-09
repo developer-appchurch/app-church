@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Layers,
@@ -79,6 +79,22 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       setUnits(cachedUnits);
     }
   }, [cachedUnits]);
+
+  // Os níveis também acompanham o cache (sem refazer o carregamento inicial da tela)
+  useEffect(() => {
+    if (cachedLevels && cachedLevels.length > 0) {
+      setLevels(cachedLevels);
+    }
+  }, [cachedLevels]);
+
+  // Últimos dados do cache, lidos pelo carregamento inicial sem entrar nas dependências do efeito.
+  // Assim, salvar uma célula/líder (que atualiza o cache) NÃO refaz o carregamento nem volta ao 1º nível.
+  const cachedLevelsRef = useRef(cachedLevels);
+  cachedLevelsRef.current = cachedLevels;
+  const cachedUnitsRef = useRef(cachedUnits);
+  cachedUnitsRef.current = cachedUnits;
+  // Chave (igreja + nível inicial) já inicializada: o nível ativo só é escolhido uma vez por chave
+  const initializedKeyRef = useRef<string | null>(null);
 
   const [levels, setLevels] = useState<ChurchHierarchicalLevel[]>([]);
   const [activeLevelId, setActiveLevelId] = useState<string>('');
@@ -294,8 +310,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     async function fetchData() {
       try {
         const [currentLvs, currentUnits, fetchedMembers, fetchedRoles] = await Promise.all([
-          cachedLevels.length > 0 ? Promise.resolve(cachedLevels) : AppChurchService.getChurchLevels(effectiveChurchId),
-          cachedUnits.length > 0 ? Promise.resolve(cachedUnits) : AppChurchService.getUnits(effectiveChurchId, undefined, 'flat'),
+          cachedLevelsRef.current.length > 0 ? Promise.resolve(cachedLevelsRef.current) : AppChurchService.getChurchLevels(effectiveChurchId),
+          cachedUnitsRef.current.length > 0 ? Promise.resolve(cachedUnitsRef.current) : AppChurchService.getUnits(effectiveChurchId, undefined, 'flat'),
           AppChurchService.getMembers(effectiveChurchId, undefined, false, { limit: 2000 }),
           AppChurchService.getRoles(),
         ]);
@@ -308,7 +324,12 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
           setRoles(fetchedRoles);
         }
 
-        if (currentLvs.length > 0) {
+        // Só escolhe o nível ativo na primeira carga desta igreja/nível inicial; recargas não resetam a seleção
+        const initKey = `${effectiveChurchId}:${initialLevelIndex}`;
+        const isFirstInit = initializedKeyRef.current !== initKey;
+        if (isFirstInit) initializedKeyRef.current = initKey;
+
+        if (currentLvs.length > 0 && isFirstInit) {
           // Determina os níveis que o usuário logado tem permissão hierárquica para acessar
           const isSysAdmin = user.isSystemAdmin || user.role === 'Administrador' || user.login === 'admin';
           let userLvl = 1;
@@ -386,7 +407,10 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [effectiveChurchId, initialLevelIndex, cachedLevels, cachedUnits, user]);
+    // Dependências propositalmente enxutas: cachedLevels/cachedUnits são lidos via ref (ver acima) e o
+    // usuário entra pelo id, para não refazer a carga (membros, funções, unidades) a cada atualização de cache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveChurchId, initialLevelIndex, user?.id]);
 
   // Nível ativo atual
   const activeLevel = useMemo(() => {
@@ -406,12 +430,16 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return levels[activeLevelIndex - 1];
   }, [levels, activeLevelIndex]);
 
-  // Unidades do nível pai já cadastradas (prioriza e restringe para pais sob cobertura do líder logado)
+  // Unidades do nível pai em que o usuário pode criar, conforme a hierarquia de liderança.
+  // Tudo é calculado em memória sobre as unidades já carregadas (nenhuma consulta extra ao banco).
+  // - Pastor / Supervisor / Admin: todas
+  // - Líder de Célula: só o pai (setor) da própria célula e das células que lidera
+  // - Líder de Setor: os que lidera + o da própria célula
+  // - Líder de Área / Distrito: o que lidera e tudo abaixo + o da própria célula
   const parentUnitsAvailable = useMemo(() => {
     if (!parentLevel) return [];
     const allParents = units.filter((u) => u.levelTypeId === parentLevel.id);
 
-    // Administradores e Pastores Gerais possuem acesso amplo a todos os pais
     if (
       user.isSystemAdmin ||
       user.role === 'Administrador' ||
@@ -421,29 +449,55 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       return allParents;
     }
 
-    // Se o usuário lidera setores/áreas/distritos específicos, filtra apenas as unidades pai sob sua cobertura
-    const uSectorNorm = (user.sector || '').toLowerCase().trim();
-    const uId = user.id || '';
-    const uNameNorm = (user.name || '').toLowerCase().trim();
+    const uId = (user.id || '').toLowerCase().trim();
     const uLogin = (user.login || '').toLowerCase().trim();
+    const uSectorNorm = (user.sector || '').toLowerCase().trim();
+    const ownCellId = (user.cellId || user.currentCellId || '').toLowerCase().trim();
 
-    const directlyMatchedParents = allParents.filter((p) => {
-      const pNameNorm = (p.name || '').toLowerCase().trim();
-      if (uSectorNorm && (pNameNorm === uSectorNorm || pNameNorm.includes(uSectorNorm) || uSectorNorm.includes(pNameNorm))) {
-        return true;
-      }
-      return p.leaders?.some((l) => {
-        const lId = (l.id || '').toLowerCase().trim();
-        const lName = (l.name || '').toLowerCase().trim();
-        return (uId && lId === uId.toLowerCase()) || (uLogin && lId === uLogin) || (uNameNorm && lName === uNameNorm);
+    const byId = new Map<string, OrganizationalUnit>(
+      units.map((u) => [u.id.toLowerCase(), u] as [string, OrganizationalUnit])
+    );
+    const ledIds = units
+      .filter((u) =>
+        u.leaders?.some((l) => {
+          const lId = (l.id || '').toLowerCase().trim();
+          return (uId && lId === uId) || (uLogin && lId === uLogin);
+        })
+      )
+      .map((u) => u.id);
+
+    const allowed = new Set<string>();
+    const ownParentId = ownCellId ? byId.get(ownCellId)?.parentId : null;
+    if (ownParentId) allowed.add(ownParentId);
+
+    if (userHierarchyLevel <= 2) {
+      ledIds.forEach((id) => {
+        const pid = byId.get(id.toLowerCase())?.parentId;
+        if (pid) allowed.add(pid);
       });
-    });
-
-    if (directlyMatchedParents.length > 0) {
-      return directlyMatchedParents;
+    } else {
+      const covered = new Set<string>(ledIds);
+      let changed = true;
+      let guard = 0;
+      while (changed && guard++ < 25) {
+        changed = false;
+        for (const u of units) {
+          if (!covered.has(u.id) && u.parentId && covered.has(u.parentId)) {
+            covered.add(u.id);
+            changed = true;
+          }
+        }
+      }
+      covered.forEach((id) => allowed.add(id));
+      // Compatibilidade: setor informado no perfil (nome exato)
+      if (uSectorNorm) {
+        allParents.forEach((p) => {
+          if ((p.name || '').toLowerCase().trim() === uSectorNorm) allowed.add(p.id);
+        });
+      }
     }
 
-    return allParents;
+    return allParents.filter((p) => allowed.has(p.id));
   }, [units, parentLevel, user, userHierarchyLevel]);
 
   // Unidades cadastradas no nível ativo atual
@@ -1490,23 +1544,38 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
           <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center mx-auto mb-4 border border-amber-300">
             <AlertCircle size={30} />
           </div>
-          <h2 className="text-lg font-bold text-amber-950 mb-2">
-            Nenhum(a) {parentLevel?.name} cadastrado(a) ainda
-          </h2>
-          <p className="text-xs sm:text-sm text-amber-800 leading-relaxed max-w-lg mx-auto mb-5">
-            A estrutura hierárquica exige que cada <strong>{activeLevel.name}</strong> seja
-            vinculado(a) a um(a) <strong>{parentLevel?.name}</strong> imediatamente acima.
-            Para manter a integridade da igreja, cadastre pelo menos um(a) {parentLevel?.name}{' '}
-            primeiro.
-          </p>
-          <button
-            type="button"
-            onClick={() => parentLevel && handleSelectLevel(parentLevel.id)}
-            className="px-5 py-2.5 bg-[#052447] hover:bg-[#073366] text-white rounded-xl text-xs font-bold transition shadow-sm inline-flex items-center gap-2 cursor-pointer"
-          >
-            <Plus size={16} />
-            <span>Cadastrar {parentLevel?.name} Agora</span>
-          </button>
+          {units.some((u) => u.levelTypeId === parentLevel?.id) ? (
+            <>
+              <h2 className="text-lg font-bold text-amber-950 mb-2">
+                Nenhum(a) {parentLevel?.name} sob a sua liderança
+              </h2>
+              <p className="text-xs sm:text-sm text-amber-800 leading-relaxed max-w-lg mx-auto">
+                Você só pode cadastrar {activeLevel.name.toLowerCase()} em {parentLevel?.name?.toLowerCase()} que
+                estejam sob a sua liderança, e não há nenhum vinculado ao seu perfil. Procure a liderança
+                responsável.
+              </p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-lg font-bold text-amber-950 mb-2">
+                Nenhum(a) {parentLevel?.name} cadastrado(a) ainda
+              </h2>
+              <p className="text-xs sm:text-sm text-amber-800 leading-relaxed max-w-lg mx-auto mb-5">
+                A estrutura hierárquica exige que cada <strong>{activeLevel.name}</strong> seja
+                vinculado(a) a um(a) <strong>{parentLevel?.name}</strong> imediatamente acima.
+                Para manter a integridade da igreja, cadastre pelo menos um(a) {parentLevel?.name}{' '}
+                primeiro.
+              </p>
+              <button
+                type="button"
+                onClick={() => parentLevel && handleSelectLevel(parentLevel.id)}
+                className="px-5 py-2.5 bg-[#052447] hover:bg-[#073366] text-white rounded-xl text-xs font-bold transition shadow-sm inline-flex items-center gap-2 cursor-pointer"
+              >
+                <Plus size={16} />
+                <span>Cadastrar {parentLevel?.name} Agora</span>
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
