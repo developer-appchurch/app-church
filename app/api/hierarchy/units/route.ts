@@ -751,6 +751,27 @@ export async function POST(req: NextRequest) {
     const isRootLevel = currentLevelIndex === 0;
     const isLeafLevel = currentLevelIndex === levels.length - 1;
 
+    // Quem pode criar cada nível: Setor → líder de setor+; Área → líder de área+;
+    // Distrito/Rede → nível 5+; Célula → líder de célula+ (validado mais abaixo pelo setor pai).
+    if (!auth.actor.isSystemAdmin && !isLeafLevel) {
+      const norm = String(currentLevel.nome || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+      const stepsFromLeaf = levels.length - 1 - currentLevelIndex;
+      let requiredLevel = Math.min(2 + stepsFromLeaf, 5);
+      if (norm.includes('setor')) requiredLevel = 3;
+      else if (norm.includes('area')) requiredLevel = 4;
+      else if (norm.includes('distrito') || norm.includes('rede')) requiredLevel = 5;
+      if (auth.actor.level < requiredLevel) {
+        const who = requiredLevel === 3 ? 'líder de setor' : requiredLevel === 4 ? 'líder de área' : 'líder de distrito/rede';
+        return NextResponse.json(
+          { error: `Somente ${who} ou superior pode criar ${currentLevel.nome}.` },
+          { status: 403 }
+        );
+      }
+    }
+
     // 2. Se NÃO for o nível raiz (mais alto), é obrigatório ter pai_id válido
     if (!isRootLevel) {
       if (!input.parentId) {

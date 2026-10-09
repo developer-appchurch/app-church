@@ -517,16 +517,16 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
   }, []);
 
   const load = useCallback(
-    async (force = false) => {
+    async (force = false, silent = false) => {
       if (!churchId) return;
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       try {
         const data = await AppChurchService.getNeighborhoods(churchId, force);
         setNeighborhoods(data);
       } catch (err: any) {
         showToast('error', err?.message || 'Falha ao carregar bairros.');
       } finally {
-        setIsLoading(false);
+        if (!silent) setIsLoading(false);
       }
     },
     [churchId, showToast]
@@ -853,7 +853,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
     setReorderingNumber(step.stepNumber);
     try {
       await AppChurchService.reorderTrackStep({ churchId, stepNumber: step.stepNumber, direction });
-      await load(true);
+      await load(true, true);
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao reordenar etapa.');
     } finally {
@@ -903,7 +903,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
         showToast('success', 'Etapa atualizada com sucesso.');
       }
       setModal(null);
-      await load(true);
+      await load(true, true);
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao salvar etapa.');
     } finally {
@@ -921,7 +921,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
     try {
       await AppChurchService.deleteTrackStep({ churchId, stepNumber: step.stepNumber });
       showToast('success', 'Etapa excluída.');
-      await load(true);
+      await load(true, true);
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao excluir etapa.');
     } finally {
@@ -940,7 +940,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
       });
       showToast('success', 'Etapa excluída.');
       setConfirmDeleteStep(null);
-      await load(true);
+      await load(true, true);
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao excluir etapa.');
     } finally {

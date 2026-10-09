@@ -1042,12 +1042,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const handleSelectLevel = (levelId: string) => {
     const targetIdx = levels.findIndex((l) => l.id === levelId);
     const targetLvl = levels[targetIdx];
-    if (targetLvl && !isLevelAllowedForUser(targetLvl, targetIdx)) {
-      setErrorMessage(
-        `Seu cargo (${user.role || 'Membro'}) não possui permissão para gerenciar o nível ${targetLvl.name}. Acesso restrito a níveis iguais ou inferiores ao seu.`
-      );
-      return;
-    }
+    // Guia sem acesso fica apenas bloqueada, sem mensagem de erro
+    if (targetLvl && !isLevelAllowedForUser(targetLvl, targetIdx)) return;
     setActiveLevelId(levelId);
     setErrorMessage('');
     setSuccessBanner('');
@@ -1449,7 +1445,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                 onClick={() => canAccess && handleSelectLevel(lvl.id)}
                 title={
                   !isAllowed
-                    ? `Acesso Restrito: Seu cargo (${user.role || 'Membro'}) não permite gerenciar ${lvl.name}s. Acesso apenas para níveis iguais ou inferiores ao seu.`
+                    ? undefined
                     : !isUnlocked
                     ? `Nível bloqueado: cadastre pelo menos um(a) ${levels[index - 1]?.name} antes.`
                     : undefined
@@ -1484,11 +1480,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   </div>
                 )}
                 <span>{lvl.name}</span>
-                {!isAllowed && (
-                  <span className="px-1.5 py-0.5 rounded text-[9px] bg-rose-50 text-rose-700 border border-rose-200 font-semibold">
-                    Nível Superior
-                  </span>
-                )}
                 {isAllowed && isUnlocked && (
                   <span
                     className={`px-1.5 py-0.5 rounded-md text-[10px] ${
