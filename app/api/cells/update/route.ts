@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireLevel, unitInChurch } from '@/lib/requireSession';
+import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission, requireLevel, unitInChurch, actorCan } from '@/lib/requireSession';
 import { getSupabaseServerClient } from '@/lib/supabaseServer';
 import { CellGroup } from '@/types';
 
@@ -195,9 +195,45 @@ export async function POST(req: NextRequest) {
     if (fotoUrl !== undefined) unitUpdatePayload.foto_url = fotoUrl || null;
     if (parentUnitId !== undefined) unitUpdatePayload.pai_id = parentUnitId || null;
     if (ativo !== undefined) unitUpdatePayload.ativo = Boolean(ativo);
-    const resolvedMother = motherCellId || unidade_criadora_id;
+    // "Multiplicada de": '' / null limpa a marca. Alterar a célula mãe é uma mudança significativa,
+    // por isso só quem tem permissão de administrador (church:admin) pode fazê-lo.
+    const resolvedMother = motherCellId !== undefined ? motherCellId : unidade_criadora_id;
     if (resolvedMother !== undefined) {
-      unitUpdatePayload.unidade_criadora_id = resolvedMother && resolvedMother.trim() !== '' ? resolvedMother.trim() : null;
+      const newMother =
+        typeof resolvedMother === 'string' && resolvedMother.trim() !== '' ? resolvedMother.trim() : null;
+
+      if (newMother !== (currentUnit.unidade_criadora_id || null)) {
+        const canEditMother = auth.actor.isSystemAdmin || (await actorCan(auth.actor, 'church:admin'));
+        if (!canEditMother) {
+          return NextResponse.json(
+            { error: 'Apenas administradores podem alterar a célula de origem ("Multiplicada de").' },
+            { status: 403 }
+          );
+        }
+
+        if (newMother) {
+          if (newMother === cellId) {
+            return NextResponse.json(
+              { error: 'Uma célula não pode ser multiplicação dela mesma.' },
+              { status: 400 }
+            );
+          }
+          const { data: motherCheck } = await supabase
+            .from('unidades')
+            .select('id, nivel_tipo_id')
+            .eq('id', newMother)
+            .eq('igreja_id', currentUnit.igreja_id)
+            .maybeSingle();
+          if (!motherCheck) {
+            return NextResponse.json(
+              { error: 'A célula escolhida em "Multiplicada de" não foi encontrada nesta igreja.' },
+              { status: 400 }
+            );
+          }
+        }
+
+        unitUpdatePayload.unidade_criadora_id = newMother;
+      }
     }
 
     const { data: updatedUnit, error: updateErr } = await supabase
