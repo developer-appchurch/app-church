@@ -622,7 +622,8 @@ export async function GET(req: NextRequest) {
 async function allowedParentIdsForActor(
   supabase: any,
   actor: { memberId: string | null; level: number },
-  churchId: string
+  churchId: string,
+  includeAncestors = false
 ): Promise<Set<string>> {
   const allowed = new Set<string>();
   if (!actor.memberId) return allowed;
@@ -662,6 +663,22 @@ async function allowedParentIdsForActor(
       });
     }
     covered.forEach((id) => allowed.add(id));
+  }
+
+  // Criação de níveis intermediários (Setor/Área): as unidades acima do que o usuário conduz
+  // também são pais válidos (ex.: líder de setor cadastra outro setor na própria área).
+  if (includeAncestors && actor.level >= 3) {
+    const base = new Set<string>(allowed);
+    ledIds.forEach((id) => base.add(id));
+    if (ownId) base.add(ownId);
+    base.forEach((id) => {
+      let pid = parentOf.get(id) || null;
+      let hops = 0;
+      while (pid && hops++ < 25) {
+        allowed.add(pid);
+        pid = parentOf.get(pid) || null;
+      }
+    });
   }
 
   return allowed;
@@ -806,6 +823,17 @@ export async function POST(req: NextRequest) {
           { error: 'A unidade pai selecionada não é do nível imediatamente superior.' },
           { status: 400 }
         );
+      }
+
+      // Criar Setor/Área/Distrito: só dentro da própria linha de liderança (Pastor/Admin: qualquer um)
+      if (!isLeafLevel && !auth.actor.isSystemAdmin && auth.actor.level < 6) {
+        const allowedParents = await allowedParentIdsForActor(supabase, auth.actor, input.churchId, true);
+        if (!allowedParents.has(input.parentId)) {
+          return NextResponse.json(
+            { error: `Você só pode criar ${currentLevel.nome} dentro da sua própria liderança.` },
+            { status: 403 }
+          );
+        }
       }
 
       // Criar célula: só nos setores sob a liderança do usuário (Pastor/Supervisor/Admin: qualquer um)
