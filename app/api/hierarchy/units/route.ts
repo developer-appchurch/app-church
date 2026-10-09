@@ -612,6 +612,61 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/**
+ * Setores (ou nível pai equivalente) em que o usuário pode criar células, conforme a liderança:
+ * - Líder de Célula: só o setor da própria célula (e das células que lidera)
+ * - Líder de Setor: os setores que lidera + o setor da própria célula
+ * - Líder de Área / Distrito: o que lidera e tudo abaixo (descendentes) + o setor da própria célula
+ * Pastor, Supervisor e Admin (nível >= 6) não passam por aqui.
+ */
+async function allowedParentIdsForActor(
+  supabase: any,
+  actor: { memberId: string | null; level: number },
+  churchId: string
+): Promise<Set<string>> {
+  const allowed = new Set<string>();
+  if (!actor.memberId) return allowed;
+
+  const [unitsRes, ledRes, memberRes] = await Promise.all([
+    supabase.from('unidades').select('id, pai_id').eq('igreja_id', churchId),
+    supabase.from('unidade_lideres').select('unidade_id').eq('pessoa_id', actor.memberId).eq('ativo', true),
+    supabase.from('membros').select('unidade_id').eq('id', actor.memberId).maybeSingle(),
+  ]);
+
+  const parentOf = new Map<string, string | null>();
+  (unitsRes.data || []).forEach((u: any) => parentOf.set(u.id, u.pai_id || null));
+  const ledIds: string[] = (ledRes.data || []).map((l: any) => l.unidade_id).filter((id: string) => parentOf.has(id));
+  const ownId: string | null = memberRes.data?.unidade_id || null;
+
+  const ownParent = ownId ? parentOf.get(ownId) || null : null;
+  if (ownParent) allowed.add(ownParent);
+
+  if (actor.level <= 2) {
+    ledIds.forEach((id) => {
+      const pid = parentOf.get(id);
+      if (pid) allowed.add(pid);
+    });
+  } else if (actor.level === 3) {
+    ledIds.forEach((id) => allowed.add(id));
+  } else {
+    const covered = new Set<string>(ledIds);
+    let changed = true;
+    let guard = 0;
+    while (changed && guard++ < 25) {
+      changed = false;
+      parentOf.forEach((pid, id) => {
+        if (!covered.has(id) && pid && covered.has(pid)) {
+          covered.add(id);
+          changed = true;
+        }
+      });
+    }
+    covered.forEach((id) => allowed.add(id));
+  }
+
+  return allowed;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireSession(req);
@@ -721,6 +776,26 @@ export async function POST(req: NextRequest) {
           { error: 'Unidade pai selecionada não foi encontrada no banco de dados.' },
           { status: 400 }
         );
+      }
+
+      // O pai precisa ser do nível imediatamente acima do que está sendo criado
+      const expectedParentLevelId = levels[currentLevelIndex - 1]?.id;
+      if (expectedParentLevelId && parentCheck.nivel_tipo_id !== expectedParentLevelId) {
+        return NextResponse.json(
+          { error: 'A unidade pai selecionada não é do nível imediatamente superior.' },
+          { status: 400 }
+        );
+      }
+
+      // Criar célula: só nos setores sob a liderança do usuário (Pastor/Supervisor/Admin: qualquer um)
+      if (isLeafLevel && !auth.actor.isSystemAdmin && auth.actor.level < 6) {
+        const allowedParents = await allowedParentIdsForActor(supabase, auth.actor, input.churchId);
+        if (!allowedParents.has(input.parentId)) {
+          return NextResponse.json(
+            { error: 'Você só pode criar células nos setores sob a sua liderança.' },
+            { status: 403 }
+          );
+        }
       }
     }
 
