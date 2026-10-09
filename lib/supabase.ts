@@ -4339,6 +4339,24 @@ export const AppChurchService = {
       ),
     ];
 
+    // Tarefa E: Marca a célula nova como multiplicada a partir da célula de origem.
+    // Importante: isso só acontece AQUI, ao finalizar a multiplicação (depois de já
+    // ter recebido os membros e líderes), nunca no momento da criação da célula.
+    if (supabase) {
+      unitLeaderTasks.push(
+        (async () => {
+          try {
+            await supabase
+              .from('unidades')
+              .update({ unidade_criadora_id: originCellId, atualizado_em: new Date().toISOString() })
+              .eq('id', destCellId);
+          } catch (err) {
+            console.warn('Erro ao vincular célula mãe na célula nova:', err);
+          }
+        })()
+      );
+    }
+
     // Aguardar todas as tarefas remotas em paralelo
     await Promise.all([...supabaseTasks, ...unitLeaderTasks]);
 

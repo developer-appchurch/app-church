@@ -1221,9 +1221,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         selectedLeaderIds.includes(m.id)
       );
 
-      const motherCellIdToUse = isLeafLevel ? (user.cellId || user.currentCellId || undefined) : undefined;
-      const motherCellNameToUse = isLeafLevel ? (user.cellName || undefined) : undefined;
-
+      // Células criadas pela tela de Níveis Organizacionais NÃO recebem célula mãe
+      // automaticamente (isso só deve acontecer via tela "Multiplicar Célula",
+      // e somente após o processo de multiplicação ser finalizado).
       const createdUnit = await AppChurchService.createUnit({
         churchId: effectiveChurchId,
         levelTypeId: activeLevel.id,
@@ -1236,12 +1236,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         meetingDay: isLeafLevel ? meetingDay : undefined,
         meetingTime: isLeafLevel ? meetingTime : undefined,
         createdByMemberId: user.id || user.login,
-        unidade_criadora_id: motherCellIdToUse,
-        motherCellId: motherCellIdToUse,
-        motherCellName: motherCellNameToUse,
       });
 
-      // Registra nos rastreamentos locais de células criadas e multiplicadas
+      // Registra apenas o rastreamento local de "criada por mim" (sem vínculo de célula mãe)
       const updatedCreatedCellIds = [createdUnit.id, ...userCreatedCellIds];
       setUserCreatedCellIds(updatedCreatedCellIds);
       try {
@@ -1249,11 +1246,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
           `appchurch_created_cells_${user?.id || user?.login || 'anon'}`,
           JSON.stringify(updatedCreatedCellIds)
         );
-        if (motherCellIdToUse) {
-          const updatedLineage = { ...userCellLineageMap, [createdUnit.id]: motherCellIdToUse };
-          setUserCellLineageMap(updatedLineage);
-          localStorage.setItem('appchurch_cell_lineage_map', JSON.stringify(updatedLineage));
-        }
       } catch {
         // localStorage opcional
       }
