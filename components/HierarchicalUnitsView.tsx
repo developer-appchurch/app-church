@@ -28,7 +28,6 @@ import {
   X,
   ArrowRightLeft,
   PowerOff,
-  AlertTriangle,
 } from 'lucide-react';
 import {
   ChurchHierarchicalLevel,
@@ -39,6 +38,7 @@ import {
   Role,
 } from '../types';
 import { AppChurchService } from '../lib/supabase';
+import { DeactivateCellModal, DeactivateCellResult, deactivateSuccessMessage } from './DeactivateCellModal';
 
 interface HierarchicalUnitsViewProps {
   user: UserProfile;
@@ -138,8 +138,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
   // Modal de Desativar Célula (Líder de Setor ou acima, somente células sob a sua cobertura)
   const [unitToDeactivate, setUnitToDeactivate] = useState<OrganizationalUnit | null>(null);
-  const [isDeactivating, setIsDeactivating] = useState<boolean>(false);
-  const [deactivateError, setDeactivateError] = useState<string>('');
 
   // Permissões efetivas do usuário, usadas para liberar a ação de mover célula
   const [userPermissions, setUserPermissions] = useState<Record<string, boolean>>({});
@@ -1250,66 +1248,25 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     }
   };
 
-  const handleOpenDeactivateModal = (unit: OrganizationalUnit) => {
-    setDeactivateError('');
-    setUnitToDeactivate(unit);
-  };
-
-  const handleConfirmDeactivate = async () => {
-    if (!unitToDeactivate) return;
-    const cell = unitToDeactivate;
-    setIsDeactivating(true);
-    setDeactivateError('');
-    try {
-      const result = await AppChurchService.deactivateCell(cell.id, effectiveChurchId);
-
-      // A célula sai da lista desta tela e do cache
-      setUnits((prev) => prev.filter((u) => u.id !== cell.id));
-      queryClient.setQueryData(['churchUnits', effectiveChurchId], (old: OrganizationalUnit[] | undefined) =>
-        old ? old.filter((u) => u.id !== cell.id) : old
+  // Depois de desativar: tira a célula desta tela e atualiza os membros afetados (o modal cuida dos caches)
+  const handleCellDeactivated = (cell: OrganizationalUnit, result: DeactivateCellResult) => {
+    setUnits((prev) => prev.filter((u) => u.id !== cell.id));
+    const unlinked = new Set(result.unlinkedMemberIds);
+    const demoted = new Set(result.demotedLeaders.map((l) => l.id));
+    if (unlinked.size > 0 || demoted.size > 0) {
+      setChurchMembers((prev) =>
+        prev.map((m) => {
+          if (!unlinked.has(m.id) && !demoted.has(m.id)) return m;
+          return {
+            ...m,
+            ...(unlinked.has(m.id) ? { cellId: '', cellName: undefined } : {}),
+            ...(demoted.has(m.id) ? { role: 'Membro' as UserRole } : {}),
+          };
+        })
       );
-
-      // Membros desvinculados e líderes que voltaram a ser Membro
-      const unlinked = new Set(result.unlinkedMemberIds);
-      const demoted = new Set(result.demotedLeaders.map((l) => l.id));
-      if (unlinked.size > 0 || demoted.size > 0) {
-        setChurchMembers((prev) =>
-          prev.map((m) => {
-            if (!unlinked.has(m.id) && !demoted.has(m.id)) return m;
-            return {
-              ...m,
-              ...(unlinked.has(m.id) ? { cellId: '', cellName: undefined } : {}),
-              ...(demoted.has(m.id) ? { role: 'Membro' as UserRole } : {}),
-            };
-          })
-        );
-      }
-
-      // As demais telas buscam os dados novos quando forem abertas
-      markStale(
-        queryClient,
-        ['churchUnits', effectiveChurchId],
-        ['churchMembers', effectiveChurchId],
-        ['church-members', effectiveChurchId],
-        ['church-cells', effectiveChurchId],
-        ['church-structure', effectiveChurchId],
-        ['celulas-gallery', effectiveChurchId],
-        ['member-pool'],
-        ['user-covered-cells']
-      );
-
-      const parts = [`${result.unlinkedMemberIds.length} membro(s) desvinculado(s)`];
-      if (result.demotedLeaders.length > 0) {
-        parts.push(`${result.demotedLeaders.map((l) => l.name).join(', ')} voltou(aram) a ser Membro`);
-      }
-      setSuccessBanner(`Célula "${cell.name}" desativada: ${parts.join('; ')}.`);
-      setUnitToDeactivate(null);
-    } catch (err: any) {
-      console.error('Erro ao desativar célula:', err);
-      setDeactivateError(err?.message || 'Falha ao desativar a célula.');
-    } finally {
-      setIsDeactivating(false);
     }
+    setSuccessBanner(deactivateSuccessMessage(cell.name, result));
+    setUnitToDeactivate(null);
   };
 
   const handleQuickAddLeader = async (e: React.FormEvent) => {
@@ -2168,7 +2125,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                           {userHierarchyLevel >= 3 && canUserManageUnit(unit) && (
                             <button
                               type="button"
-                              onClick={() => handleOpenDeactivateModal(unit)}
+                              onClick={() => setUnitToDeactivate(unit)}
                               className="text-[11px] font-bold text-red-700 hover:text-red-900 flex items-center gap-1 cursor-pointer bg-red-50/70 hover:bg-red-100/80 px-2.5 py-1 rounded-lg border border-red-200/70 transition shrink-0"
                               title="Desativar esta célula"
                             >
@@ -2669,80 +2626,15 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
       {/* Modal: Desativar Célula (alerta de confirmação) */}
       {unitToDeactivate && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="bg-red-700 text-white p-3.5 sm:p-5 flex items-center justify-between">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
-                  <AlertTriangle size={19} />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm sm:text-base font-extrabold">Desativar Célula</h3>
-                  <p className="text-[11px] text-red-100 mt-0.5 truncate">{unitToDeactivate.name}</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setUnitToDeactivate(null)}
-                disabled={isDeactivating}
-                className="p-1.5 text-red-100 hover:text-white rounded-lg transition cursor-pointer"
-                aria-label="Fechar"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-3.5 sm:p-5 space-y-3">
-              {deactivateError && (
-                <div className="p-2.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
-                  <AlertCircle size={15} className="shrink-0" />
-                  <span>{deactivateError}</span>
-                </div>
-              )}
-
-              <p className="text-xs sm:text-sm text-slate-700">
-                Tem certeza que deseja desativar a célula <strong>{unitToDeactivate.name}</strong>?
-              </p>
-
-              <ul className="p-2.5 sm:p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] sm:text-xs text-amber-900 space-y-1 list-disc pl-6 sm:pl-7">
-                <li>
-                  {unitToDeactivate.memberCount
-                    ? `Os ${unitToDeactivate.memberCount} membro(s) serão desvinculados da célula`
-                    : 'Os membros serão desvinculados da célula'}{' '}
-                  (não são apagados e podem ser vinculados a outra célula pelo Pool de Membros).
-                </li>
-                <li>
-                  {unitToDeactivate.leaders && unitToDeactivate.leaders.length > 0
-                    ? `O vínculo de liderança de ${unitToDeactivate.leaders.map((l) => l.name).join(', ')} será encerrado`
-                    : 'O vínculo dos líderes será encerrado'}
-                  ; quem não lidera outra unidade volta a ter a função de Membro.
-                </li>
-                <li>Os relatórios e o histórico da célula são preservados.</li>
-                <li>A célula some das listas. Só o Administrador do Sistema pode reativá-la.</li>
-              </ul>
-            </div>
-
-            <div className="px-3.5 sm:px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setUnitToDeactivate(null)}
-                disabled={isDeactivating}
-                className="px-3.5 py-2 rounded-lg text-sm font-semibold text-slate-600 hover:bg-slate-100 transition cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDeactivate}
-                disabled={isDeactivating}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-50 transition cursor-pointer"
-              >
-                {isDeactivating ? <Loader2 size={15} className="animate-spin" /> : <PowerOff size={15} />}
-                Desativar Célula
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeactivateCellModal
+          cellId={unitToDeactivate.id}
+          cellName={unitToDeactivate.name}
+          churchId={effectiveChurchId}
+          memberCount={unitToDeactivate.memberCount}
+          leaderNames={unitToDeactivate.leaders?.map((l) => l.name)}
+          onClose={() => setUnitToDeactivate(null)}
+          onDeactivated={(result) => handleCellDeactivated(unitToDeactivate, result)}
+        />
       )}
       </div>
     </div>

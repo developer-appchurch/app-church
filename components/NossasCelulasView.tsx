@@ -10,6 +10,7 @@ import { validateImageFile, formatFileSize } from '@/lib/imageOptimizer';
 import { uploadUnitPhoto, deleteUnitPhoto, isUnitStorageUrl } from '@/lib/unitPhotoStorage';
 import { CelulaCard } from './CelulaCard';
 import { CelulaSearchInput } from './CelulaSearchInput';
+import { DeactivateCellModal, deactivateSuccessMessage } from './DeactivateCellModal';
 import {
   AlertCircle,
   RotateCcw,
@@ -29,6 +30,7 @@ import {
   Upload,
   CheckCircle2,
   Info,
+  PowerOff,
 } from 'lucide-react';
 
 interface NossasCelulasViewProps {
@@ -312,6 +314,9 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
     setIsModalOpen(true);
   };
 
+  const [cellToDeactivate, setCellToDeactivate] = useState<CelulaCardItem | null>(null);
+  const [deactivatedBanner, setDeactivatedBanner] = useState<string>('');
+
   const handleCloseModal = () => {
     discardPendingPhoto();
     setIsModalOpen(false);
@@ -445,6 +450,8 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   };
 
   const isEditable = canEditCell(selectedCell);
+  // Desativar: Líder de Setor ou acima, somente células sob a sua cobertura (o servidor confere de novo)
+  const canDeactivate = isEditable && userHierarchyLevel >= 3;
 
   const isLoading = isQueryLoading && allCelulas.length === 0;
   const hasError = queryError && allCelulas.length === 0;
@@ -462,6 +469,21 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
             isPending={isPending}
           />
         </div>
+
+        {deactivatedBanner && (
+          <div className="mb-4 p-2.5 sm:p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs sm:text-sm flex items-start gap-2">
+            <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
+            <span className="flex-1">{deactivatedBanner}</span>
+            <button
+              type="button"
+              onClick={() => setDeactivatedBanner('')}
+              className="text-emerald-700 hover:text-emerald-900 cursor-pointer"
+              aria-label="Fechar aviso"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        )}
 
         {/* 1. ESTADO DE ERRO */}
         {hasError && (
@@ -877,6 +899,18 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
 
               {/* Modal Footer */}
               <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
+                {canDeactivate && selectedCell && (
+                  <button
+                    type="button"
+                    onClick={() => setCellToDeactivate(selectedCell)}
+                    disabled={isSaving}
+                    className="mr-auto px-3 py-2 text-xs font-bold text-red-700 hover:text-red-900 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    title="Desativar esta célula"
+                  >
+                    <PowerOff size={14} />
+                    <span>Desativar<span className="hidden sm:inline"> Célula</span></span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={handleCloseModal}
@@ -909,6 +943,22 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {cellToDeactivate && (
+        <DeactivateCellModal
+          cellId={cellToDeactivate.unidadeId || cellToDeactivate.id}
+          cellName={cellToDeactivate.nome}
+          churchId={cellToDeactivate.churchId || churchId}
+          memberCount={cellToDeactivate.memberCount}
+          leaderNames={cellToDeactivate.leaderNames}
+          onClose={() => setCellToDeactivate(null)}
+          onDeactivated={(result) => {
+            setDeactivatedBanner(deactivateSuccessMessage(cellToDeactivate.nome, result));
+            setCellToDeactivate(null);
+            handleCloseModal();
+          }}
+        />
       )}
     </div>
   );
