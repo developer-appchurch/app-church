@@ -101,6 +101,7 @@ export const MemberPermissionsView: React.FC<MemberPermissionsViewProps> = ({
   const [selectedMember, setSelectedMember] = useState<MemberSummaryItem | null>(null);
   const [memberPermissions, setMemberPermissions] = useState<MemberEffectivePermission[]>([]);
   const [isLoadingPermissions, setIsLoadingPermissions] = useState(false);
+  const [isResettingOverrides, setIsResettingOverrides] = useState(false);
   const [updatingPermId, setUpdatingPermId] = useState<string | null>(null);
 
   // Filtros internos na lista de permissões
@@ -225,8 +226,7 @@ export const MemberPermissionsView: React.FC<MemberPermissionsViewProps> = ({
         message: res?.message || 'Permissão atualizada com sucesso.',
       });
 
-      // Recarrega permissões em segundo plano para garantir consistência total
-      await loadMemberPermissions(selectedMember.id);
+      // A permissão já foi atualizada na tela acima (sem recarregar a lista inteira)
     } catch (err: any) {
       // Reverte em caso de erro
       setMemberPermissions(previousPermissions);
@@ -251,7 +251,7 @@ export const MemberPermissionsView: React.FC<MemberPermissionsViewProps> = ({
     }
 
     try {
-      setIsLoadingPermissions(true);
+      setIsResettingOverrides(true);
       for (const p of overrides) {
         await AppChurchService.updateMemberPermissionOverride({
           memberId: selectedMember.id,
@@ -263,14 +263,15 @@ export const MemberPermissionsView: React.FC<MemberPermissionsViewProps> = ({
         type: 'success',
         message: `Todas as permissões de ${selectedMember.name} foram restauradas para o padrão.`,
       });
-      await loadMemberPermissions(selectedMember.id);
+      // Volta cada permissão ao padrão da função, só na tela (sem recarregar a lista)
+      setMemberPermissions((prev) => prev.map((p) => ({ ...p, override: null, effective: p.inherited })));
     } catch (err: any) {
       setFeedbackToast({
         type: 'error',
         message: err?.message || 'Erro ao restaurar permissões.',
       });
     } finally {
-      setIsLoadingPermissions(false);
+      setIsResettingOverrides(false);
       setTimeout(() => setFeedbackToast(null), 3500);
     }
   };
@@ -528,7 +529,7 @@ export const MemberPermissionsView: React.FC<MemberPermissionsViewProps> = ({
                     <button
                       type="button"
                       onClick={handleResetAllOverrides}
-                      disabled={isLoadingPermissions}
+                      disabled={isLoadingPermissions || isResettingOverrides}
                       className="inline-flex items-center gap-1 px-2 py-1 text-[10px] sm:text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg transition cursor-pointer shrink-0 disabled:opacity-50"
                       title="Apaga todos os overrides individuais e volta às regras da função"
                     >

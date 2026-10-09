@@ -31,7 +31,9 @@ interface MultiplyCellViewProps {
   cells: CellGroup[];
   currentCell?: CellGroup;
   onNavigate: (screen: ActiveScreen) => void;
-  onRefreshCells?: () => void;
+  onRefreshCells?: (
+    change?: { originCellId: string; destCellId: string; movedCount: number } | { createdCell: CellGroup }
+  ) => void;
   onSelectCell?: (cellId: string) => void;
 }
 
@@ -452,7 +454,8 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
       });
 
       if (created && created.id) {
-        onRefreshCells?.();
+        // Acrescenta só a nova célula à lista (sem buscar todas de novo)
+        onRefreshCells?.({ createdCell: created });
         // Seleciona automaticamente como célula de destino no Passo 3
         setDestCellId(created.id);
         setIsCreateCellModalOpen(false);
@@ -542,6 +545,8 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
         originLeaderIds: selectedOriginLeaderIds,
       });
 
+      const movedIds = [...transferredMemberIds];
+
       // 2. Notificação de Sucesso conforme solicitado
       setSuccessToast('Célula Multiplicada com Sucesso!');
 
@@ -550,11 +555,11 @@ export const MultiplyCellView: React.FC<MultiplyCellViewProps> = ({
       setTransferredMemberIds([]);
       setSelectedDestLeaderIds([]);
 
-      // 4. Recarrega os membros da célula de origem para atualizar as contagens e a liderança
-      await loadOriginMembers(originCellId);
+      // 4. Tira da lista da célula de origem só os membros transferidos (sem recarregar a tela)
+      setOriginMembers((prev) => prev.filter((m) => !movedIds.includes(m.id)));
 
-      // 5. Notifica o sistema para recarregar as células
-      onRefreshCells?.();
+      // 5. Avisa o app para ajustar só a contagem das duas células
+      onRefreshCells?.({ originCellId, destCellId, movedCount: movedIds.length });
     } catch (err: any) {
       console.error('Erro ao multiplicar célula:', err);
       setSubmitError(err?.message || 'Falha ao concluir a multiplicação de célula. Tente novamente.');

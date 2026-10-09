@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { markStale } from '@/lib/queryCache';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Users,
@@ -464,13 +465,34 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       const targetCellObj = availableCells.find((c) => c.id === targetCellId);
       const cellName = targetCellObj?.name || resData.cellName || 'Célula';
 
-      // Invalida cache do React Query para atualização instantânea
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
-      ]);
+      // Atualiza só esse membro nas listas (na aba "sem célula" ele sai da lista)
+      const assignedId = selectedMemberToAssign.id;
+      const assignedCellId = resData.cellId || targetCellId;
+      queryClient.getQueriesData({ queryKey: ['member-pool'] }).forEach(([key, oldData]: [any, any]) => {
+        if (!oldData?.pages) return;
+        const tab = String(key[2] ?? 'all');
+        queryClient.setQueryData(key, {
+          ...oldData,
+          pages: oldData.pages.map((page: any) => ({
+            ...page,
+            members:
+              tab === 'unlinked'
+                ? page.members.filter((m: MemberListItem) => m.id !== assignedId)
+                : page.members.map((m: MemberListItem) =>
+                    m.id === assignedId ? { ...m, cellId: assignedCellId, cellName, isUnlinked: false } : m
+                  ),
+            counts: page.counts
+              ? {
+                  ...page.counts,
+                  unlinked: Math.max(0, (page.counts.unlinked || 0) - 1),
+                  linked: (page.counts.linked || 0) + 1,
+                }
+              : page.counts,
+          })),
+        });
+      });
+      adjustCellMemberCount(assignedCellId, +1);
+      markRelatedScreensStale();
 
       setActionSuccessBanner(
         `Membro "${selectedMemberToAssign.name}" vinculado com sucesso à "${cellName}"!`
@@ -485,6 +507,55 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
   };
 
   // Ação: Desvincular Membro (Retornar ao Cadastro Geral com atualização atômica e instantânea do cache)
+  // ---- Atualização pontual do cache (sem buscar a lista inteira de novo) ----
+
+  // Contagem de membros da célula no cache de células (seletor da Minha Célula, galerias)
+  const adjustCellMemberCount = (cellId: string | null | undefined, delta: number) => {
+    if (!cellId) return;
+    queryClient.setQueryData(['church-cells', user.churchId], (old: CellGroup[] | undefined) =>
+      old?.map((c) =>
+        c.id === cellId
+          ? {
+              ...c,
+              memberCount: Math.max(0, (c.memberCount || 0) + delta),
+              quantidade_membros: Math.max(0, (c.quantidade_membros ?? c.memberCount ?? 0) + delta),
+            }
+          : c
+      )
+    );
+  };
+
+  // Outras telas que dependem dos membros: buscam a versão nova só quando forem abertas
+  const markRelatedScreensStale = () =>
+    markStale(queryClient, ['church-members', user.churchId], ['church-structure', user.churchId], ['cell-members']);
+
+  // Aplica uma mudança em todas as listas do pool em cache (cada aba/busca), respeitando o filtro da aba
+  const updatePoolCaches = (
+    change: (members: MemberListItem[], tab: string, search: string, hasMorePages: boolean) => MemberListItem[],
+    countsDelta: { total?: number; unlinked?: number; linked?: number }
+  ) => {
+    queryClient.getQueriesData({ queryKey: ['member-pool'] }).forEach(([key, oldData]: [any, any]) => {
+      if (!oldData?.pages) return;
+      const tab = String(key[2] ?? 'all');
+      const search = String(key[3] ?? '');
+      queryClient.setQueryData(key, {
+        ...oldData,
+        pages: oldData.pages.map((page: any, idx: number) => ({
+          ...page,
+          members: idx === 0 ? change(page.members, tab, search, oldData.pages.length > 1 || Boolean(page.hasNextPage)) : page.members,
+          counts: page.counts
+            ? {
+                ...page.counts,
+                total: Math.max(0, (page.counts.total || 0) + (countsDelta.total || 0)),
+                unlinked: Math.max(0, (page.counts.unlinked || 0) + (countsDelta.unlinked || 0)),
+                linked: Math.max(0, (page.counts.linked || 0) + (countsDelta.linked || 0)),
+              }
+            : page.counts,
+        })),
+      });
+    });
+  };
+
   const handleConfirmUnassign = async () => {
     if (!memberToUnassign) return;
     const member = memberToUnassign;
@@ -537,10 +608,9 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       setMemberToUnassign(null);
       setActionSuccessBanner(`"${member.name}" foi desvinculado e movido para o cadastro geral.`);
 
-      // Sincroniza em background
-      queryClient.invalidateQueries({ queryKey: ['church-members'] });
-      queryClient.invalidateQueries({ queryKey: ['church-cells'] });
-      queryClient.invalidateQueries({ queryKey: ['church-structure'] });
+      // Lista já atualizada acima; ajusta só a contagem da célula de origem
+      adjustCellMemberCount(member.cellId, -1);
+      markRelatedScreensStale();
     } catch (err: any) {
       console.error('Erro ao desvincular membro:', err);
       setErrorMessage(err?.message || 'Falha ao desvincular membro.');
@@ -589,10 +659,9 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
       setMemberToDelete(null);
       setActionSuccessBanner(`"${member.name}" foi excluído com sucesso.`);
 
-      // Sincroniza em background
-      queryClient.invalidateQueries({ queryKey: ['church-members'] });
-      queryClient.invalidateQueries({ queryKey: ['church-cells'] });
-      queryClient.invalidateQueries({ queryKey: ['church-structure'] });
+      // Lista já atualizada acima; ajusta só a contagem da célula
+      adjustCellMemberCount(member.cellId, -1);
+      markRelatedScreensStale();
     } catch (err: any) {
       console.error('Erro ao excluir membro:', err);
       setErrorMessage(err?.message || 'Falha ao excluir membro.');
@@ -636,12 +705,38 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
         throw new Error(resData?.error || 'Falha ao cadastrar membro.');
       }
 
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
-      ]);
+      // Acrescenta só o novo membro às listas em cache (na posição em ordem alfabética)
+      const created = resData.member || {};
+      const createdItem: MemberListItem = {
+        id: created.id,
+        name: created.name || newMemberName.trim(),
+        role: created.role || newMemberRole,
+        cellId: destinationCellId,
+        cellName: destinationCellId
+          ? availableCells.find((c) => c.id === destinationCellId)?.name || 'Célula'
+          : 'Sem Célula',
+        neighborhood: created.neighborhood || newMemberNeighborhood.trim() || 'Centro',
+        phone: created.phone || undefined,
+        isUnlinked: !destinationCellId,
+      };
+      if (createdItem.id) {
+        updatePoolCaches(
+          (members, tab, search, hasMorePages) => {
+            if (tab === 'unlinked' && !createdItem.isUnlinked) return members;
+            if (tab === 'linked' && createdItem.isUnlinked) return members;
+            if (search && !createdItem.name.toLowerCase().includes(search.toLowerCase())) return members;
+            // Fora do trecho já carregado: aparece ao rolar a lista
+            const last = members[members.length - 1];
+            if (hasMorePages && last && createdItem.name.localeCompare(last.name, 'pt-BR') > 0) return members;
+            return [...members.filter((m) => m.id !== createdItem.id), createdItem].sort((a, b) =>
+              a.name.localeCompare(b.name, 'pt-BR')
+            );
+          },
+          { total: 1, unlinked: createdItem.isUnlinked ? 1 : 0, linked: createdItem.isUnlinked ? 0 : 1 }
+        );
+      }
+      adjustCellMemberCount(destinationCellId, +1);
+      markRelatedScreensStale();
 
       setActionSuccessBanner(
         `Membro "${newMemberName.trim()}" cadastrado com sucesso ${

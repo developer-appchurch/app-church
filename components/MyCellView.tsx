@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { markStale } from '../lib/queryCache';
 import { CellMember, CellGroup, AttendanceStatus, UserRole, UserProfile, Role, OrganizationalUnit } from '../types';
 import { LeadershipBadgeIcon } from './LeadershipBadgeIcon';
 import { AppChurchService } from '../lib/supabase';
@@ -1394,7 +1395,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
       setFormError('');
       setLoginDuplicateError('');
       setIsAddModalOpen(false);
-      queryClient.invalidateQueries({ queryKey: ['cell-members', cell?.id] });
+      // A lista da célula já recebeu o novo membro em onAddMember (sem recarregar a tela)
     } catch (err: any) {
       const msg = err?.message || 'Erro ao cadastrar membro.';
       setFormError(msg);
@@ -1712,8 +1713,8 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
         return old.filter((m) => m.id !== editingMember.id);
       });
 
-      // Libera o cache do pool de membros para incluir esse membro na próxima leitura
-      queryClient.invalidateQueries({ queryKey: ['member-pool'] });
+      // O pool de membros busca a versão nova quando for aberto
+      markStale(queryClient, ['member-pool']);
 
       if (onUpdateMember) {
         await onUpdateMember({ ...updated, cellId: '' }, cell.id);

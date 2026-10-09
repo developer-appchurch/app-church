@@ -53,9 +53,10 @@ export const TadelPresenceView: React.FC<TadelPresenceViewProps> = ({ currentUse
       setFeedback({ type: 'success', message: 'Presença registrada! Obrigado por estar no TADEL.' });
     } catch (err: any) {
       setFeedback({ type: 'error', message: err?.message || 'Não foi possível registrar a presença.' });
+      // Ex.: presença já registrada em outro aparelho — busca a situação atual
+      queryClient.invalidateQueries({ queryKey: statusQuery.queryKey });
     } finally {
       setIsRegistering(false);
-      queryClient.invalidateQueries({ queryKey: statusQuery.queryKey });
     }
   };
 

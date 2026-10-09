@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { markStale } from '@/lib/queryCache';
 import {
   Layers,
   Plus,
@@ -1168,10 +1169,13 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         );
       }
 
-      // Invalidação pontual no React Query para sincronizar
-      queryClient.invalidateQueries({ queryKey: ['churchUnits', effectiveChurchId] });
-      queryClient.invalidateQueries({ queryKey: ['churchMembers', effectiveChurchId] });
-      queryClient.invalidateQueries({ queryKey: ['memberPool', effectiveChurchId] });
+      // Tela já atualizada acima; as demais telas buscam os dados novos quando forem abertas
+      markStale(
+        queryClient,
+        ['churchUnits', effectiveChurchId],
+        ['churchMembers', effectiveChurchId],
+        ['memberPool', effectiveChurchId]
+      );
 
       setSuccessBanner(
         result.leaders.length > 0
@@ -1226,7 +1230,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
           );
         }
       );
-      queryClient.invalidateQueries({ queryKey: ['churchUnits', effectiveChurchId] });
 
       setSuccessBanner(
         `"${unitToMove.name}" foi movida para "${result.parentName || 'o novo setor'}" com sucesso. Membros e líderes vinculados continuam os mesmos.`
@@ -1355,11 +1358,11 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         // localStorage opcional
       }
 
-      // Atualiza lista de unidades no estado local (Otimista)
-      setUnits((prev) => [createdUnit, ...prev]);
-
-      // Invalidar cache do React Query apenas após criar ou editar (Passo 5)
-      queryClient.invalidateQueries({ queryKey: ['churchUnits', effectiveChurchId] });
+      // Atualiza lista de unidades no estado local e no cache (sem buscar todas de novo)
+      setUnits((prev) => [createdUnit, ...prev.filter((u) => u.id !== createdUnit.id)]);
+      queryClient.setQueryData(['churchUnits', effectiveChurchId], (old: OrganizationalUnit[] | undefined) =>
+        old ? [createdUnit, ...old.filter((u) => u.id !== createdUnit.id)] : old
+      );
 
       setSuccessBanner(
         `${activeLevel.name} "${createdUnit.name}" cadastrado(a) com sucesso!`
