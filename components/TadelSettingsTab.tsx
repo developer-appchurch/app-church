@@ -58,12 +58,18 @@ export const TadelSettingsTab: React.FC<{ currentUser: UserProfile }> = ({ curre
     load();
   }, [load]);
 
-  const run = async (id: string | null, action: () => Promise<unknown>, successMessage: string) => {
+  // Executa a ação e aplica o resultado só no item afetado (sem buscar a configuração inteira de novo)
+  const run = async <T,>(
+    id: string | null,
+    action: () => Promise<T>,
+    successMessage: string,
+    apply: (result: T, prev: TadelConfigResponse) => TadelConfigResponse
+  ) => {
     setBusyId(id);
     try {
-      await action();
+      const result = await action();
+      setConfig((prev) => (prev ? apply(result, prev) : prev));
       showToast('success', successMessage);
-      await load();
       return true;
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao salvar.');
@@ -73,25 +79,43 @@ export const TadelSettingsTab: React.FC<{ currentUser: UserProfile }> = ({ curre
     }
   };
 
+  const sortSchedules = (list: TadelSchedule[]) =>
+    [...list].sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime));
+
+  const upsertSchedule = (schedule: TadelSchedule) => (prev: TadelConfigResponse): TadelConfigResponse => ({
+    ...prev,
+    schedules: sortSchedules([...prev.schedules.filter((s) => s.id !== schedule.id), schedule]),
+  });
+
   const handleSaveGeneral = async () => {
     setIsSavingGeneral(true);
+    const cleanName = name.trim();
+    const savedLevelIds = levelIds;
     await run(
       null,
-      () => TadelClient.updateConfig(churchId, { name: name.trim(), participatingLevelIds: levelIds }),
-      'Configuração salva.'
+      () => TadelClient.updateConfig(churchId, { name: cleanName, participatingLevelIds: savedLevelIds }),
+      'Configuração salva.',
+      (_r, prev) => ({ ...prev, name: cleanName, participatingLevelIds: savedLevelIds, usingDefaultLevels: false })
     );
     setIsSavingGeneral(false);
   };
 
   const handleCreate = async () => {
     setIsCreating(true);
-    const ok = await run(null, () => TadelClient.createSchedule(churchId, draft), 'Horário cadastrado.');
+    const ok = await run(null, () => TadelClient.createSchedule(churchId, draft), 'Horário cadastrado.', (r, prev) =>
+      upsertSchedule(r.schedule)(prev)
+    );
     if (ok) setDraft(EMPTY_DRAFT);
     setIsCreating(false);
   };
 
   const handleSaveEdit = async (id: string) => {
-    const ok = await run(id, () => TadelClient.updateSchedule(churchId, { id, ...editDraft }), 'Horário atualizado.');
+    const ok = await run(
+      id,
+      () => TadelClient.updateSchedule(churchId, { id, ...editDraft }),
+      'Horário atualizado.',
+      (r, prev) => upsertSchedule(r.schedule)(prev)
+    );
     if (ok) setEditingId(null);
   };
 
@@ -247,7 +271,10 @@ export const TadelSettingsTab: React.FC<{ currentUser: UserProfile }> = ({ curre
                       type="button"
                       onClick={() => {
                         setConfirmDeleteId(null);
-                        run(s.id, () => TadelClient.deleteSchedule(churchId, s.id), 'Horário excluído.');
+                        run(s.id, () => TadelClient.deleteSchedule(churchId, s.id), 'Horário excluído.', (_r, prev) => ({
+                          ...prev,
+                          schedules: prev.schedules.filter((x) => x.id !== s.id),
+                        }));
                       }}
                       className="px-2 py-1 rounded-md text-xs font-semibold text-white bg-red-600 hover:bg-red-700 cursor-pointer"
                     >
@@ -270,7 +297,8 @@ export const TadelSettingsTab: React.FC<{ currentUser: UserProfile }> = ({ curre
                         run(
                           s.id,
                           () => TadelClient.updateSchedule(churchId, { id: s.id, active: !s.active }),
-                          s.active ? 'Horário desativado.' : 'Horário reativado.'
+                          s.active ? 'Horário desativado.' : 'Horário reativado.',
+                          (r, prev) => upsertSchedule(r.schedule)(prev)
                         )
                       }
                     >

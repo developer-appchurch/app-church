@@ -414,7 +414,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
       }
 
       // 2. Grava no banco apenas a URL pública e dimensões (nunca base64)
-      await AppChurchService.createFeedPost({
+      const createdPost = await AppChurchService.createFeedPost({
         churchId: postData.churchId,
         cellId: postData.cellId,
         cellName: postData.cellName,
@@ -429,9 +429,20 @@ export const FeedView: React.FC<FeedViewProps> = ({
         category: postData.category,
       });
 
-      // 3. Sucesso: remove o post otimista e invalida a query para revalidação suave
+      // 3. Sucesso: coloca o post salvo no topo do feed em cache e remove o otimista
+      //    (sem buscar o feed inteiro de novo)
+      queryClient.setQueryData(queryKey, (oldData: any) => {
+        if (!oldData?.pages?.length) return oldData;
+        const [first, ...rest] = oldData.pages;
+        return {
+          ...oldData,
+          pages: [
+            { ...first, posts: [createdPost, ...first.posts.filter((p: FeedPost) => p.id !== createdPost.id)] },
+            ...rest,
+          ],
+        };
+      });
       setOptimisticPosts((prev) => prev.filter((p) => p.id !== tempId));
-      queryClient.invalidateQueries({ queryKey });
     } catch (err: any) {
       console.error('Falha ao publicar postagem:', err);
       // Marca como erro no card com opção de tentar novamente

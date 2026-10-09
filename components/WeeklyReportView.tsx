@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { markStale } from '@/lib/queryCache';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppChurchService } from '../lib/supabase';
 import { CellGroup, CellMember, UserProfile, WeeklyReport } from '../types';
@@ -34,6 +35,20 @@ interface WeeklyReportViewProps {
   currentUser?: UserProfile;
   autoOpenModal?: boolean;
   initialReportDate?: string;
+}
+
+/**
+ * Junta o relatório devolvido ao salvar com o que já estava na tela. A resposta do salvamento não traz
+ * as presenças de membros já excluídos do cadastro (que o servidor preserva), então elas são mantidas.
+ */
+function mergeSavedReport(previous: WeeklyReport, saved: WeeklyReport): WeeklyReport {
+  const excluded = previous.presentes_excluidos || [];
+  return {
+    ...previous,
+    ...saved,
+    presentes_excluidos: excluded,
+    qtd_membros: (saved.presentes_ids?.length ?? saved.qtd_membros ?? 0) + excluded.length,
+  };
 }
 
 export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
@@ -545,6 +560,8 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
 
       // 2. Remove também de relatórios antigos carregados sob demanda
       setOlderReports((prev) => prev.filter((r) => r.id !== rep.id));
+      // Frequência e indicadores mudam no banco: essas telas buscam a versão nova ao serem abertas
+      markStale(queryClient, ['cell-members', currentCell.id], ['cell-indicators', currentCell.id], ['rankings']);
 
       // 3. Fecha os modais e exibe o feedback
       setSelectedReportForDetail(null);
@@ -616,7 +633,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
             const oldReports: WeeklyReport[] = old.reports || [];
             const exists = oldReports.some((r) => r.id === json.report.id);
             const updatedReports = exists
-              ? oldReports.map((r) => (r.id === json.report.id ? json.report : r))
+              ? oldReports.map((r) => (r.id === json.report.id ? mergeSavedReport(r, json.report) : r))
               : [json.report, ...oldReports];
             return {
               ...old,
@@ -625,13 +642,17 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
           }
         );
         if (selectedReportForDetail && selectedReportForDetail.id === json.report.id) {
-          setSelectedReportForDetail(json.report);
+          setSelectedReportForDetail(mergeSavedReport(selectedReportForDetail, json.report));
         }
+        // Relatórios antigos carregados sob demanda
+        setOlderReports((prev) => prev.map((r) => (r.id === json.report.id ? mergeSavedReport(r, json.report) : r)));
       }
 
-      // Revalida em segundo plano com o banco de dados
+      // O relatório já foi atualizado na lista acima (sem buscar o histórico de novo).
+      // A frequência dos membros e os indicadores mudam no banco: essas telas buscam a versão
+      // nova quando forem abertas.
       if (currentCell?.id) {
-        queryClient.invalidateQueries({ queryKey: ['weekly-reports', currentCell.id] });
+        markStale(queryClient, ['cell-members', currentCell.id], ['cell-indicators', currentCell.id], ['rankings']);
       }
 
       setDuplicateWarning(null);

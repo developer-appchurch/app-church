@@ -546,10 +546,15 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
     if (!cleanName || !churchId) return;
     setIsCreating(true);
     try {
-      await AppChurchService.createNeighborhood({ churchId, name: cleanName });
+      const created = await AppChurchService.createNeighborhood({ churchId, name: cleanName });
       setNewName('');
       showToast('success', `Bairro "${cleanName}" cadastrado.`);
-      await load(true);
+      // Só acrescenta o novo bairro à lista (sem recarregar a aba)
+      setNeighborhoods((prev) =>
+        [...prev.filter((x) => x.id !== created.id), { ...created, usageCount: created.usageCount ?? 0 }].sort((a, b) =>
+          a.name.localeCompare(b.name, 'pt-BR')
+        )
+      );
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao criar bairro.');
     } finally {
@@ -576,10 +581,15 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
     }
     setSavingId(n.id);
     try {
-      await AppChurchService.updateNeighborhood({ id: n.id, churchId, name: cleanName });
+      const updated = await AppChurchService.updateNeighborhood({ id: n.id, churchId, name: cleanName });
       showToast('success', 'Bairro renomeado com sucesso.');
       cancelEditing();
-      await load(true);
+      // Atualiza só o bairro renomeado
+      setNeighborhoods((prev) =>
+        prev
+          .map((x) => (x.id === n.id ? { ...x, ...updated, usageCount: x.usageCount } : x))
+          .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+      );
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao renomear bairro.');
     } finally {
@@ -598,7 +608,8 @@ const NeighborhoodsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser 
     try {
       await AppChurchService.updateNeighborhood({ id: n.id, churchId, active: nextActive });
       showToast('success', nextActive ? 'Bairro reativado.' : 'Bairro desativado.');
-      await load(true);
+      // Atualiza só o status do bairro
+      setNeighborhoods((prev) => prev.map((x) => (x.id === n.id ? { ...x, active: nextActive } : x)));
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao atualizar bairro.');
     } finally {
@@ -848,12 +859,43 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
     load();
   }, [load]);
 
+  // Remove a etapa da lista e renumera as seguintes, como o servidor faz (sem recarregar a aba)
+  const applyStepRemoved = async (removedNumber: number) => {
+    if (!isCustomized) {
+      await load(true, true);
+      return;
+    }
+    setSteps((prev) =>
+      prev
+        .filter((s) => s.stepNumber !== removedNumber)
+        .sort((a, b) => a.stepNumber - b.stepNumber)
+        .map((s, i) => ({ ...s, stepNumber: i + 1 }))
+    );
+  };
+
   const handleReorder = async (step: TrackStepWithProgress, direction: 'up' | 'down') => {
     if (!churchId) return;
     setReorderingNumber(step.stepNumber);
     try {
       await AppChurchService.reorderTrackStep({ churchId, stepNumber: step.stepNumber, direction });
-      await load(true, true);
+      if (!isCustomized) {
+        // 1ª alteração: o servidor criou as etapas próprias da igreja (novos ids) — busca uma vez
+        await load(true, true);
+      } else {
+        // Troca só as duas etapas de posição
+        const neighbor = step.stepNumber + (direction === 'up' ? -1 : 1);
+        setSteps((prev) =>
+          prev
+            .map((s) =>
+              s.stepNumber === step.stepNumber
+                ? { ...s, stepNumber: neighbor }
+                : s.stepNumber === neighbor
+                  ? { ...s, stepNumber: step.stepNumber }
+                  : s
+            )
+            .sort((a, b) => a.stepNumber - b.stepNumber)
+        );
+      }
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao reordenar etapa.');
     } finally {
@@ -884,8 +926,9 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
     }
     setIsSavingModal(true);
     try {
+      let saved: TrackStep;
       if (modal.mode === 'create') {
-        await AppChurchService.createTrackStep({
+        saved = await AppChurchService.createTrackStep({
           churchId,
           title: cleanTitle,
           description: modal.description.trim(),
@@ -893,7 +936,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
         });
         showToast('success', 'Etapa criada com sucesso.');
       } else {
-        await AppChurchService.updateTrackStep({
+        saved = await AppChurchService.updateTrackStep({
           churchId,
           stepNumber: modal.stepNumber as number,
           title: cleanTitle,
@@ -903,7 +946,20 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
         showToast('success', 'Etapa atualizada com sucesso.');
       }
       setModal(null);
-      await load(true, true);
+      if (!isCustomized) {
+        // 1ª alteração: o servidor criou as etapas próprias da igreja (novos ids) — busca uma vez
+        await load(true, true);
+      } else if (modal.mode === 'create') {
+        // Acrescenta só a nova etapa
+        setSteps((prev) =>
+          [...prev, { ...saved, progressCount: 0 }].sort((a, b) => a.stepNumber - b.stepNumber)
+        );
+      } else {
+        // Atualiza só a etapa editada (mantém a contagem de progresso)
+        setSteps((prev) =>
+          prev.map((s) => (s.stepNumber === saved.stepNumber ? { ...s, ...saved, progressCount: s.progressCount } : s))
+        );
+      }
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao salvar etapa.');
     } finally {
@@ -921,7 +977,7 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
     try {
       await AppChurchService.deleteTrackStep({ churchId, stepNumber: step.stepNumber });
       showToast('success', 'Etapa excluída.');
-      await load(true, true);
+      await applyStepRemoved(step.stepNumber);
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao excluir etapa.');
     } finally {
@@ -939,8 +995,9 @@ const TrackStepsTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) 
         confirmDataLoss: true,
       });
       showToast('success', 'Etapa excluída.');
+      const removedNumber = confirmDeleteStep.stepNumber;
       setConfirmDeleteStep(null);
-      await load(true, true);
+      await applyStepRemoved(removedNumber);
     } catch (err: any) {
       showToast('error', err?.message || 'Falha ao excluir etapa.');
     } finally {

@@ -14,6 +14,7 @@ import {
   UserProfile,
 } from '../types';
 import { AppChurchService, invalidateMemoryCache } from '../lib/supabase';
+import { markStale } from '../lib/queryCache';
 import { AppChurchLogo } from '../components/AppChurchLogo';
 import { LoginScreen } from '../components/LoginScreen';
 import { Header } from '../components/Header';
@@ -424,6 +425,22 @@ export default function Home() {
     router.replace('/login');
   };
 
+  // Ajusta a contagem de membros de uma célula no cache (sem buscar todas as células de novo)
+  const adjustCellMemberCount = (cellId: string | null | undefined, delta: number) => {
+    if (!cellId || !user?.churchId) return;
+    queryClient.setQueryData(['church-cells', user.churchId], (old: CellGroup[] | undefined) =>
+      old?.map((c) =>
+        c.id === cellId
+          ? {
+              ...c,
+              memberCount: Math.max(0, (c.memberCount || 0) + delta),
+              quantidade_membros: Math.max(0, (c.quantidade_membros ?? c.memberCount ?? 0) + delta),
+            }
+          : c
+      )
+    );
+  };
+
   // Cell Members Management: Atualização instantânea da galeria e sincronização automática
   const handleAddMember = async (newMemberData: Omit<CellMember, 'id'>) => {
     const created = await AppChurchService.addMember(newMemberData);
@@ -454,15 +471,15 @@ export default function Home() {
       );
     }
 
-    // 4. Revalidação em segundo plano sem necessidade de clique manual
+    // 4. Acrescenta o membro só na lista da célula dele e ajusta a contagem (sem buscar tudo de novo)
+    if (created.cellId) {
+      queryClient.setQueryData(['cell-members', created.cellId], (old: CellMember[] | undefined) =>
+        old ? [...old.filter((m) => m.id !== created.id), created] : old
+      );
+    }
     if (user?.churchId) {
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['church-members', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['cell-members'] }),
-        queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['member-pool', user.churchId] }),
-        queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] }),
-      ]).catch((err) => console.warn('Aviso na invalidação de queries pós-cadastro:', err));
+      adjustCellMemberCount(created.cellId, +1);
+      markStale(queryClient, ['member-pool', user.churchId], ['church-structure', user.churchId]);
     }
   };
 
@@ -472,7 +489,12 @@ export default function Home() {
     newPercentage: number
   ) => {
     await AppChurchService.updateMemberAttendance(memberId, newStatus, newPercentage);
-    queryClient.invalidateQueries({ queryKey: ['cell-members'] });
+    // Atualiza só esse membro na lista da célula
+    queryClient.setQueriesData({ queryKey: ['cell-members'] }, (old: CellMember[] | undefined) =>
+      old?.map((m) =>
+        m.id === memberId ? { ...m, attendanceStatus: newStatus, attendancePercentage: newPercentage } : m
+      )
+    );
     setMembers((prev) =>
       prev.map((m) =>
         m.id === memberId
@@ -505,8 +527,13 @@ export default function Home() {
       });
     }
 
+    // Mudou de célula: ajusta só a contagem das duas células
+    if (user?.churchId && previousCellId && previousCellId !== updatedMember.cellId) {
+      adjustCellMemberCount(previousCellId, -1);
+      adjustCellMemberCount(updatedMember.cellId, +1);
+    }
     if (user?.churchId) {
-      queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] });
+      markStale(queryClient, ['member-pool', user.churchId], ['church-members', user.churchId], ['church-structure', user.churchId]);
     }
   };
 
@@ -522,9 +549,8 @@ export default function Home() {
         const list = old || [];
         return list.map((c) => (c.id === updatedCell.id ? { ...c, ...updatedCell } : c));
       });
-      queryClient.invalidateQueries({ queryKey: ['church-cells', user.churchId] });
-      queryClient.invalidateQueries({ queryKey: ['church-structure', user.churchId] });
-      queryClient.invalidateQueries({ queryKey: ['celulas-gallery'] });
+      // Outras telas (organograma, galeria) buscam a versão nova quando forem abertas
+      markStale(queryClient, ['church-structure', user.churchId], ['celulas-gallery'], ['churchUnits']);
     }
   };
 
@@ -834,10 +860,29 @@ export default function Home() {
               cells={effectiveCells}
               currentCell={currentCell}
               onNavigate={(screen) => setActiveScreen(screen)}
-              onRefreshCells={() => {
-                refetchCells();
-                queryClient.invalidateQueries({ queryKey: ['church-cells'] });
-                queryClient.invalidateQueries({ queryKey: ['churchUnits'] });
+              onRefreshCells={(change) => {
+                if (change && 'createdCell' in change) {
+                  // Nova célula criada no passo 2: entra na lista sem buscar todas de novo
+                  queryClient.setQueryData(['church-cells', user.churchId], (old: CellGroup[] | undefined) =>
+                    old ? [...old.filter((c) => c.id !== change.createdCell.id), change.createdCell] : old
+                  );
+                } else if (change) {
+                  // Ajusta só a contagem das duas células envolvidas
+                  adjustCellMemberCount(change.originCellId, -change.movedCount);
+                  adjustCellMemberCount(change.destCellId, +change.movedCount);
+                } else {
+                  refetchCells();
+                }
+                // Listas de membros, níveis e organograma buscam a versão nova quando forem abertas
+                markStale(
+                  queryClient,
+                  ['churchUnits'],
+                  ['cell-members'],
+                  ['member-pool'],
+                  ['church-members'],
+                  ['church-structure'],
+                  ['celulas-gallery']
+                );
               }}
               onSelectCell={setSelectedCellId}
             />

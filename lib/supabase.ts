@@ -2914,10 +2914,14 @@ export const AppChurchService = {
         if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
           const legPayload = { ...ptPayload, celula_id: post.cellId || null };
           delete legPayload.unidade_id;
-          await supabase.from('feed_posts').insert(legPayload);
+          const legacyRes = await supabase.from('feed_posts').insert(legPayload);
+          error = legacyRes.error;
         }
-      } catch (e) {
+        if (error) throw error;
+      } catch (e: any) {
         console.warn('Erro ao inserir post no Supabase:', e);
+        // Propaga a falha para o card do post mostrar o erro e a opção de tentar de novo
+        throw new Error(e?.message || 'Não foi possível publicar a postagem.');
       }
     }
 
