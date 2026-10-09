@@ -890,14 +890,14 @@ export const FeedView: React.FC<FeedViewProps> = ({
               />
 
               {/* Barra de Ações do Criador */}
-              <div className="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-slate-100">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-nowrap sm:flex-wrap items-center justify-between gap-1.5 sm:gap-2 mt-3 pt-3 border-t border-slate-100">
+                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                   <button
                     type="button"
                     id="btn-upload-photo"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isOptimizingImage}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                    className="px-2.5 sm:px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
                   >
                     {isOptimizingImage ? (
                       <Loader2 size={15} className="animate-spin text-sky-700" />
@@ -911,7 +911,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                     onChange={(e) =>
                       setSelectedCategory(e.target.value as FeedPost['category'])
                     }
-                    className="bg-slate-100 text-slate-700 text-xs font-semibold px-2.5 py-1.5 rounded-xl border-none focus:outline-none cursor-pointer"
+                    className="bg-slate-100 text-slate-700 text-xs font-semibold px-2 sm:px-2.5 py-1.5 rounded-xl border-none focus:outline-none cursor-pointer w-[88px] sm:w-auto min-w-0 truncate"
                   >
                     <option value="Célula">Célula</option>
                     <option value="Comunhão">Comunhão</option>
@@ -926,7 +926,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                   type="submit"
                   id="btn-publish-post"
                   disabled={isOptimizingImage || (!newPostCaption.trim() && !previewDataUrl)}
-                  className="px-5 py-1.5 bg-[#052447] hover:bg-[#073366] text-white text-xs font-bold rounded-xl shadow-xs disabled:opacity-50 transition flex items-center gap-1.5 cursor-pointer"
+                  className="px-3.5 sm:px-5 py-1.5 bg-[#052447] hover:bg-[#073366] text-white text-xs font-bold rounded-xl shadow-xs disabled:opacity-50 transition flex items-center gap-1.5 cursor-pointer shrink-0"
                 >
                   <Send size={13} />
                   <span>Publicar</span>
