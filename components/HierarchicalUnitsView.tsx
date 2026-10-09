@@ -136,8 +136,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [selectedParentId, setSelectedParentId] = useState<string>('');
   const [selectedLeaderIds, setSelectedLeaderIds] = useState<string[]>([]);
   const [createAnother, setCreateAnother] = useState<boolean>(false);
-  // "Multiplicada de" (opcional). null = ainda não mexeu (usa o padrão: líder de célula já vem com a própria célula)
-  const [selectedMotherId, setSelectedMotherId] = useState<string | null>(null);
+  // "Multiplicada de" (opcional): sempre começa vazio; só é gravado se a pessoa escolher uma célula
+  const [selectedMotherId, setSelectedMotherId] = useState<string>('');
 
   // Leaf level specific fields
   const [neighborhood, setNeighborhood] = useState<string>('Centro');
@@ -952,7 +952,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   }, [isRootLevel, selectedParentId, parentUnitsAvailable, user]);
 
   // Células que podem ser escolhidas como "multiplicada de" (só no nível folha), em ordem alfabética.
-  // - Líder de Célula: apenas a(s) célula(s) que ele lidera / a célula a que está vinculado
+  // - Líder de Célula: apenas a(s) célula(s) que ele lidera / a célula a que está vinculado (nada vem marcado)
   // - Líder de Setor / Área / Distrito: células sob a sua cobertura
   // - Pastor / Administrador: todas as células da igreja
   const motherCellOptions = useMemo(() => {
@@ -981,19 +981,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return [...allowed].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' }));
   }, [isLeafLevel, activeLevel, units, userHierarchyLevel, user, userCoveredUnitIds]);
 
-  // Padrão: Líder de Célula já vem com a própria célula marcada; os demais começam em "Nenhuma"
-  const defaultMotherId = useMemo(() => {
-    if (userHierarchyLevel > 2 || motherCellOptions.length === 0) return '';
-    const uCellId = (user.cellId || user.currentCellId || '').toLowerCase().trim();
-    const own = motherCellOptions.find((u) => uCellId && u.id.toLowerCase() === uCellId);
-    if (own) return own.id;
-    return motherCellOptions.length === 1 ? motherCellOptions[0].id : '';
-  }, [userHierarchyLevel, motherCellOptions, user]);
-
   const effectiveMotherId = useMemo(() => {
-    const chosen = selectedMotherId === null ? defaultMotherId : selectedMotherId;
-    return chosen && motherCellOptions.some((u) => u.id === chosen) ? chosen : '';
-  }, [selectedMotherId, defaultMotherId, motherCellOptions]);
+    return selectedMotherId && motherCellOptions.some((u) => u.id === selectedMotherId) ? selectedMotherId : '';
+  }, [selectedMotherId, motherCellOptions]);
 
   const handleSelectLevel = (levelId: string) => {
     const targetIdx = levels.findIndex((l) => l.id === levelId);
@@ -1010,7 +1000,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     setUnitName('');
     setSelectedLeaderIds([]);
     setSearchTerm('');
-    setSelectedMotherId(null);
+    setSelectedMotherId('');
   };
 
   const handleToggleLeader = (memberId: string) => {
@@ -1306,7 +1296,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       setSuccessBanner(
         `${activeLevel.name} "${createdUnit.name}" cadastrado(a) com sucesso!`
       );
-      setSelectedMotherId(null);
+      setSelectedMotherId('');
 
       if (createAnother) {
         // Mantém o mesmo pai selecionado e limpa campos específicos
