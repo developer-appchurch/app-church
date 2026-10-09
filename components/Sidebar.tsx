@@ -384,6 +384,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const canCreateQuickCell = isCellLeaderOrAbove && !!leafLevel && leafLevelIndex > 0;
 
+  // Setor pré-selecionado ao abrir o cadastro rápido: o setor do próprio perfil do usuário
+  // (ou o único setor disponível). Se não houver como saber, continua em "Selecione...".
+  // Só aplica uma vez por abertura do modal, para não sobrescrever uma escolha manual.
+  const setorAutoPickedRef = useRef(false);
+  useEffect(() => {
+    if (!isNewCellModalOpen) {
+      setorAutoPickedRef.current = false;
+      return;
+    }
+    if (setorAutoPickedRef.current || newCellSetorId || setorOptions.length === 0) return;
+    const userSetor = (user?.sector || '').toLowerCase().trim();
+    const own = userSetor
+      ? setorOptions.find((s) => s.name.toLowerCase().trim() === userSetor)
+      : undefined;
+    const pick = own || (setorOptions.length === 1 ? setorOptions[0] : undefined);
+    setorAutoPickedRef.current = true;
+    if (pick) setNewCellSetorId(pick.id);
+  }, [isNewCellModalOpen, setorOptions, newCellSetorId, user?.sector]);
+
   // Limpa apenas os campos de conteúdo (mantém Setor, Dia e Horário, já que
   // em geral quem usa esse modal cadastra uma célula por vez no mesmo Setor).
   const resetNewCellContentFields = () => {
