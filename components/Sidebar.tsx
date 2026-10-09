@@ -363,7 +363,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     staleTime: 1000 * 60 * 10,
   });
 
-  const { data: churchUnitsForNewCell = [] } = useQuery({
+  const { data: churchUnitsForNewCell = [], isLoading: isLoadingUnitsForNewCell } = useQuery({
     queryKey: ['churchUnits', user?.churchId],
     queryFn: () => AppChurchService.getUnits(user!.churchId, undefined, 'flat'),
     enabled: !!user?.churchId && isCellLeaderOrAbove && isNewCellModalOpen,
@@ -384,24 +384,75 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const canCreateQuickCell = isCellLeaderOrAbove && !!leafLevel && leafLevelIndex > 0;
 
-  // Setor pré-selecionado ao abrir o cadastro rápido: o setor do próprio perfil do usuário
-  // (ou o único setor disponível). Se não houver como saber, continua em "Selecione...".
-  // Só aplica uma vez por abertura do modal, para não sobrescrever uma escolha manual.
-  const setorAutoPickedRef = useRef(false);
-  useEffect(() => {
-    if (!isNewCellModalOpen) {
-      setorAutoPickedRef.current = false;
-      return;
+  // Nível hierárquico do usuário (2 célula, 3 setor, 4 área, 5 distrito/rede, 6 pastor/supervisor/admin)
+  const quickCellUserLevel = (() => {
+    if (isSystemAdmin || userRoleNorm.includes('pastor') || userRoleNorm.includes('supervisor') || userRoleNorm.includes('administrador')) return 6;
+    if (userRoleNorm.includes('líder de distrito') || userRoleNorm.includes('líder de rede')) return 5;
+    if (userRoleNorm.includes('líder de área') || userRoleNorm.includes('líder de area')) return 4;
+    if (userRoleNorm.includes('líder de setor')) return 3;
+    return 2;
+  })();
+
+  // Setores em que o usuário pode criar célula, conforme o nível de liderança:
+  // - Pastor / Supervisor / Admin: todos
+  // - Líder de Área / Distrito: os setores sob a sua cobertura (unidades que lidera e tudo abaixo delas)
+  // - Líder de Setor: só os setores que lidera (e o setor da própria célula)
+  // - Líder de Célula: só o setor da própria célula
+  const allowedSetorOptions: OrganizationalUnit[] = (() => {
+    if (quickCellUserLevel >= 6) return setorOptions;
+
+    const uId = (user?.id || '').toLowerCase().trim();
+    const byId = new Map<string, OrganizationalUnit>(churchUnitsForNewCell.map((u: OrganizationalUnit) => [u.id, u] as [string, OrganizationalUnit]));
+    const ledIds = new Set<string>(
+      churchUnitsForNewCell
+        .filter((u: OrganizationalUnit) => u.leaders?.some((l) => uId && (l.id || '').toLowerCase().trim() === uId))
+        .map((u: OrganizationalUnit) => u.id)
+    );
+    const ownCellId = (user?.cellId || user?.currentCellId || '').trim();
+    const ownSetorId = ownCellId ? byId.get(ownCellId)?.parentId || null : null;
+
+    const allowed = new Set<string>();
+    if (ownSetorId) allowed.add(ownSetorId);
+
+    if (quickCellUserLevel === 2) {
+      // Também vale o setor das células que ele lidera
+      ledIds.forEach((id) => {
+        const pid = byId.get(id)?.parentId;
+        if (pid) allowed.add(pid);
+      });
+    } else if (quickCellUserLevel === 3) {
+      ledIds.forEach((id) => allowed.add(id));
+    } else {
+      // Área / Distrito: unidades que lidera + todas as descendentes
+      const covered = new Set<string>(ledIds);
+      let changed = true;
+      let guard = 0;
+      while (changed && guard++ < 25) {
+        changed = false;
+        for (const u of churchUnitsForNewCell as OrganizationalUnit[]) {
+          if (!covered.has(u.id) && u.parentId && covered.has(u.parentId)) {
+            covered.add(u.id);
+            changed = true;
+          }
+        }
+      }
+      covered.forEach((id) => allowed.add(id));
     }
-    if (setorAutoPickedRef.current || newCellSetorId || setorOptions.length === 0) return;
-    const userSetor = (user?.sector || '').toLowerCase().trim();
-    const own = userSetor
-      ? setorOptions.find((s) => s.name.toLowerCase().trim() === userSetor)
-      : undefined;
-    const pick = own || (setorOptions.length === 1 ? setorOptions[0] : undefined);
-    setorAutoPickedRef.current = true;
-    if (pick) setNewCellSetorId(pick.id);
-  }, [isNewCellModalOpen, setorOptions, newCellSetorId, user?.sector]);
+
+    return setorOptions.filter((setor) => allowed.has(setor.id));
+  })();
+
+  // Setor efetivo: escolha manual (se ainda permitida) ou, quando só existe um setor possível,
+  // esse setor. Calculado direto na renderização (sem efeito), então não "pisca" ao abrir.
+  const effectiveNewCellSetorId =
+    newCellSetorId && allowedSetorOptions.some((s) => s.id === newCellSetorId)
+      ? newCellSetorId
+      : allowedSetorOptions.length === 1
+      ? allowedSetorOptions[0].id
+      : '';
+
+  // Líder de Célula só pode criar no setor dele: o campo nem aparece
+  const hideSetorField = quickCellUserLevel <= 2;
 
   // Limpa apenas os campos de conteúdo (mantém Setor, Dia e Horário, já que
   // em geral quem usa esse modal cadastra uma célula por vez no mesmo Setor).
@@ -466,8 +517,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const handleCreateQuickCell = async () => {
     if (!leafLevel || !user?.churchId) return;
-    if (!newCellSetorId) {
-      setCreateCellError(`Selecione o ${setorLevel?.name || 'Setor'} responsável.`);
+    if (!effectiveNewCellSetorId) {
+      setCreateCellError(
+        hideSetorField
+          ? `Seu perfil não está vinculado a um(a) ${setorLevel?.name || 'Setor'}. Procure a liderança.`
+          : `Selecione o ${setorLevel?.name || 'Setor'} responsável.`
+      );
       return;
     }
     if (!newCellName.trim()) {
@@ -489,7 +544,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         churchId: user.churchId,
         levelTypeId: leafLevel.id,
         name: createdName,
-        parentId: newCellSetorId,
+        parentId: effectiveNewCellSetorId,
         neighborhood: newCellNeighborhood.trim(),
         address: newCellAddress.trim(),
         meetingDay: newCellDay,
@@ -1341,29 +1396,48 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
+                {hideSetorField ? (
+                  // Líder de Célula: o setor é sempre o da própria célula, não há o que escolher
+                  isLoadingUnitsForNewCell ? (
+                    <div className="col-span-2 h-4 w-40 rounded bg-slate-200 animate-pulse" />
+                  ) : allowedSetorOptions.length === 0 ? (
+                    <p className="col-span-2 text-[11px] text-amber-600">
+                      Seu perfil não está vinculado a um(a) {setorLevel?.name || 'Setor'}. Procure a liderança.
+                    </p>
+                  ) : (
+                    <p className="col-span-2 text-[11px] text-slate-500">
+                      {setorLevel?.name || 'Setor'}: <strong className="text-slate-700">{allowedSetorOptions.map((s) => s.name).join(', ')}</strong>
+                    </p>
+                  )
+                ) : (
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     {setorLevel?.name || 'Setor'} <span className="text-rose-600">*</span>
                   </label>
-                  <select
-                    value={newCellSetorId}
-                    onChange={(e) => setNewCellSetorId(e.target.value)}
-                    disabled={isCreatingCell}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer disabled:opacity-60"
-                  >
-                    <option value="">Selecione...</option>
-                    {setorOptions.map((setor) => (
-                      <option key={setor.id} value={setor.id}>
-                        {setor.name}
-                      </option>
-                    ))}
-                  </select>
-                  {setorOptions.length === 0 && (
+                  {isLoadingUnitsForNewCell ? (
+                    <div className="w-full h-9 rounded-xl bg-slate-100 border border-slate-200 animate-pulse" />
+                  ) : (
+                    <select
+                      value={effectiveNewCellSetorId}
+                      onChange={(e) => setNewCellSetorId(e.target.value)}
+                      disabled={isCreatingCell}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer disabled:opacity-60"
+                    >
+                      <option value="">Selecione...</option>
+                      {allowedSetorOptions.map((setor) => (
+                        <option key={setor.id} value={setor.id}>
+                          {setor.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {!isLoadingUnitsForNewCell && allowedSetorOptions.length === 0 && (
                     <p className="text-[11px] text-amber-600 mt-1">
-                      Nenhum {setorLevel?.name || 'Setor'} cadastrado ainda.
+                      Nenhum {setorLevel?.name || 'Setor'} disponível para o seu nível de liderança.
                     </p>
                   )}
                 </div>
+                )}
 
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
