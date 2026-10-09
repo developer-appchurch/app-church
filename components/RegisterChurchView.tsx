@@ -371,6 +371,10 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
       setErrorMessage('Informe uma senha de acesso para o Pastor.');
       return;
     }
+    if (pastorPassword.trim().length < 6) {
+      setErrorMessage('A senha do Pastor deve ter no mínimo 6 dígitos.');
+      return;
+    }
     if (isOptimizingLogo) {
       setErrorMessage('Aguarde o envio do logotipo terminar antes de confirmar.');
       return;
@@ -1124,6 +1128,7 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
                       id={pastorPasswordId}
                       type={showPassword ? 'text' : 'password'}
                       required
+                      minLength={6}
                       value={pastorPassword}
                       onChange={(e) => setPastorPassword(e.target.value)}
                       placeholder="Senha do pastor"
@@ -1138,7 +1143,7 @@ export const RegisterChurchView: React.FC<RegisterChurchViewProps> = ({
                     </button>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Padrão inicial &quot;123456&quot;. Pode ser personalizada ou alterada posteriormente.
+                    Padrão inicial &quot;123456&quot;. Mínimo de 6 dígitos. Pode ser personalizada ou alterada posteriormente.
                   </p>
                 </div>
               </div>

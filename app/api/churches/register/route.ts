@@ -34,6 +34,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (input.pastorPassword !== undefined && input.pastorPassword.trim().length > 0 && input.pastorPassword.trim().length < 6) {
+      return NextResponse.json(
+        { error: 'A senha do Pastor deve ter no mínimo 6 dígitos.' },
+        { status: 400 }
+      );
+    }
+
     const churchId = (input.churchId && input.churchId.trim()) || generateUUID();
     const pastorId = generateUUID();
     const cellId = generateUUID();
