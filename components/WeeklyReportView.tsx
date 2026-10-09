@@ -1276,7 +1276,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   const shortAbsent = compactNames(absent.map((m) => m.name));
                   return (
                     <div className="bg-slate-50 rounded-xl p-2.5 sm:p-3 border border-slate-200">
-                      <div className="text-[10px] sm:text-[11px] font-bold text-slate-600 uppercase mb-1.5">
+                      <div className="text-[10px] sm:text-[11px] font-bold text-red-500 uppercase mb-1.5">
                         Membros Ausentes ({absent.length})
                       </div>
                       <div className="flex flex-wrap gap-1">
@@ -1294,24 +1294,27 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                   );
                 })()}
 
-                {/* Observação sobre a Reunião */}
-                {Boolean(
-                  cleanObservationText(
+                {/* Observação sobre a Reunião: sempre visível, para o líder e os superiores saberem se houve
+                    algo importante (ou que nada foi registrado). */}
+                {(() => {
+                  const obs = cleanObservationText(
                     selectedReportForDetail.observacao_texto || selectedReportForDetail.observacao
-                  )
-                ) && (
-                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-200/80">
-                    <div className="text-[11px] font-bold text-slate-700 uppercase mb-1">
-                      Observação sobre a Reunião
-                    </div>
-                    <p className="text-xs text-slate-800 whitespace-pre-line font-medium">
-                      {cleanObservationText(
-                        selectedReportForDetail.observacao_texto ||
-                          selectedReportForDetail.observacao
+                  );
+                  return (
+                    <div className="bg-slate-50 rounded-xl p-2.5 sm:p-3 border border-slate-200">
+                      <div className="text-[10px] sm:text-[11px] font-bold text-slate-600 uppercase mb-1">
+                        Observação sobre a Reunião
+                      </div>
+                      {obs ? (
+                        <p className="text-[11px] sm:text-xs text-slate-800 whitespace-pre-line font-medium leading-snug">
+                          {obs}
+                        </p>
+                      ) : (
+                        <p className="text-[11px] sm:text-xs text-slate-400 italic">Nenhuma observação registrada.</p>
                       )}
-                    </p>
-                  </div>
-                )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Rodapé com Botões de Fechar, Excluir e Editar (oculta Excluir/Editar se validado pela tesouraria) */}
