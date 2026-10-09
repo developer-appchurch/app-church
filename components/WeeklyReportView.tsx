@@ -58,6 +58,16 @@ function compactNames(names: string[]): string[] {
   return short.map((n, i) => ((counts.get(n.toLowerCase()) || 0) > 1 ? names[i] : n));
 }
 
+/** Janela em que a lista de ausentes é confiável (membros atuais ≈ membros da época). */
+const ABSENT_WINDOW_DAYS = 28;
+
+function isRecentReport(dateStr?: string): boolean {
+  if (!dateStr) return false;
+  const reportTime = Date.parse(`${dateStr.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(reportTime)) return false;
+  return Date.now() - reportTime <= ABSENT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
+
 /**
  * Junta o relatório devolvido ao salvar com o que já estava na tela. A resposta do salvamento não traz
  * as presenças de membros já excluídos do cadastro (que o servidor preserva), então elas são mantidas.
@@ -1251,6 +1261,38 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
                       </div>
                     </div>
                   )}
+
+                {/* Membros Ausentes: só em relatórios recentes (últimas 4 semanas), porque a lista usa os
+                    membros ATUAIS da célula e o app não guarda quem fazia parte da célula em datas antigas. */}
+                {(() => {
+                  const rep = selectedReportForDetail;
+                  if (!rep.houve_reuniao || !isRecentReport(rep.data_relatorio)) return null;
+                  if (rep.unidade_id && rep.unidade_id !== currentCellId) return null;
+                  const presentIds = new Set(rep.presentes_ids || []);
+                  const absent = cellMembers
+                    .filter((m) => !presentIds.has(m.id))
+                    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+                  if (absent.length === 0) return null;
+                  const shortAbsent = compactNames(absent.map((m) => m.name));
+                  return (
+                    <div className="bg-slate-50 rounded-xl p-2.5 sm:p-3 border border-slate-200">
+                      <div className="text-[10px] sm:text-[11px] font-bold text-slate-600 uppercase mb-1.5">
+                        Membros Ausentes ({absent.length})
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {absent.map((m, idx) => (
+                          <span
+                            key={m.id}
+                            title={m.name}
+                            className="bg-white border border-slate-200 text-slate-600 text-[10px] sm:text-[11px] font-semibold px-2 py-0.5 rounded-md leading-tight truncate max-w-[160px] sm:max-w-none"
+                          >
+                            {shortAbsent[idx]}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Observação sobre a Reunião */}
                 {Boolean(
