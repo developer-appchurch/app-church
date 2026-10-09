@@ -727,6 +727,24 @@ export async function POST(req: NextRequest) {
     const unitId = generateUUID();
     const motherCellId = input.unidade_criadora_id || input.motherCellId || null;
 
+    // Célula mãe (opcional): precisa existir, ser da mesma igreja e do mesmo nível (célula).
+    // Evita o erro de chave estrangeira e marcas de origem inválidas.
+    if (isLeafLevel && motherCellId && motherCellId.trim() !== '') {
+      const { data: motherCheck } = await supabase
+        .from('unidades')
+        .select('id, nivel_tipo_id')
+        .eq('id', motherCellId.trim())
+        .eq('igreja_id', input.churchId)
+        .maybeSingle();
+
+      if (!motherCheck || motherCheck.nivel_tipo_id !== input.levelTypeId) {
+        return NextResponse.json(
+          { error: 'A célula escolhida em "Multiplicada de" não foi encontrada nesta igreja.' },
+          { status: 400 }
+        );
+      }
+    }
+
     // 3. Inserir na tabela unidades com atributos consolidados
     const unitPayload: any = {
       id: unitId,

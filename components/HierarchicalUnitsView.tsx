@@ -136,6 +136,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [selectedParentId, setSelectedParentId] = useState<string>('');
   const [selectedLeaderIds, setSelectedLeaderIds] = useState<string[]>([]);
   const [createAnother, setCreateAnother] = useState<boolean>(false);
+  // "Multiplicada de" (opcional): sempre começa vazio; só é gravado se a pessoa escolher uma célula
+  const [selectedMotherId, setSelectedMotherId] = useState<string>('');
 
   // Leaf level specific fields
   const [neighborhood, setNeighborhood] = useState<string>('Centro');
@@ -949,6 +951,40 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return parentUnitsAvailable[0]?.id || '';
   }, [isRootLevel, selectedParentId, parentUnitsAvailable, user]);
 
+  // Células que podem ser escolhidas como "multiplicada de" (só no nível folha), em ordem alfabética.
+  // - Líder de Célula: apenas a(s) célula(s) que ele lidera / a célula a que está vinculado (nada vem marcado)
+  // - Líder de Setor / Área / Distrito: células sob a sua cobertura
+  // - Pastor / Administrador: todas as células da igreja
+  const motherCellOptions = useMemo(() => {
+    if (!isLeafLevel || !activeLevel) return [];
+    const sameLevel = units.filter((u) => u.levelTypeId === activeLevel.id);
+
+    let allowed: OrganizationalUnit[];
+    if (userHierarchyLevel >= 6 || user.isSystemAdmin || user.role === 'Administrador' || user.login === 'admin') {
+      allowed = sameLevel;
+    } else if (userHierarchyLevel <= 2) {
+      const uId = (user.id || '').toLowerCase().trim();
+      const uLogin = (user.login || '').toLowerCase().trim();
+      const uCellId = (user.cellId || user.currentCellId || '').toLowerCase().trim();
+      allowed = sameLevel.filter(
+        (u) =>
+          (uCellId && u.id.toLowerCase() === uCellId) ||
+          u.leaders?.some((l) => {
+            const lId = (l.id || '').toLowerCase().trim();
+            return (uId && lId === uId) || (uLogin && lId === uLogin);
+          })
+      );
+    } else {
+      allowed = sameLevel.filter((u) => userCoveredUnitIds.has(u.id));
+    }
+
+    return [...allowed].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' }));
+  }, [isLeafLevel, activeLevel, units, userHierarchyLevel, user, userCoveredUnitIds]);
+
+  const effectiveMotherId = useMemo(() => {
+    return selectedMotherId && motherCellOptions.some((u) => u.id === selectedMotherId) ? selectedMotherId : '';
+  }, [selectedMotherId, motherCellOptions]);
+
   const handleSelectLevel = (levelId: string) => {
     const targetIdx = levels.findIndex((l) => l.id === levelId);
     const targetLvl = levels[targetIdx];
@@ -964,6 +1000,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     setUnitName('');
     setSelectedLeaderIds([]);
     setSearchTerm('');
+    setSelectedMotherId('');
   };
 
   const handleToggleLeader = (memberId: string) => {
@@ -1221,9 +1258,8 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         selectedLeaderIds.includes(m.id)
       );
 
-      // Células criadas pela tela de Níveis Organizacionais NÃO recebem célula mãe
-      // automaticamente (isso só deve acontecer via tela "Multiplicar Célula",
-      // e somente após o processo de multiplicação ser finalizado).
+      // "Multiplicada de" é sempre uma escolha manual (campo opcional do formulário).
+      // O app nunca marca a célula mãe sozinho; sem escolha, a célula nasce sem origem.
       const createdUnit = await AppChurchService.createUnit({
         churchId: effectiveChurchId,
         levelTypeId: activeLevel.id,
@@ -1236,6 +1272,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         meetingDay: isLeafLevel ? meetingDay : undefined,
         meetingTime: isLeafLevel ? meetingTime : undefined,
         createdByMemberId: user.id || user.login,
+        motherCellId: isLeafLevel && effectiveMotherId ? effectiveMotherId : undefined,
       });
 
       // Registra apenas o rastreamento local de "criada por mim" (sem vínculo de célula mãe)
@@ -1259,6 +1296,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
       setSuccessBanner(
         `${activeLevel.name} "${createdUnit.name}" cadastrado(a) com sucesso!`
       );
+      setSelectedMotherId('');
 
       if (createAnother) {
         // Mantém o mesmo pai selecionado e limpa campos específicos
@@ -1657,18 +1695,34 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
               {/* Campos específicos da CÉLULA (nível folha) */}
               {isLeafLevel && (
                 <div className="pt-2 border-t border-slate-100 space-y-3.5">
-                  {/* Informações de multiplicação para Líder de Célula */}
-                  {userHierarchyLevel <= 2 && (
-                    <div className="p-3 bg-sky-50/80 border border-sky-200 rounded-xl text-xs text-sky-950 space-y-1">
-                      <div className="flex items-center gap-1.5 font-bold text-sky-900">
-                        <Sparkles size={14} className="text-sky-600 shrink-0" />
-                        <span>Origem da Multiplicação / Criação</span>
-                      </div>
-                      <p className="text-[11px] text-sky-800 leading-snug">
-                        Esta nova célula será vinculada como gerada a partir da sua célula <strong>{user.cellName || 'vinculada'}</strong> por você (<strong>{user.name}</strong>). Você terá permissão para gerenciar e alterar seus líderes na tela.
-                      </p>
-                    </div>
-                  )}
+                  {/* Multiplicada de (opcional) — escolha manual, lista em ordem alfabética */}
+                  <div>
+                    <label
+                      htmlFor="select-multiplicada-de"
+                      className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1"
+                    >
+                      <Sparkles size={13} className="text-sky-600" />
+                      <span>É multiplicação de qual célula?</span>
+                      <span className="font-medium text-slate-400">(opcional)</span>
+                    </label>
+                    <select
+                      id="select-multiplicada-de"
+                      value={effectiveMotherId}
+                      onChange={(e) => setSelectedMotherId(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer"
+                    >
+                      <option value="">Nenhuma (célula nova)</option>
+                      {motherCellOptions.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                          {c.parentName ? ` — ${c.parentName}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Preencha só se esta célula nasceu da multiplicação de outra. Em branco, ela é cadastrada sem origem.
+                    </p>
+                  </div>
 
                   <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
                     <MapPin size={14} />

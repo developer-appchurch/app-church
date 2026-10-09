@@ -1840,6 +1840,8 @@ export const AppChurchService = {
     fotoUrl?: string;
     parentUnitId?: string | null;
     userMemberId?: string;
+    /** Célula de origem ('Multiplicada de'); '' limpa. Só administradores conseguem alterar. */
+    motherCellId?: string | null;
   }): Promise<CellGroup> {
     if (typeof window !== 'undefined') {
       try {

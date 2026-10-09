@@ -260,6 +260,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   // Edit Cell form state
   const [isEditCellModalOpen, setIsEditCellModalOpen] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editMotherId, setEditMotherId] = useState('');
   const [editMeetingDay, setEditMeetingDay] = useState('');
   const [editMeetingTime, setEditMeetingTime] = useState('');
   const [editNeighborhood, setEditNeighborhood] = useState('');
@@ -381,6 +382,30 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
 
   // Carrega unidades organizacionais para mapeamento da estrutura hierárquica
   const [units, setUnits] = useState<OrganizationalUnit[]>([]);
+
+  // Permissões efetivas (mesma query/cache do menu lateral) — define quem pode alterar a célula de origem
+  const { data: effectivePermissions } = useQuery({
+    queryKey: ['user-effective-permissions', currentUser?.id],
+    queryFn: () => (currentUser ? AppChurchService.getUserEffectivePermissions(currentUser) : Promise.resolve({})),
+    enabled: !!currentUser?.id,
+    staleTime: 1000 * 60 * 5,
+  });
+
+  // "Multiplicada de" na edição: visível e habilitado apenas para quem tem permissão de administrador
+  const canEditMotherCell = useMemo(() => {
+    if (!currentUser) return false;
+    if (currentUser.isSystemAdmin || currentUser.role === 'Administrador' || currentUser.login === 'admin') return true;
+    return AppChurchService.hasPermission(currentUser, 'church:admin', effectivePermissions || {});
+  }, [currentUser, effectivePermissions]);
+
+  // Células da igreja (mesmo nível desta célula), em ordem alfabética, sem a própria célula
+  const motherCellChoices = useMemo(() => {
+    const self = units.find((u) => u.id === cell.id);
+    if (!self) return [];
+    return units
+      .filter((u) => u.levelTypeId === self.levelTypeId && u.id !== cell.id)
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' }));
+  }, [units, cell.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -792,6 +817,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const handleOpenEditCellModal = () => {
     discardPendingCellPhoto();
     setEditName(cell.name || '');
+    setEditMotherId(cell.motherCellId || cell.unidade_criadora_id || '');
     setEditMeetingDay(cell.meetingDay || 'Quarta-feira');
     setEditMeetingTime(sanitizeTimeValue(cell.meetingTime));
     setEditNeighborhood(cell.bairro || '');
@@ -878,6 +904,10 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
         // '' limpa a foto (botão "Remover"); URL do Storage substitui a anterior
         fotoUrl: editFotoUrl.trim(),
         userMemberId: currentUser?.id,
+        // Só administradores alteram a célula de origem; enviado apenas quando mudou
+        ...(canEditMotherCell && editMotherId !== (cell.motherCellId || cell.unidade_criadora_id || '')
+          ? { motherCellId: editMotherId }
+          : {}),
       });
 
       // Salvo: a foto enviada deixa de ser "pendente" e a antiga (se era do Storage) é removida
@@ -2877,6 +2907,33 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* Multiplicada de — visível apenas para administradores */}
+                {canEditMotherCell && (
+                  <div>
+                    <label
+                      htmlFor="edit-multiplicada-de"
+                      className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1"
+                    >
+                      <span>Multiplicada de:</span>
+                      <span className="font-medium text-slate-400">(só administradores)</span>
+                    </label>
+                    <select
+                      id="edit-multiplicada-de"
+                      value={editMotherId}
+                      onChange={(e) => setEditMotherId(e.target.value)}
+                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white cursor-pointer"
+                    >
+                      <option value="">Nenhuma (sem origem)</option>
+                      {motherCellChoices.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                          {c.parentName ? ` — ${c.parentName}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {/* Seção da Foto da Célula */}
                 <div className="pt-2 border-t border-slate-100 space-y-2.5">
