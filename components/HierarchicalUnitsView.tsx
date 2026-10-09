@@ -489,6 +489,24 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         }
       }
       covered.forEach((id) => allowed.add(id));
+      // Níveis acima (ex.: a Área do setor que o líder conduz) também são pais válidos,
+      // senão um líder de setor não conseguiria cadastrar outro setor na sua própria área.
+      covered.forEach((id) => {
+        let pid = byId.get(id.toLowerCase())?.parentId;
+        let hops = 0;
+        while (pid && hops++ < 25) {
+          allowed.add(pid);
+          pid = byId.get(pid.toLowerCase())?.parentId;
+        }
+      });
+      if (ownParentId) {
+        let pid = byId.get(ownParentId.toLowerCase())?.parentId;
+        let hops = 0;
+        while (pid && hops++ < 25) {
+          allowed.add(pid);
+          pid = byId.get(pid.toLowerCase())?.parentId;
+        }
+      }
       // Compatibilidade: setor informado no perfil (nome exato)
       if (uSectorNorm) {
         allParents.forEach((p) => {
