@@ -12,6 +12,7 @@ const GROWTH_WINDOW_MONTHS = 2;
  * Indicadores de uma célula para o modal da tela Minha Célula (Líder de Célula ou acima):
  * - líderes em treinamento da célula;
  * - média de membros presentes nas últimas 5 reuniões;
+ * - média de convidados por reunião nos últimos 2 meses;
  * - curva de crescimento: total presente (membros + convidados) por reunião nos últimos 2 meses;
  * - conclusão de cada etapa do Trilho de Liderança entre os membros da célula.
  */
@@ -76,6 +77,11 @@ export async function GET(req: NextRequest) {
       return { date: r.data_relatorio as string, members, guests, total: members + guests };
     });
 
+    const averageGuests =
+      growth.length > 0
+        ? Math.round((growth.reduce((sum, g) => sum + g.guests, 0) / growth.length) * 10) / 10
+        : null;
+
     const track = trackRes.data || {};
 
     return NextResponse.json(
@@ -83,6 +89,7 @@ export async function GET(req: NextRequest) {
         leadersInTraining: trainingRes.count ?? 0,
         averageMembers,
         meetingsInAverage: lastMeetings.length,
+        averageGuests,
         growth,
         track: {
           totalMembers: track.totalMembers ?? 0,

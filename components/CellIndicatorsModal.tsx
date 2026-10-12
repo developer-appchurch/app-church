@@ -7,18 +7,21 @@ import {
   BarChart,
   CartesianGrid,
   Cell as RechartsCell,
+  ComposedChart,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from 'recharts';
-import { BarChart3, GraduationCap, Loader2, TrendingUp, Users, X, AlertCircle } from 'lucide-react';
+import { BarChart3, GraduationCap, Loader2, TrendingUp, UserPlus, Users, X, AlertCircle } from 'lucide-react';
 import { THRESHOLD_COLORS, colorForPercent } from '@/lib/trackColors';
 
 interface CellIndicators {
   leadersInTraining: number;
   averageMembers: number | null;
   meetingsInAverage: number;
+  averageGuests: number | null;
   growth: { date: string; members: number; guests: number; total: number }[];
   track: {
     totalMembers: number;
@@ -33,6 +36,7 @@ interface CellIndicatorsModalProps {
 }
 
 const NAVY = '#052447';
+const GUESTS_GREEN = '#10b981';
 
 const formatDay = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
 
@@ -105,7 +109,7 @@ export const CellIndicatorsModal: React.FC<CellIndicatorsModalProps> = ({ cellId
           {data && (
             <>
               {/* Cards */}
-              <div className="grid grid-cols-2 gap-2 sm:gap-3">
+              <div className="grid grid-cols-3 gap-2 sm:gap-3">
                 <StatCard
                   icon={GraduationCap}
                   label="Líderes em Treinamento"
@@ -121,6 +125,12 @@ export const CellIndicatorsModal: React.FC<CellIndicatorsModalProps> = ({ cellId
                       : 'sem reuniões registradas'
                   }
                 />
+                <StatCard
+                  icon={UserPlus}
+                  label="Média de Convidados"
+                  value={data.averageGuests === null ? '—' : data.averageGuests.toLocaleString('pt-BR', { minimumFractionDigits: 1 })}
+                  hint={data.growth.length > 0 ? 'por reunião nos últimos 2 meses' : 'sem reuniões registradas'}
+                />
               </div>
 
               {/* Curva de crescimento */}
@@ -129,14 +139,26 @@ export const CellIndicatorsModal: React.FC<CellIndicatorsModalProps> = ({ cellId
                   <TrendingUp size={15} className="text-[#052447]" />
                   Curva de Crescimento
                 </h3>
-                <p className="text-[11px] text-slate-500 mb-2">
+                <p className="text-[11px] text-slate-500 mb-1">
                   Total de presentes (membros + convidados) por reunião, nos últimos 2 meses.
                 </p>
+                {data.growth.length > 0 && (
+                  <div className="flex items-center gap-3 text-[10px] text-slate-500 mb-1">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-sm" style={{ background: NAVY }} />
+                      Total presente
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="w-3 h-0.5" style={{ background: GUESTS_GREEN }} />
+                      Convidados
+                    </span>
+                  </div>
+                )}
                 {data.growth.length === 0 ? (
                   <p className="text-sm text-slate-400 text-center py-8">Nenhuma reunião registrada nos últimos 2 meses.</p>
                 ) : (
                   <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={data.growth} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+                    <ComposedChart data={data.growth} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
                       <XAxis
                         dataKey="date"
@@ -171,7 +193,15 @@ export const CellIndicatorsModal: React.FC<CellIndicatorsModalProps> = ({ cellId
                         }}
                       />
                       <Bar dataKey="total" fill={NAVY} radius={[4, 4, 0, 0]} maxBarSize={28} />
-                    </BarChart>
+                      <Line
+                        dataKey="guests"
+                        type="monotone"
+                        stroke={GUESTS_GREEN}
+                        strokeWidth={2.5}
+                        dot={{ r: 3, fill: GUESTS_GREEN, strokeWidth: 0 }}
+                        activeDot={{ r: 4.5 }}
+                      />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 )}
               </section>
@@ -239,12 +269,12 @@ const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string
   value,
   hint,
 }) => (
-  <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
-    <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-slate-500">
-      <Icon size={14} className="text-[#052447] shrink-0" />
-      <span className="truncate">{label}</span>
+  <div className="bg-white rounded-xl border border-slate-200 p-2.5 sm:p-4 min-w-0">
+    <div className="flex items-start gap-1 sm:gap-1.5 text-[10px] sm:text-xs font-semibold text-slate-500 leading-tight">
+      <Icon size={13} className="text-[#052447] shrink-0 mt-px" />
+      <span>{label}</span>
     </div>
-    <p className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">{value}</p>
-    {hint && <p className="text-[10px] sm:text-[11px] text-slate-400 leading-tight">{hint}</p>}
+    <p className="text-xl sm:text-3xl font-black text-slate-900 mt-1">{value}</p>
+    {hint && <p className="text-[9px] sm:text-[11px] text-slate-400 leading-tight">{hint}</p>}
   </div>
 );
