@@ -87,9 +87,8 @@ function build(d) {
   out.push(p('As partes celebram o presente contrato, que se regerá pelas cláusulas a seguir.'));
 
   out.push(clause('1ª', 'OBJETO'));
-  out.push(item('1.1.', [T('Licença de uso, não exclusiva e intransferível, da plataforma online '), B('AppChurch'), T(' (software como serviço), destinada à gestão eclesiástica da IGREJA, compreendendo: (a) cadastro e gestão de membros, visitantes e líderes; (b) gestão de células, unidades/congregações e discipulado; (c) relatórios e indicadores de crescimento; (d) notificações e comunicação com os membros; e (e) suporte técnico e atualizações.')]));
-  out.push(item('1.2.', 'A licença não transfere propriedade intelectual. O software, seu código, a marca e o layout permanecem de titularidade exclusiva da APPCHURCH.'));
-  out.push(item('1.3.', 'A APPCHURCH poderá incluir ou aprimorar funcionalidades a qualquer tempo, sem prejuízo das funcionalidades essenciais contratadas.'));
+  out.push(item('1.1.', [T('Licença de uso, não exclusiva e intransferível, da plataforma online '), B('AppChurch'), T(', para gestão de membros, células, unidades, discipulado e relatórios da IGREJA, com suporte técnico e atualizações incluídos.')]));
+  out.push(item('1.2.', 'O software, a marca e demais elementos da plataforma permanecem de propriedade exclusiva da APPCHURCH, sendo vedado à IGREJA copiá-los, revendê-los ou sublicenciá-los.'));
 
   out.push(clause('2ª', 'VALOR E PAGAMENTO'));
   const row = (k, v) => [cell([B(k)], 3000, { fill: 'EEF2F7' }), cell(v, 6638)];
@@ -100,10 +99,8 @@ function build(d) {
     row('Início da vigência', [val(pg.inicio, '[__/__/____]')]),
   ]));
   out.push(new Paragraph({ spacing: { after: 80 }, children: [] }));
-  out.push(item('2.1.', 'O primeiro pagamento vence no primeiro vencimento após o início da vigência, e os demais nos meses subsequentes, enquanto vigorar este contrato.'));
-  out.push(item('2.2.', 'O valor será reajustado a cada 12 (doze) meses, contados do início da vigência, pela variação do IPCA/IBGE ou índice que o substitua, salvo disposição diversa nas Condições Especiais.'));
-  out.push(item('2.3.', 'O atraso sujeita a IGREJA a multa de 2% (dois por cento) sobre o valor devido e juros de mora de 1% (um por cento) ao mês, pro rata die.'));
-  out.push(item('2.4.', 'Após 15 (quinze) dias de atraso, a APPCHURCH poderá, mediante aviso por e-mail ou WhatsApp, suspender o acesso à plataforma até a regularização, sem perda dos dados da IGREJA.'));
+  out.push(item('2.1.', 'O valor será reajustado anualmente pelo IPCA/IBGE, salvo disposição diversa nas Condições Especiais.'));
+  out.push(item('2.2.', 'O atraso gera multa de 2% e juros de 1% ao mês. Após 15 (quinze) dias de atraso, o acesso poderá ser suspenso, mediante aviso, até a regularização, sem perda dos dados.'));
 
   out.push(clause('3ª', 'CONDIÇÕES ESPECIAIS'));
   const ce = d.condicoesEspeciais;
@@ -139,31 +136,16 @@ function build(d) {
     out.push(table([3800, 2900, 2938], rows));
   }
 
-  out.push(clause('4ª', 'OBRIGAÇÕES DA APPCHURCH'));
-  out.push(item('4.1.', 'Manter a plataforma disponível 24 (vinte e quatro) horas por dia, ressalvadas manutenções programadas, falhas de terceiros (internet, hospedagem, energia) e casos fortuitos ou de força maior.'));
-  out.push(item('4.2.', 'Prestar suporte técnico por WhatsApp e/ou e-mail, em dias úteis e horário comercial, e realizar backups periódicos dos dados.'));
-  out.push(item('4.3.', 'Manter sigilo sobre os dados da IGREJA e comunicar com 30 (trinta) dias de antecedência qualquer alteração de valores não prevista neste contrato.'));
+  out.push(clause('4ª', 'OBRIGAÇÕES DAS PARTES'));
+  out.push(item('4.1.', 'A APPCHURCH se compromete a manter a plataforma disponível (ressalvadas manutenções e falhas de terceiros), prestar suporte por WhatsApp/e-mail em horário comercial, fazer backups periódicos e manter sigilo sobre os dados da IGREJA.'));
+  out.push(item('4.2.', 'A IGREJA se compromete a pagar em dia, manter sob sigilo as senhas de acesso, inserir apenas dados obtidos de forma lícita e informar o número de células quando este for critério de preço.'));
+  out.push(item('4.3.', 'Para fins da LGPD (Lei nº 13.709/2018), a IGREJA é controladora e a APPCHURCH operadora dos dados pessoais, que serão usados apenas para a execução deste contrato e, ao seu término, exportados à IGREJA mediante solicitação em até 30 dias.'));
 
-  out.push(clause('5ª', 'OBRIGAÇÕES DA IGREJA'));
-  out.push(item('5.1.', 'Efetuar pontualmente os pagamentos e manter seus dados cadastrais atualizados, inclusive o número de células, quando for critério de preço.'));
-  out.push(item('5.2.', 'Manter sob sigilo logins e senhas, respondendo pelo uso da plataforma por seus usuários.'));
-  out.push(item('5.3.', 'Não copiar, revender, sublicenciar, modificar ou realizar engenharia reversa do software.'));
+  out.push(clause('5ª', 'VIGÊNCIA E RESCISÃO'));
+  out.push(item('5.1.', 'Este contrato vigora por prazo indeterminado e pode ser rescindido por qualquer das partes, sem multa, com aviso prévio de 30 (trinta) dias, sendo devidas as mensalidades até o fim do aviso.'));
 
-  out.push(clause('6ª', 'PROTEÇÃO DE DADOS (LGPD)'));
-  out.push(item('6.1.', 'Nos termos da Lei nº 13.709/2018, a IGREJA é controladora e a APPCHURCH operadora dos dados pessoais de membros, visitantes e líderes, tratando-os apenas para a execução deste contrato e conforme as instruções da IGREJA, que se responsabiliza pela licitude da coleta.'));
-  out.push(item('6.2.', 'A APPCHURCH adotará medidas de segurança adequadas e comunicará à IGREJA qualquer incidente de segurança relevante.'));
-  out.push(item('6.3.', 'Encerrado o contrato, a IGREJA poderá solicitar a exportação de seus dados em até 30 (trinta) dias; após esse prazo, os dados poderão ser excluídos definitivamente.'));
-
-  out.push(clause('7ª', 'VIGÊNCIA E RESCISÃO'));
-  out.push(item('7.1.', 'Este contrato vigora por prazo indeterminado a partir do início da vigência.'));
-  out.push(item('7.2.', 'Qualquer das partes poderá rescindi-lo, sem multa, com aviso prévio por escrito de 30 (trinta) dias, sendo devidas as mensalidades até o fim do aviso.'));
-  out.push(item('7.3.', 'O contrato poderá ser rescindido de imediato em caso de descumprimento de cláusula não sanado em 10 (dez) dias após notificação, ou de inadimplência superior a 60 (sessenta) dias.'));
-
-  out.push(clause('8ª', 'DISPOSIÇÕES GERAIS E FORO'));
-  out.push(item('8.1.', 'A responsabilidade da APPCHURCH por eventuais danos fica limitada ao valor pago pela IGREJA nos 12 (doze) meses anteriores ao fato.'));
-  out.push(item('8.2.', 'A tolerância quanto ao descumprimento de qualquer obrigação não implica renúncia de direitos. As comunicações por e-mail ou WhatsApp, nos contatos deste contrato, são válidas.'));
-  out.push(item('8.3.', 'As partes reconhecem a validade da assinatura eletrônica deste contrato (Lei nº 14.063/2020).'));
-  out.push(item('8.4.', [T('Fica eleito o foro da Comarca de '), val(d.foro, '[Cidade/UF]'), T(' para dirimir quaisquer questões oriundas deste contrato.')]));
+  out.push(clause('6ª', 'FORO'));
+  out.push(item('6.1.', [T('Fica eleito o foro da Comarca de '), val(d.foro, '[Cidade/UF]'), T('. As partes aceitam a assinatura deste contrato por meio eletrônico.')]));
 
   out.push(new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 200 }, keepNext: true, children: [val(d.local, '[Cidade/UF]'), T(', '), F('[dia]'), T(' de '), F('[mês]'), T(' de '), F('[ano]'), T('.')] }));
 
@@ -211,9 +193,7 @@ const paz = {
   condicoesEspeciais: [
     [T('A Paz Church Sobral (sede) pagará '), B('R$ 200,00 (duzentos reais)'), T(' mensais.')],
     [T('Cada uma das '), B('4 (quatro) igrejas sob sua cobertura'), T(', listadas abaixo, pagará '), B('R$ 50,00 (cinquenta reais)'), T(' mensais, totalizando '), B('R$ 400,00'), T(' por mês para o conjunto.')],
-    [T('O valor de R$ 50,00 por igreja poderá ser alterado quando a respectiva igreja '), B('passar de 15 (quinze) células'), T(', mediante aviso prévio de 30 (trinta) dias, sem alterar o valor das demais.')],
-    'A Paz Church Sobral é responsável pelo pagamento do valor total, salvo se ajustado por escrito que cada igreja da cobertura pagará diretamente à APPCHURCH.',
-    'Novas igrejas da cobertura poderão ser incluídas por aditivo ou troca de e-mails, nas mesmas condições desta cláusula.',
+    [T('O valor de R$ 50,00 por igreja poderá ser alterado quando a respectiva igreja '), B('passar de 15 (quinze) células'), T(', mediante aviso prévio de 30 (trinta) dias.')],
   ],
   anexo: [
     { nome: 'Paz Church Sobral (sede)', sede: true, valor: 'R$ 200,00' },
