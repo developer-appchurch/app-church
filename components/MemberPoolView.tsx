@@ -27,6 +27,7 @@ import {
   Sparkles,
   RefreshCw,
   Trash2,
+  MessageCircle,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -36,6 +37,7 @@ import {
   UserRole,
 } from '../types';
 import { AppChurchService } from '../lib/supabase';
+import { checkBrazilMobile, PHONE_PROBLEM_LABEL, whatsappLink } from '../lib/whatsapp';
 
 
 /** Nível mínimo para excluir membros: 3 = Líder de Setor (2º nível de liderança). */
@@ -140,6 +142,8 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
 
   // Modal: Vincular Membro à Célula
   const [selectedMemberToAssign, setSelectedMemberToAssign] = useState<MemberListItem | null>(null);
+  // Modal de detalhes do membro sem célula (Vincular à Célula e Chamar no WhatsApp)
+  const [memberDetail, setMemberDetail] = useState<MemberListItem | null>(null);
   const [targetCellId, setTargetCellId] = useState<string>('');
   const [isAssigning, setIsAssigning] = useState<boolean>(false);
 
@@ -334,6 +338,13 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
   }, [assignableRoles, newMemberRole]);
 
   // Células/Unidades folha disponíveis para vinculação RESTRITAS à cobertura do usuário
+  const openAssignModal = (member: MemberListItem) => {
+    setSelectedMemberToAssign(member);
+    if (availableCells.length > 0 && !targetCellId) {
+      setTargetCellId(availableCells[0].id);
+    }
+  };
+
   const availableCells = useMemo(() => {
     const map = new Map<string, { id: string; name: string; sector?: string }>();
     const cellsList = helperData?.cells || [];
@@ -976,9 +987,20 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
 
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-xs sm:text-sm font-bold text-slate-900">
-                            {member.name}
-                          </h3>
+                          {member.isUnlinked ? (
+                            <button
+                              type="button"
+                              onClick={() => setMemberDetail(member)}
+                              className="text-xs sm:text-sm font-bold text-slate-900 hover:text-sky-800 hover:underline underline-offset-2 text-left cursor-pointer"
+                              title="Ver detalhes do membro"
+                            >
+                              {member.name}
+                            </button>
+                          ) : (
+                            <h3 className="text-xs sm:text-sm font-bold text-slate-900">
+                              {member.name}
+                            </h3>
+                          )}
                           <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-100 text-slate-700">
                             {member.role || 'Membro'}
                           </span>
@@ -1017,12 +1039,7 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
                           <button
                             type="button"
                             disabled={availableCells.length === 0}
-                            onClick={() => {
-                              setSelectedMemberToAssign(member);
-                              if (availableCells.length > 0 && !targetCellId) {
-                                setTargetCellId(availableCells[0].id);
-                              }
-                            }}
+                            onClick={() => openAssignModal(member)}
                             className="px-3.5 py-1.5 bg-[#052447] hover:bg-[#073366] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
                             title={
                               availableCells.length === 0
@@ -1083,6 +1100,102 @@ export const MemberPoolView: React.FC<MemberPoolViewProps> = ({
           )}
         </div>
       </div>
+
+      {/* Modal: Detalhes do Membro sem Célula */}
+      {memberDetail &&
+        (() => {
+          const phone = checkBrazilMobile(memberDetail.phone);
+          const canAssign = isMemberInUserCoverage(memberDetail) && availableCells.length > 0;
+          return (
+            <div
+              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in"
+              onClick={() => setMemberDetail(null)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label={`Detalhes de ${memberDetail.name}`}
+                className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="bg-[#04213d] text-white px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold truncate">{memberDetail.name}</h3>
+                    <p className="text-[11px] text-slate-300">{memberDetail.role || 'Membro'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMemberDetail(null)}
+                    className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer shrink-0"
+                    aria-label="Fechar"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="p-3 sm:p-4 space-y-2 text-xs">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500 font-semibold">Situação</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                      Sem Célula
+                    </span>
+                  </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-slate-500 font-semibold flex items-center gap-1 shrink-0">
+                      <Phone size={12} /> Telefone
+                    </span>
+                    {phone.valid ? (
+                      <span className="font-semibold text-slate-800">{phone.display}</span>
+                    ) : (
+                      <span className="text-right">
+                        {memberDetail.phone && <span className="block text-slate-400">{memberDetail.phone}</span>}
+                        <span className="block text-[11px] text-slate-400 italic">{PHONE_PROBLEM_LABEL[phone.reason]}</span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-slate-500 font-semibold flex items-center gap-1">
+                      <MapPin size={12} /> Bairro
+                    </span>
+                    <span className="font-semibold text-slate-800 text-right">
+                      {memberDetail.neighborhood || <span className="text-slate-400 font-normal italic">Não informado</span>}
+                    </span>
+                  </div>
+                </div>
+
+                {(phone.valid || canAssign) && (
+                  <div className="px-3 sm:px-4 py-3 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row gap-2">
+                    {phone.valid && (
+                      <a
+                        href={whatsappLink(phone.e164, memberDetail.name, user.name, user.churchName)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs"
+                      >
+                        <MessageCircle size={14} />
+                        <span>Chamar no WhatsApp</span>
+                      </a>
+                    )}
+                    {canAssign && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const member = memberDetail;
+                          setMemberDetail(null);
+                          openAssignModal(member);
+                        }}
+                        className="flex-1 px-3 py-2 bg-[#052447] hover:bg-[#073366] text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                      >
+                        <LinkIcon size={14} />
+                        <span>Vincular à Célula</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
       {/* Modal: Vincular Membro à Célula */}
       {selectedMemberToAssign && (
