@@ -592,7 +592,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
       // 2. Remove também de relatórios antigos carregados sob demanda
       setOlderReports((prev) => prev.filter((r) => r.id !== rep.id));
       // Frequência e indicadores mudam no banco: essas telas buscam a versão nova ao serem abertas
-      markStale(queryClient, ['cell-members', currentCell.id], ['cell-indicators', currentCell.id], ['rankings']);
+      markStale(queryClient, ['cell-members', currentCell.id], ['cell-indicators', currentCell.id], ['rankings'], ['supervision-indicators']);
 
       // 3. Fecha os modais e exibe o feedback
       setSelectedReportForDetail(null);
@@ -683,7 +683,7 @@ export const WeeklyReportView: React.FC<WeeklyReportViewProps> = ({
       // A frequência dos membros e os indicadores mudam no banco: essas telas buscam a versão
       // nova quando forem abertas.
       if (currentCell?.id) {
-        markStale(queryClient, ['cell-members', currentCell.id], ['cell-indicators', currentCell.id], ['rankings']);
+        markStale(queryClient, ['cell-members', currentCell.id], ['cell-indicators', currentCell.id], ['rankings'], ['supervision-indicators']);
       }
 
       setDuplicateWarning(null);
