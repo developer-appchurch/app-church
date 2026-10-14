@@ -1201,8 +1201,12 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   // Lista de setores (ou nível pai equivalente) disponíveis como destino, excluindo o setor atual da célula
   const moveTargetOptions = useMemo(() => {
     if (!unitToMove) return [];
+    // Setor (ou nível intermediário): o destino é qualquer unidade do nível pai (ex.: outra Área).
+    if (!isLeafLevel && parentLevel) {
+      return units.filter((u) => u.levelTypeId === parentLevel.id && u.id !== unitToMove.parentId);
+    }
     return parentUnitsAvailable.filter((p) => p.id !== unitToMove.parentId);
-  }, [parentUnitsAvailable, unitToMove]);
+  }, [parentUnitsAvailable, unitToMove, isLeafLevel, parentLevel, units]);
 
   const handleOpenMoveModal = (unit: OrganizationalUnit) => {
     setMoveError('');
@@ -1236,8 +1240,13 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         }
       );
 
+      // Indicadores que dependem da árvore (Supervisão por Área/Setor, Organograma) buscam de novo ao abrir.
+      markStale(queryClient, ['supervision-indicators'], ['org-chart']);
+
       setSuccessBanner(
-        `"${unitToMove.name}" foi movida para "${result.parentName || 'o novo setor'}" com sucesso. Membros e líderes vinculados continuam os mesmos.`
+        isLeafLevel
+          ? `"${unitToMove.name}" foi movida para "${result.parentName || 'o novo setor'}" com sucesso. Membros e líderes vinculados continuam os mesmos.`
+          : `"${unitToMove.name}" foi movido(a) para "${result.parentName || parentLevel?.name || 'o novo destino'}" com sucesso. As células, os membros e os líderes continuam os mesmos.`
       );
       setUnitToMove(null);
     } catch (err: any) {
@@ -2135,6 +2144,21 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                           )}
                         </div>
                       )}
+
+                      {/* Ação do Setor (nível intermediário): mover para outra Área */}
+                      {!isRootLevel && !isLeafLevel && canTransferUnits && parentLevel && (
+                        <div className="pt-2 border-t border-slate-200/60 mt-2 flex flex-wrap items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenMoveModal(unit)}
+                            className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 flex items-center gap-1 cursor-pointer bg-indigo-50/60 hover:bg-indigo-100/80 px-2.5 py-1 rounded-lg border border-indigo-200/60 transition shrink-0"
+                            title={`Mover este(a) ${activeLevel.name.toLowerCase()} para outro(a) ${parentLevel.name.toLowerCase()}`}
+                          >
+                            <ArrowRightLeft size={12} />
+                            <span>Mover para outro(a) {parentLevel.name}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
@@ -2545,7 +2569,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm sm:text-base font-extrabold text-white">
-                    Mover Célula de Setor
+                    {isLeafLevel ? 'Mover Célula de Setor' : `Mover ${activeLevel.name} de ${parentLevel?.name || 'nível'}`}
                   </h3>
                   <p className="text-[11px] text-slate-300 mt-0.5">{unitToMove.name}</p>
                 </div>
@@ -2569,21 +2593,25 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
               <div className="p-2.5 bg-sky-50/70 border border-sky-100 rounded-xl text-[11px] text-sky-900">
                 <p>
-                  Setor atual: <strong>{unitToMove.parentName || 'Sem setor vinculado'}</strong>
+                  {isLeafLevel ? 'Setor atual' : `${parentLevel?.name || 'Nível'} atual`}:{' '}
+                  <strong>{unitToMove.parentName || 'Sem vínculo'}</strong>
                 </p>
                 <p className="mt-1 text-sky-800">
-                  Os membros e o(s) líder(es) desta célula não serão afetados — apenas a posição dela na
-                  árvore organizacional muda.
+                  {isLeafLevel
+                    ? 'Os membros e o(s) líder(es) desta célula não serão afetados — apenas a posição dela na árvore organizacional muda.'
+                    : 'As células, os membros e os líderes continuam os mesmos — apenas a posição na árvore muda. Nos indicadores por Área, este setor passa a contar na nova Área (inclusive nos meses anteriores).'}
                 </p>
               </div>
 
               <div>
                 <label className="text-xs font-bold text-slate-700 mb-1.5 block">
-                  Novo setor de destino
+                  {isLeafLevel ? 'Novo setor de destino' : `${parentLevel?.name || 'Nível'} de destino`}
                 </label>
                 {moveTargetOptions.length === 0 ? (
                   <p className="text-xs text-slate-500 italic">
-                    Nenhum outro setor disponível para transferência.
+                    {isLeafLevel
+                      ? 'Nenhum outro setor disponível para transferência.'
+                      : `Nenhum(a) outro(a) ${(parentLevel?.name || 'nível').toLowerCase()} disponível para transferência.`}
                   </p>
                 ) : (
                   <select
@@ -2591,7 +2619,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                     onChange={(e) => setMoveTargetParentId(e.target.value)}
                     className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none bg-white"
                   >
-                    <option value="">Selecione um setor...</option>
+                    <option value="">{isLeafLevel ? 'Selecione um setor...' : 'Selecione...'}</option>
                     {moveTargetOptions.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
