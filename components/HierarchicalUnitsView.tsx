@@ -49,6 +49,44 @@ interface HierarchicalUnitsViewProps {
   onNavigatePool?: () => void;
 }
 
+/**
+ * Busca membros no servidor (a partir de 2 letras, com espera de 300 ms ao digitar).
+ * Substitui a antiga carga de até 2.000 membros na abertura da tela: a lista só é
+ * consultada quando alguém realmente vai escolher um líder.
+ */
+function useServerMemberSearch(churchId: string, term: string, enabled: boolean) {
+  const [results, setResults] = useState<CellMember[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const q = term.trim();
+    if (!enabled || q.length < 2) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const timeoutId = setTimeout(async () => {
+      try {
+        const found = await AppChurchService.getMembers(churchId, undefined, false, { search: q, limit: 100 });
+        if (!cancelled) setResults(found || []);
+      } catch (e) {
+        console.error('[HierarchicalUnitsView] Erro ao buscar membros para escolher líder:', e);
+        if (!cancelled) setResults([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [churchId, term, enabled]);
+
+  return { results, loading };
+}
+
 export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   user,
   initialLevelIndex = 0,
@@ -127,8 +165,6 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [bindLeaderError, setBindLeaderError] = useState<string>('');
   // Resultado da busca de membros direto no banco (não fica preso ao teto de 1000 registros
   // carregados inicialmente em `churchMembers` — ver modalFilteredMembers abaixo)
-  const [bindLeaderServerResults, setBindLeaderServerResults] = useState<CellMember[]>([]);
-  const [isSearchingBindLeaderMembers, setIsSearchingBindLeaderMembers] = useState<boolean>(false);
 
   // Modal de Mover Célula para outro Setor (Configurações da Igreja > Setores e Células)
   const [unitToMove, setUnitToMove] = useState<OrganizationalUnit | null>(null);
@@ -315,17 +351,16 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
 
     async function fetchData() {
       try {
-        const [currentLvs, currentUnits, fetchedMembers, fetchedRoles] = await Promise.all([
+        // Membros NÃO são carregados aqui: só são buscados (no servidor) ao escolher um líder.
+        const [currentLvs, currentUnits, fetchedRoles] = await Promise.all([
           cachedLevelsRef.current.length > 0 ? Promise.resolve(cachedLevelsRef.current) : AppChurchService.getChurchLevels(effectiveChurchId),
           cachedUnitsRef.current.length > 0 ? Promise.resolve(cachedUnitsRef.current) : AppChurchService.getUnits(effectiveChurchId, undefined, 'flat'),
-          AppChurchService.getMembers(effectiveChurchId, undefined, false, { limit: 2000 }),
           AppChurchService.getRoles(),
         ]);
 
         if (!isMounted) return;
         setLevels(currentLvs);
         setUnits(currentUnits);
-        setChurchMembers(fetchedMembers);
         if (fetchedRoles && fetchedRoles.length > 0) {
           setRoles(fetchedRoles);
         }
@@ -544,54 +579,46 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     return churchMembers.filter((m) => m.churchId === effectiveChurchId);
   }, [churchMembers, effectiveChurchId]);
 
-  // Busca membros direto no banco ao digitar no modal de vinculação de líderes.
-  // Necessário porque `churchMembers` é carregado uma única vez com um teto (ver fetchData
-  // acima) e o Supabase/PostgREST também aplica um limite máximo de linhas por requisição
-  // (geralmente 1000), então um membro cadastrado fora desse recorte nunca apareceria só
-  // filtrando a lista já carregada em memória — era o caso relatado com o membro "Vicente".
+  // Membros já conhecidos nesta tela (resultados de busca, líderes cadastrados agora...).
+  // Guardá-los permite mostrar nomes e montar a criação da unidade sem nova consulta.
+  const rememberMembers = React.useCallback((found: CellMember[]) => {
+    if (found.length === 0) return;
+    setChurchMembers((prev) => {
+      const known = new Set(prev.map((m) => m.id));
+      const fresh = found.filter((m) => !known.has(m.id));
+      return fresh.length === 0 ? prev : [...prev, ...fresh];
+    });
+  }, []);
+
+  // Busca no servidor ao digitar no modal de vincular líderes.
+  const bindSearch = useServerMemberSearch(effectiveChurchId, bindLeaderSearchTerm, isBindLeaderModalOpen);
+  const bindLeaderServerResults = bindSearch.results;
+  const isSearchingBindLeaderMembers = bindSearch.loading;
   useEffect(() => {
-    const term = bindLeaderSearchTerm.trim();
-    if (!isBindLeaderModalOpen || term.length < 2) {
-      setBindLeaderServerResults([]);
-      setIsSearchingBindLeaderMembers(false);
-      return;
-    }
+    rememberMembers(bindSearch.results);
+  }, [bindSearch.results, rememberMembers]);
 
-    let cancelled = false;
-    setIsSearchingBindLeaderMembers(true);
-    const timeoutId = setTimeout(async () => {
-      try {
-        const results = await AppChurchService.getMembers(effectiveChurchId, undefined, false, {
-          search: term,
-          limit: 100,
-        });
-        if (!cancelled) {
-          setBindLeaderServerResults(results || []);
-        }
-      } catch (e) {
-        console.error('[HierarchicalUnitsView] Erro ao buscar membros no banco para vincular líder:', e);
-        if (!cancelled) {
-          setBindLeaderServerResults([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsSearchingBindLeaderMembers(false);
-        }
-      }
-    }, 300);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timeoutId);
-    };
-  }, [bindLeaderSearchTerm, isBindLeaderModalOpen, effectiveChurchId]);
+  // Busca no servidor ao digitar no formulário de nova unidade.
+  const [leaderSearchTerm, setLeaderSearchTerm] = useState('');
+  const formSearch = useServerMemberSearch(effectiveChurchId, leaderSearchTerm, true);
+  useEffect(() => {
+    rememberMembers(formSearch.results);
+  }, [formSearch.results, rememberMembers]);
+  const formResults = useMemo(
+    () =>
+      leaderSearchTerm.trim().length < 2
+        ? []
+        : formSearch.results.filter((m) => m.churchId === effectiveChurchId),
+    [formSearch.results, leaderSearchTerm, effectiveChurchId]
+  );
 
   // Filtro de membros da igreja para o modal de vinculação direta de líderes.
   // Combina o filtro local (sobre a lista já carregada em memória, com retorno instantâneo)
   // com o resultado da busca direta no banco (bindLeaderServerResults), que cobre qualquer
   // membro da igreja, mesmo fora do recorte inicial carregado em `churchMembers`.
   const modalFilteredMembers = useMemo(() => {
-    if (!bindLeaderSearchTerm.trim()) return filteredChurchMembers;
+    // Sem busca (menos de 2 letras) não lista ninguém: os membros são consultados no servidor.
+    if (bindLeaderSearchTerm.trim().length < 2) return [];
     const term = bindLeaderSearchTerm.toLowerCase();
     const localMatches = filteredChurchMembers.filter(
       (m) =>
@@ -1073,6 +1100,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
     setSuccessBanner('');
     setUnitName('');
     setSelectedLeaderIds([]);
+    setLeaderSearchTerm('');
     setSearchTerm('');
     setSelectedMotherId('');
   };
@@ -1408,6 +1436,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         // Mantém o mesmo pai selecionado e limpa campos específicos
         setUnitName('');
         setSelectedLeaderIds([]);
+        setLeaderSearchTerm('');
         if (isLeafLevel) {
           setAddress('');
         }
@@ -1415,6 +1444,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         // Limpa tudo
         setUnitName('');
         setSelectedLeaderIds([]);
+        setLeaderSearchTerm('');
         if (isLeafLevel) {
           setAddress('');
         }
@@ -1735,11 +1765,63 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                   </div>
                 </div>
 
+                {selectedLeaderIds.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50 rounded-xl border border-slate-200/80">
+                    {selectedLeaderIds.map((id) => {
+                      const name = churchMembers.find((m) => m.id === id)?.name;
+                      if (!name) return null;
+                      return (
+                        <span
+                          key={id}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-sky-300 rounded-lg text-xs font-bold text-sky-950 shadow-2xs"
+                        >
+                          <UserCheck size={12} className="text-sky-700" />
+                          <span>{name}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleToggleLeader(id)}
+                            className="ml-1 text-slate-400 hover:text-red-500 cursor-pointer"
+                          >
+                            <X size={12} />
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="relative">
+                  <Search
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    type="text"
+                    value={leaderSearchTerm}
+                    onChange={(e) => setLeaderSearchTerm(e.target.value)}
+                    placeholder="Buscar membro para ser líder (mín. 2 letras)..."
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800"
+                  />
+                  {formSearch.loading && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-sky-700">
+                      Buscando...
+                    </span>
+                  )}
+                </div>
+
                 <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl p-2 bg-slate-50/70 space-y-1">
-                  {filteredChurchMembers.length === 0 ? (
+                  {formResults.length === 0 ? (
                     <div className="p-4 text-center space-y-2">
                       <p className="text-xs text-slate-500 font-medium">
-                        Nenhum membro cadastrado em <strong>{effectiveChurchName}</strong> ainda.
+                        {leaderSearchTerm.trim().length < 2 ? (
+                          'Digite o nome de um membro para escolher o líder.'
+                        ) : formSearch.loading ? (
+                          'Buscando membros...'
+                        ) : (
+                          <>
+                            Nenhum membro encontrado em <strong>{effectiveChurchName}</strong>.
+                          </>
+                        )}
                       </p>
                       <button
                         type="button"
@@ -1754,7 +1836,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                       </button>
                     </div>
                   ) : (
-                    filteredChurchMembers.map((member) => {
+                    formResults.map((member) => {
                       const isSelected = selectedLeaderIds.includes(member.id);
                       const ledUnits = memberLedUnitsMap.get(member.id) || [];
                       const isLeaderElsewhere = ledUnits.length > 0;
@@ -2383,13 +2465,15 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                 )}
               </div>
               <p className="text-[10px] text-slate-400 -mt-1">
-                A busca consulta todos os membros da igreja, não apenas os já carregados na tela.
+                Digite pelo menos 2 letras: a busca consulta todos os membros da igreja.
               </p>
 
               {/* Contador & Selecionados */}
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-slate-700">
-                  Membros da Igreja ({modalFilteredMembers.length}):
+                  {bindLeaderSearchTerm.trim().length < 2
+                    ? 'Membros da Igreja:'
+                    : `Resultados (${modalFilteredMembers.length}):`}
                 </span>
                 <span className="font-semibold text-sky-800 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
                   {bindLeaderSelectedIds.length}{' '}
@@ -2408,7 +2492,10 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                       churchMembers.find((m) => m.id === id) ||
                       bindLeaderServerResults.find((m) => m.id === id) ||
                       modalFilteredMembers.find((m) => m.id === id);
-                    if (!mem) return null;
+                    // Líderes atuais da unidade não vêm da busca: o nome está na própria unidade.
+                    const leaderName =
+                      mem?.name || unitToBindLeaders?.leaders?.find((l) => l.id === id)?.name;
+                    if (!leaderName) return null;
                     const otherLedUnits = (memberLedUnitsMap.get(id) || []).filter(
                       (name) => name !== unitToBindLeaders?.name
                     );
@@ -2418,7 +2505,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                         className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-sky-300 rounded-lg text-xs font-bold text-sky-950 shadow-2xs"
                       >
                         <UserCheck size={12} className="text-sky-700" />
-                        <span>{mem.name}</span>
+                        <span>{leaderName}</span>
                         {otherLedUnits.length > 0 && (
                           <span className="text-[9px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1 py-0.2 rounded">
                             +{otherLedUnits.length} célula(s)
@@ -2446,7 +2533,9 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                 ) : modalFilteredMembers.length === 0 ? (
                   <div className="p-6 text-center space-y-2">
                     <p className="text-xs text-slate-500 font-medium">
-                      Nenhum membro encontrado com os critérios de busca.
+                      {bindLeaderSearchTerm.trim().length < 2
+                        ? 'Digite o nome, cargo ou telefone para buscar um membro.'
+                        : 'Nenhum membro encontrado com os critérios de busca.'}
                     </p>
                     <button
                       type="button"
