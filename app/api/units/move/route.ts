@@ -157,6 +157,14 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Esta célula já está neste setor.' }, { status: 400 });
     }
 
+    // Unidade do nível mais alto (sem pai) não pode ser pendurada em outra: evita Área dentro de Setor.
+    if (!unit.pai_id) {
+      return NextResponse.json(
+        { error: 'Unidades do nível mais alto da hierarquia não podem ser movidas.' },
+        { status: 400 }
+      );
+    }
+
     // Garante que o destino é do mesmo nível hierárquico do pai atual (ex: Setor -> Setor),
     // evitando pendurar a célula direto em uma Área/Distrito por engano.
     if (unit.pai_id) {
