@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Bar,
   BarChart,
@@ -29,7 +30,7 @@ import {
 import { UserProfile, ChurchHierarchicalLevel, OrganizationalUnit } from '../types';
 import { AppChurchService } from '../lib/supabase';
 import { THRESHOLD_COLORS, colorForPercent } from '@/lib/trackColors';
-import { SupervisionIndicatorsTab } from './SupervisionIndicatorsTab';
+import { SupervisionIndicatorsTab, supervisionQuery } from './SupervisionIndicatorsTab';
 import { OrgChartTab } from './OrgChartTab';
 
 interface ChurchIndicatorsViewProps {
@@ -64,6 +65,19 @@ interface IndicatorsData {
 export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ currentUser, onBack }) => {
   const churchId = currentUser.churchId;
   const [activeTab, setActiveTab] = useState<IndicatorsTab>('orgchart');
+  const queryClient = useQueryClient();
+
+  // Os dados do Trilho (níveis, unidades e indicadores) só são buscados quando o usuário aponta para
+  // a aba ou a abre — a tela agora abre no Organograma e não precisa deles. Apontar/tocar na aba já
+  // dispara a busca (um instante antes do clique), então ao abrir o Trilho ele costuma estar pronto.
+  const [trackEnabled, setTrackEnabled] = useState(false);
+  const warmTab = (tab: IndicatorsTab) => {
+    if (tab === 'track') setTrackEnabled(true);
+    if (tab === 'supervision' && churchId) {
+      // não refaz a busca se o cache (5 min) ainda é válido
+      queryClient.prefetchQuery(supervisionQuery(churchId, currentUser.id));
+    }
+  };
 
   // Base: níveis e unidades da hierarquia (carregados uma vez, usados para
   // montar os seletores de Área/Setor e resolver o nível de comparação)
@@ -82,7 +96,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
   const [indicatorsError, setIndicatorsError] = useState('');
 
   useEffect(() => {
-    if (!churchId) return;
+    if (!churchId || !trackEnabled) return;
     let mounted = true;
     (async () => {
       setIsLoadingBase(true);
@@ -103,7 +117,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
     return () => {
       mounted = false;
     };
-  }, [churchId]);
+  }, [churchId, trackEnabled]);
 
   const cellLevel = levels.length > 0 ? levels[levels.length - 1] : null;
   const sectorLevel = levels.length > 1 ? levels[levels.length - 2] : null;
@@ -213,7 +227,13 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => {
+                  warmTab(tab.id);
+                  setActiveTab(tab.id);
+                }}
+                onPointerEnter={() => warmTab(tab.id)}
+                onPointerDown={() => warmTab(tab.id)}
+                onFocus={() => warmTab(tab.id)}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition cursor-pointer ${
                   isActive ? 'bg-[#052447] text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
                 }`}

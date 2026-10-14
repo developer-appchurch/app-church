@@ -93,6 +93,23 @@ interface ChartPoint {
   partial: boolean;
 }
 
+/**
+ * Consulta da aba (chave, busca e validade do cache). Exportada para a tela poder adiantar a busca
+ * (prefetch) quando o usuário aponta para a aba, sem duplicar a consulta.
+ */
+export function supervisionQuery(churchId: string, userId: string) {
+  return {
+    queryKey: ['supervision-indicators', churchId, userId],
+    queryFn: async (): Promise<SupervisionData> => {
+      const res = await fetch(`/api/indicators/supervision?churchId=${encodeURIComponent(churchId)}`);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body?.error || 'Falha ao carregar a supervisão das células.');
+      return body as SupervisionData;
+    },
+    staleTime: 1000 * 60 * 5,
+  };
+}
+
 export const SupervisionIndicatorsTab: React.FC<SupervisionIndicatorsTabProps> = ({ currentUser }) => {
   const churchId = currentUser.churchId;
 
@@ -100,15 +117,8 @@ export const SupervisionIndicatorsTab: React.FC<SupervisionIndicatorsTabProps> =
   // Filtros, mês escolhido, percentuais e lista de pendentes são calculados em memória:
   // trocar de Área/Setor/mês não faz requisição nem recarrega o gráfico.
   const { data, isLoading, error } = useQuery<SupervisionData>({
-    queryKey: ['supervision-indicators', churchId, currentUser.id],
-    queryFn: async () => {
-      const res = await fetch(`/api/indicators/supervision?churchId=${encodeURIComponent(churchId)}`);
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body?.error || 'Falha ao carregar a supervisão das células.');
-      return body as SupervisionData;
-    },
+    ...supervisionQuery(churchId, currentUser.id),
     enabled: Boolean(churchId),
-    staleTime: 1000 * 60 * 5,
   });
 
   const [areaId, setAreaId] = useState('');
