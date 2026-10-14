@@ -49,8 +49,8 @@ interface TreeNode {
 
 const CHURCH_ID = '__church__';
 
-/** Cores disponíveis para escolher (todas dão contraste suficiente com texto branco ou escuro). */
-const COLOR_CHOICES = [
+/** Cores padrão (usadas quando ninguém escolheu uma cor). Não inclui branco nem cinza claro. */
+const DEFAULT_COLORS = [
   '#d63a12',
   '#c2410c',
   '#f5b400',
@@ -65,6 +65,27 @@ const COLOR_CHOICES = [
   '#1c1c1c',
 ];
 
+/** Cores disponíveis para escolher (todas dão contraste suficiente com texto branco ou escuro). */
+const COLOR_CHOICES: { hex: string; name: string }[] = [
+  { hex: '#dc2626', name: 'Vermelho' },
+  { hex: '#d63a12', name: 'Vermelho alaranjado' },
+  { hex: '#f97316', name: 'Laranja' },
+  { hex: '#c2410c', name: 'Laranja escuro' },
+  { hex: '#f5b400', name: 'Âmbar' },
+  { hex: '#eab308', name: 'Amarelo' },
+  { hex: '#15803d', name: 'Verde' },
+  { hex: '#0e7490', name: 'Azul petróleo' },
+  { hex: '#2563eb', name: 'Azul' },
+  { hex: '#1d4ed8', name: 'Azul royal' },
+  { hex: '#1e3a8a', name: 'Azul marinho' },
+  { hex: '#6d28d9', name: 'Roxo' },
+  { hex: '#be185d', name: 'Rosa' },
+  { hex: '#6b7280', name: 'Cinza' },
+  { hex: '#52525b', name: 'Cinza escuro' },
+  { hex: '#1c1c1c', name: 'Preto' },
+  { hex: '#ffffff', name: 'Branco' },
+];
+
 function hashId(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
@@ -73,7 +94,7 @@ function hashId(id: string): number {
 
 /** Cor padrão estável de uma unidade sem cor escolhida. */
 function defaultColor(id: string): string {
-  return COLOR_CHOICES[hashId(id) % COLOR_CHOICES.length];
+  return DEFAULT_COLORS[hashId(id) % DEFAULT_COLORS.length];
 }
 
 function luminance(hex: string): number {
@@ -89,9 +110,15 @@ function inkFor(hex: string): string {
   return 1.05 / (l + 0.05) >= (l + 0.05) / 0.0556 ? '#ffffff' : '#111111';
 }
 
-/** Cor da linha de ligação (cores muito escuras ficam cinza para aparecer no fundo branco). */
+/** Cor da linha de ligação (cores muito escuras ou muito claras viram cinza para aparecer no fundo branco). */
 function lineFor(hex: string): string {
-  return luminance(hex) < 0.05 ? '#6b7280' : hex;
+  const l = luminance(hex);
+  return l < 0.05 ? '#6b7280' : l > 0.85 ? '#94a3b8' : hex;
+}
+
+/** Cores muito claras (ex.: branco) precisam de borda para não sumir no fundo branco. */
+function needsOutline(hex: string): boolean {
+  return luminance(hex) > 0.85;
 }
 
 function pluralize(name: string): string {
@@ -452,7 +479,7 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
             <>
               <span className="text-xs sm:text-sm font-bold text-[#052447]">Cor de {selected.name}</span>
               <div className="flex flex-wrap items-center gap-1">
-                {COLOR_CHOICES.map((hex) => {
+                {COLOR_CHOICES.map(({ hex, name }) => {
                   const isCurrent = selected.color.toLowerCase() === hex;
                   return (
                     <button
@@ -460,7 +487,8 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
                       type="button"
                       disabled={saving}
                       onClick={() => saveColor(selected.id, hex)}
-                      aria-label={`Usar a cor ${hex}`}
+                      aria-label={`Usar a cor ${name}`}
+                      title={name}
                       aria-pressed={isCurrent}
                       className="w-11 h-11 sm:w-9 sm:h-9 flex items-center justify-center cursor-pointer disabled:opacity-60"
                     >
@@ -470,7 +498,7 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
                           background: hex,
                           boxShadow: isCurrent
                             ? '0 0 0 2px #fff, 0 0 0 4px #0f172a'
-                            : 'inset 0 0 0 1px rgba(15,23,42,.2)',
+                            : 'inset 0 0 0 1px rgba(15,23,42,.25)',
                         }}
                       />
                     </button>
@@ -518,6 +546,7 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
               background: node.color,
               color: node.ink,
               opacity: dimmed ? 0.45 : 1,
+              border: needsOutline(node.color) ? '1.5px solid #cbd5e1' : undefined,
               boxShadow: editing && selectedId === node.id ? '0 0 0 3px #fff, 0 0 0 6px #38bdf8' : undefined,
             };
             if (!canToggle) {
@@ -552,7 +581,7 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
                 {node.leaders && <span className="truncate text-[11px] font-medium leading-snug">{node.leaders}</span>}
                 <span
                   className="absolute -right-2.5 top-1/2 -mt-[11px] w-[22px] h-[22px] rounded-full bg-white text-slate-900 text-[11px] font-bold flex items-center justify-center box-border"
-                  style={{ border: `2px solid ${node.color}` }}
+                  style={{ border: `2px solid ${lineFor(node.color)}` }}
                 >
                   {isOpen ? '−' : node.count}
                 </span>
@@ -579,7 +608,10 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
                 className="flex items-center gap-2.5 min-h-10 py-1 pr-3.5 border-t border-slate-100"
                 style={{ paddingLeft: pad, opacity: dimmed ? 0.45 : 1 }}
               >
-                <span className="shrink-0 w-2 h-2 rounded-full" style={{ background: node.color }} />
+                <span
+                  className="shrink-0 w-2 h-2 rounded-full"
+                  style={{ background: node.color, boxShadow: 'inset 0 0 0 1px rgba(15,23,42,.25)' }}
+                />
                 <span className="text-[13px] text-slate-800">{node.name}</span>
               </div>
             );
@@ -598,7 +630,10 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
                 boxShadow: editing && selectedId === node.id ? 'inset 0 0 0 3px #38bdf8' : undefined,
               }}
             >
-              <span className="shrink-0 w-3 h-3 rounded" style={{ background: node.color }} />
+              <span
+                className="shrink-0 w-3 h-3 rounded"
+                style={{ background: node.color, boxShadow: 'inset 0 0 0 1px rgba(15,23,42,.25)' }}
+              />
               <span className="flex-1 min-w-0 flex flex-col">
                 <span className="text-sm font-bold leading-tight text-slate-900">{node.name}</span>
                 {node.leaders && <span className="text-xs text-slate-500 leading-snug">{node.leaders}</span>}
