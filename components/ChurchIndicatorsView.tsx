@@ -17,6 +17,7 @@ import {
   Award,
   BarChart3,
   ClipboardCheck,
+  Network,
   Flame,
   GitCompareArrows,
   Loader2,
@@ -29,6 +30,7 @@ import { UserProfile, ChurchHierarchicalLevel, OrganizationalUnit } from '../typ
 import { AppChurchService } from '../lib/supabase';
 import { THRESHOLD_COLORS, colorForPercent } from '@/lib/trackColors';
 import { SupervisionIndicatorsTab } from './SupervisionIndicatorsTab';
+import { OrgChartTab } from './OrgChartTab';
 
 interface ChurchIndicatorsViewProps {
   currentUser: UserProfile;
@@ -37,11 +39,12 @@ interface ChurchIndicatorsViewProps {
 
 type ScopeTab = 'church' | 'area' | 'sector';
 type ViewMode = 'charts' | 'compare';
-type IndicatorsTab = 'track' | 'supervision';
+type IndicatorsTab = 'track' | 'supervision' | 'orgchart';
 
 const TABS: { id: IndicatorsTab; label: string; icon: React.ElementType }[] = [
   { id: 'track', label: 'Trilho de Liderança', icon: Award },
   { id: 'supervision', label: 'Supervisão', icon: ClipboardCheck },
+  { id: 'orgchart', label: 'Organograma', icon: Network },
 ];
 
 interface IndicatorsData {
@@ -226,6 +229,10 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
       {activeTab === 'supervision' ? (
         <div className="max-w-6xl mx-auto space-y-3">
           <SupervisionIndicatorsTab currentUser={currentUser} />
+        </div>
+      ) : activeTab === 'orgchart' ? (
+        <div className="max-w-6xl mx-auto space-y-3">
+          <OrgChartTab currentUser={currentUser} />
         </div>
       ) : (
       <div className="max-w-6xl mx-auto space-y-3">
