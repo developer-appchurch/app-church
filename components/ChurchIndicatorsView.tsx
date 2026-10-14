@@ -42,9 +42,9 @@ type ViewMode = 'charts' | 'compare';
 type IndicatorsTab = 'track' | 'supervision' | 'orgchart';
 
 const TABS: { id: IndicatorsTab; label: string; icon: React.ElementType }[] = [
-  { id: 'track', label: 'Trilho de Liderança', icon: Award },
-  { id: 'supervision', label: 'Supervisão', icon: ClipboardCheck },
   { id: 'orgchart', label: 'Organograma', icon: Network },
+  { id: 'supervision', label: 'Supervisão', icon: ClipboardCheck },
+  { id: 'track', label: 'Trilho de Liderança', icon: Award },
 ];
 
 interface IndicatorsData {
@@ -63,7 +63,7 @@ interface IndicatorsData {
 
 export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ currentUser, onBack }) => {
   const churchId = currentUser.churchId;
-  const [activeTab, setActiveTab] = useState<IndicatorsTab>('track');
+  const [activeTab, setActiveTab] = useState<IndicatorsTab>('orgchart');
 
   // Base: níveis e unidades da hierarquia (carregados uma vez, usados para
   // montar os seletores de Área/Setor e resolver o nível de comparação)
