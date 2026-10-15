@@ -134,7 +134,8 @@ export default function Home() {
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>('feed');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   // Desktop (>= 1280 px com mouse): menu lateral fixo; celular e tablet seguem com a gaveta
-  const { isDesktop, setCollapsed: setSidebarCollapsed, pinned: isSidebarPinned } = useDesktopSidebar();
+  const { isDesktop, collapsed: isSidebarCollapsed, setCollapsed: setSidebarCollapsed, pinned: isSidebarPinned } =
+    useDesktopSidebar();
 
   // Logged in user profile (contains churchId, churchName, role, sector, etc.)
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -765,10 +766,7 @@ export default function Home() {
   // 2. Authenticated Church Workspace
   return (
     <div
-      className="min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative transition-[padding] duration-300"
-      // Menu fixo (desktop): o cabeçalho e os avisos começam depois do menu (18rem = 288 px) e vão
-      // até o fim da tela.
-      style={isSidebarPinned ? { paddingLeft: '18rem' } : undefined}
+      className="min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative"
     >
       {/* Top Header replicating user screenshot */}
       <Header
@@ -776,8 +774,9 @@ export default function Home() {
         cells={effectiveCells}
         selectedCellId={selectedCellId}
         onSelectCell={setSelectedCellId}
-        onToggleSidebar={() => (isDesktop ? setSidebarCollapsed(false) : setIsSidebarOpen(true))}
-        hideMenuButton={isSidebarPinned}
+        // Desktop: o botão de menu alterna entre menu fixo e recolhido (o cabeçalho não se move);
+        // celular/tablet: abre a gaveta.
+        onToggleSidebar={() => (isDesktop ? setSidebarCollapsed(!isSidebarCollapsed) : setIsSidebarOpen(true))}
         showCenterLogo={isDesktop}
         onRefreshData={handleRefresh}
         isRefreshing={isRefreshing}
@@ -795,7 +794,10 @@ export default function Home() {
       )}
 
       {refreshErrorBanner && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center justify-between text-xs text-amber-800 animate-fadeIn">
+        <div
+          className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center justify-between text-xs text-amber-800 animate-fadeIn"
+          style={isSidebarPinned ? { paddingLeft: 'calc(18rem + 1rem)' } : undefined}
+        >
           <div className="flex items-center gap-2">
             <AlertCircle size={15} className="text-amber-600 shrink-0" />
             <span>{refreshErrorBanner}</span>
@@ -825,15 +827,24 @@ export default function Home() {
       />
 
       {/* Banner de Permissão Amigável para Notificações de Lembrete de Relatório */}
-      {user && <NotificationPermissionBanner user={user} />}
+      {user && (
+        <div style={isSidebarPinned ? { paddingLeft: '18rem' } : undefined}>
+          <NotificationPermissionBanner user={user} />
+        </div>
+      )}
 
       {/* Main Dynamic View com PullToRefresh mobile integrado */}
       <PullToRefresh onRefresh={handleRefresh} isRefreshing={isRefreshing}>
         <main
           className="flex-1 transition-[padding] duration-300"
-          // Só o conteúdo (não o cabeçalho) ganha um espaço à direita que espelha o menu aos poucos
-          // (0 até 1440 px, 288 px a partir de 1728 px): centraliza na TELA sem estreitar telas menores.
-          style={isSidebarPinned ? { paddingRight: 'clamp(0px, calc(100vw - 1440px), 18rem)' } : undefined}
+          // Menu fixo (desktop): só o CONTEÚDO se ajusta — o cabeçalho não se move. Esquerda: largura do
+          // menu (18rem = 288 px). Direita: espelha o menu aos poucos (0 até 1440 px, 288 px a partir de
+          // 1728 px), para centralizar na TELA sem estreitar telas menores.
+          style={
+            isSidebarPinned
+              ? { paddingLeft: '18rem', paddingRight: 'clamp(0px, calc(100vw - 1440px), 18rem)' }
+              : undefined
+          }
         >
           {activeScreen === 'feed' && (
             <FeedView
