@@ -1987,6 +1987,14 @@ export const AppChurchService = {
     }
 
     const search = options?.search?.trim() || '';
+    // Busca por nome, cargo, telefone ou bairro. Vírgulas, parênteses e aspas quebram a sintaxe do filtro `or` do PostgREST.
+    const safeSearch = search.replace(/[,()"\\]/g, ' ').trim();
+    const searchFilter = safeSearch
+      ? ['nome', 'funcao', 'telefone', 'bairro'].map((col) => `${col}.ilike.%${safeSearch}%`).join(',')
+      : '';
+    const lowerSearch = search.toLowerCase();
+    const matchesSearch = (m: CellMember) =>
+      [m.name, m.role, m.phone, m.neighborhood].some((v) => !!v && v.toLowerCase().includes(lowerSearch));
     const cacheKey = `members:${churchId || 'all'}:${cellId || 'all'}:${from ?? 'all'}:${to ?? 'all'}:${search}`;
     return getCachedOrExecute(cacheKey, 3 * 60 * 1000, async () => {
       const EXPLICIT_MEMBER_COLUMNS = 'id, igreja_id, unidade_id, papel_id, funcao, nome, login, bairro, aniversario, telefone, email, status_frequencia, percentual_frequencia, url_avatar, auth_user_id, observacoes';
@@ -2004,8 +2012,8 @@ export const AppChurchService = {
           if (cellId) {
             query = query.eq('unidade_id', cellId);
           }
-          if (search) {
-            query = query.ilike('nome', `%${search}%`);
+          if (searchFilter) {
+            query = query.or(searchFilter);
           }
           query = query.order('nome');
           if (from !== undefined && to !== undefined) {
@@ -2032,7 +2040,7 @@ export const AppChurchService = {
               legQuery = legQuery.eq('igreja_id', churchId);
             }
             if (cellId) legQuery = legQuery.eq('celula_id', cellId);
-            if (search) legQuery = legQuery.ilike('nome', `%${search}%`);
+            if (searchFilter) legQuery = legQuery.or(searchFilter);
             legQuery = legQuery.order('nome');
             if (from !== undefined && to !== undefined) {
               legQuery = legQuery.range(from, to);
@@ -2093,7 +2101,7 @@ export const AppChurchService = {
                 filtered = filtered.filter((m) => m.cellId && m.cellId.trim().toLowerCase() === normalized);
               }
               if (search) {
-                filtered = filtered.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
+                filtered = filtered.filter(matchesSearch);
               }
               console.warn('[AppChurchService.getMembers] Mantendo dados anteriores do cache devido a erro no banco.');
               return filtered.length > 0 ? filtered : cached;
@@ -2115,7 +2123,7 @@ export const AppChurchService = {
         filtered = filtered.filter((m) => m.cellId && m.cellId.trim().toLowerCase() === normalized);
       }
       if (search) {
-        filtered = filtered.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()));
+        filtered = filtered.filter(matchesSearch);
       }
       if (from !== undefined && to !== undefined) {
         filtered = filtered.slice(from, to + 1);
