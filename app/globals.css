@@ -26,3 +26,11 @@
 .animate-heart-pop {
   animation: heart-pop 0.9s ease-out forwards;
 }
+
+/* Desktop: reserva sempre o espaço da barra de rolagem, para a logo e o cabeçalho não "andarem"
+   alguns pixels quando uma tela tem rolagem e outra não. */
+@media (min-width: 1280px) and (pointer: fine) {
+  html {
+    scrollbar-gutter: stable;
+  }
+}
