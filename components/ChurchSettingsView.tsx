@@ -32,9 +32,11 @@ import {
   Square,
   CalendarCheck,
   PowerOff,
+  Church,
 } from 'lucide-react';
 import { TadelSettingsTab } from './TadelSettingsTab';
 import { InactiveCellsTab } from './InactiveCellsTab';
+import { CultoConfigTab } from './CultoConfigTab';
 import { UserProfile, Neighborhood, TrackStep, ChurchHierarchicalLevel, OrganizationalUnit } from '@/types';
 import { AppChurchService } from '@/lib/supabase';
 
@@ -46,7 +48,7 @@ interface ChurchSettingsViewProps {
   onNavigateToUnits?: () => void;
 }
 
-type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins' | 'tadel' | 'inactive';
+type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins' | 'tadel' | 'culto' | 'inactive';
 
 interface TabDef {
   id: SettingsTab;
@@ -63,6 +65,7 @@ const TABS: TabDef[] = [
   { id: 'neighborhoods', label: 'Bairros', icon: MapPin, permissionCode: 'neighborhood:manage' },
   { id: 'logins', label: 'Gestão de Logins', icon: KeyRound, permissionCode: 'member:access_manage' },
   { id: 'tadel', label: 'TADEL', icon: CalendarCheck, permissionCode: 'tadel:manage' },
+  { id: 'culto', label: 'Cultos', icon: Church, permissionCode: 'culto:configurar' },
   { id: 'inactive', label: 'Células Desativadas', icon: PowerOff, permissionCode: '', systemAdminOnly: true },
 ];
 
@@ -117,7 +120,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
               Configurações da Igreja
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-0.5 truncate">
-              Trilho, Setores e Células, Bairros, Gestão de Logins e TADEL em um só lugar.
+              Trilho, Setores e Células, Bairros, Gestão de Logins, TADEL e Cultos em um só lugar.
             </p>
           </div>
         </div>
@@ -160,6 +163,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
         )}
         {activeTab === 'logins' && <LoginsTab currentUser={currentUser} />}
         {activeTab === 'tadel' && <TadelSettingsTab currentUser={currentUser} />}
+        {activeTab === 'culto' && <CultoConfigTab currentUser={currentUser} />}
         {activeTab === 'inactive' && <InactiveCellsTab currentUser={currentUser} />}
       </div>
     </div>

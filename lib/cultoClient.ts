@@ -70,7 +70,12 @@ const qs = (params: Record<string, string | number | undefined>) =>
   ).toString();
 
 export const CultoClient = {
-  /** Campus, horários e lançamentos recentes numa única chamada. */
+  /** Campus e horários (Configurações da Igreja › Cultos). */
+  async getConfig(churchId?: string) {
+    const r = await request<{ campuses: CultoCampus[] }>(`/api/culto/config?${qs({ churchId })}`);
+    return r.campuses;
+  },
+  /** Campus, horários e lançamentos recentes numa única chamada (tela de lançamento). */
   getOverview(churchId?: string) {
     return request<{ campuses: CultoCampus[]; counts: CultoCount[] }>(`/api/culto/overview?${qs({ churchId })}`);
   },
@@ -131,5 +136,12 @@ export const CultoClient = {
 export const cultoOverviewQuery = (churchId?: string) => ({
   queryKey: ['culto-overview', churchId ?? ''] as const,
   queryFn: () => CultoClient.getOverview(churchId),
+  staleTime: 5 * 60 * 1000,
+});
+
+/** Consulta de campus e horários para a aba Cultos das Configurações da Igreja. */
+export const cultoConfigQuery = (churchId?: string) => ({
+  queryKey: ['culto-config', churchId ?? ''] as const,
+  queryFn: () => CultoClient.getConfig(churchId),
   staleTime: 5 * 60 * 1000,
 });
