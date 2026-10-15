@@ -54,7 +54,7 @@ export const Header: React.FC<HeaderProps> = ({
               ? {
                   // Bloco centralizado na tela inteira (não no espaço ao lado do menu): não se move ao abrir/fechar o menu.
                   width: 'min(850px, calc(100vw - 36rem))',
-                  marginLeft: `calc((100vw - min(850px, calc(100vw - 36rem))) / 2 - ${pinned ? '18rem' : '0rem'})`,
+                  marginLeft: 'calc((100vw - min(850px, calc(100vw - 36rem))) / 2)',
                 }
               : undefined
           }
@@ -79,7 +79,10 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            <div className="flex flex-col min-w-0">
+            <div
+              className="flex flex-col min-w-0"
+              style={showCenterLogo ? { transform: 'translateX(calc(-1 * clamp(0px, calc((100vw - 1280px) / 2), 5rem)))' } : undefined}
+            >
               <h1 className="text-sm sm:text-lg font-bold tracking-tight text-white leading-tight truncate max-w-[220px] sm:max-w-none">
                 {user.name}
               </h1>

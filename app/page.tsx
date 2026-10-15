@@ -765,10 +765,7 @@ export default function Home() {
   // 2. Authenticated Church Workspace
   return (
     <div
-      className="min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative transition-[padding] duration-300"
-      // Menu fixo (desktop): o cabeçalho e os avisos começam depois do menu (18rem = 288 px) e vão
-      // até o fim da tela.
-      style={isSidebarPinned ? { paddingLeft: '18rem' } : undefined}
+      className="min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative"
     >
       {/* Top Header replicating user screenshot */}
       <Header
@@ -796,6 +793,7 @@ export default function Home() {
       )}
 
       {refreshErrorBanner && (
+        <div style={isSidebarPinned ? { paddingLeft: '18rem' } : undefined}>
         <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-2 flex items-center justify-between text-xs text-amber-800 animate-fadeIn">
           <div className="flex items-center gap-2">
             <AlertCircle size={15} className="text-amber-600 shrink-0" />
@@ -807,6 +805,7 @@ export default function Home() {
           >
             <X size={14} />
           </button>
+        </div>
         </div>
       )}
 
@@ -826,15 +825,19 @@ export default function Home() {
       />
 
       {/* Banner de Permissão Amigável para Notificações de Lembrete de Relatório */}
-      {user && <NotificationPermissionBanner user={user} />}
+      {user && (
+        <div style={isSidebarPinned ? { paddingLeft: '18rem' } : undefined}>
+          <NotificationPermissionBanner user={user} />
+        </div>
+      )}
 
       {/* Main Dynamic View com PullToRefresh mobile integrado */}
       <PullToRefresh onRefresh={handleRefresh} isRefreshing={isRefreshing}>
         <main
           className="flex-1 transition-[padding] duration-300"
-          // Só o conteúdo (não o cabeçalho) ganha um espaço à direita que espelha o menu aos poucos
-          // (0 até 1440 px, 288 px a partir de 1728 px): centraliza na TELA sem estreitar telas menores.
-          style={isSidebarPinned ? { paddingRight: 'clamp(0px, calc(100vw - 1440px), 18rem)' } : undefined}
+          // Só o conteúdo (o cabeçalho fica parado, o menu fica por cima dele) ganha espaço à esquerda
+          // para o menu e à direita (0 até 1440 px, 288 px a partir de 1728 px): centraliza na TELA.
+          style={isSidebarPinned ? { paddingLeft: '18rem', paddingRight: 'clamp(0px, calc(100vw - 1440px), 18rem)' } : undefined}
         >
           {activeScreen === 'feed' && (
             <FeedView
