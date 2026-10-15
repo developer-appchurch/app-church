@@ -17,6 +17,9 @@ interface HeaderProps {
   pinned?: boolean;
   /** Desktop: logo do AppChurch centralizada na barra (no celular/tablet ela fica no menu lateral). */
   showCenterLogo?: boolean;
+  /** Desktop: título e linha de apoio da tela aberta (ficam ao lado do menu lateral). */
+  title?: string;
+  subtitle?: string;
   onRefreshData?: () => void;
   isRefreshing?: boolean;
   onLogout?: () => void;
@@ -28,9 +31,59 @@ export const Header: React.FC<HeaderProps> = ({
   hideMenuButton = false,
   pinned = false,
   showCenterLogo = false,
+  title,
+  subtitle,
   onRefreshData,
   isRefreshing = false,
 }) => {
+  if (showCenterLogo) {
+    // Desktop: barra fixa de 64 px, igual com o menu aberto ou recolhido (o menu lateral fica por cima dela).
+    // Título à esquerda (ao lado do menu), logo no centro da tela, botão atualizar na extremidade direita.
+    return (
+      <header className="bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none h-16">
+        <div className="relative h-full">
+          {!hideMenuButton && (
+            <button
+              id="btn-sidebar-toggle"
+              type="button"
+              onClick={onToggleSidebar}
+              className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-white hover:bg-white/10 rounded-lg transition-colors focus:outline-none cursor-pointer"
+              aria-label="Abrir Menu Lateral"
+              title="Menu Principal"
+            >
+              <Menu size={26} className="stroke-[2.2]" />
+            </button>
+          )}
+
+          <div
+            className="absolute top-0 bottom-0 flex flex-col justify-center min-w-0"
+            style={{ left: 'calc(18rem + 1.75rem)', maxWidth: 'calc(50vw - 24rem)' }}
+          >
+            <h1 className="text-lg font-bold tracking-tight text-white leading-tight truncate">{title || user.churchName}</h1>
+            {subtitle && <div className="text-xs text-sky-200/90 font-medium leading-snug truncate">{subtitle}</div>}
+          </div>
+
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
+            <AppChurchLogo variant="light" className="h-8 w-24" />
+          </div>
+
+          {onRefreshData && (
+            <button
+              type="button"
+              onClick={onRefreshData}
+              disabled={isRefreshing}
+              className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center justify-center w-9 h-9 rounded-lg text-sky-200 hover:text-white bg-sky-500/20 hover:bg-sky-600/30 active:scale-95 border border-sky-400/30 transition-all cursor-pointer shadow-xs disabled:opacity-60"
+              title="Recarregar os dados desta tela"
+              aria-label="Recarregar os dados desta tela"
+            >
+              <RotateCw size={16} className={isRefreshing ? 'animate-spin text-sky-300' : ''} />
+            </button>
+          )}
+        </div>
+      </header>
+    );
+  }
+
   return (
     <header className="bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none">
       <div className={`${showCenterLogo ? '' : 'max-w-7xl mx-auto px-3 sm:px-6 '}py-3 relative`}>
