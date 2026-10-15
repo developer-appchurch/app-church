@@ -10,7 +10,7 @@ import {
   FileText,
   LogOut,
   X,
-  ChevronsLeft,
+  ChevronLeft,
   ChevronRight,
   Building2,
   Church,
@@ -63,6 +63,8 @@ interface SidebarProps {
   pinned?: boolean;
   /** Desktop: recolhe o menu fixo (a escolha fica salva). */
   onCollapse?: () => void;
+  /** Desktop: a logo fica centralizada no cabeçalho, então não repete no menu. */
+  hideLogo?: boolean;
   activeScreen: ActiveScreen;
   onNavigate: (screen: ActiveScreen) => void;
   user: UserProfile;
@@ -87,6 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onClose,
   pinned = false,
   onCollapse,
+  hideLogo = false,
   activeScreen,
   onNavigate,
   user,
@@ -759,23 +762,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}
         aria-label="Navegação Lateral"
       >
+        {/* Menu fixo (desktop): botão de recolher na borda direita do menu */}
+        {pinned && onCollapse && (
+          <button
+            id="btn-sidebar-collapse"
+            type="button"
+            onClick={onCollapse}
+            className="absolute top-8 -right-3.5 z-10 w-7 h-7 rounded-full bg-white text-slate-600 hover:text-slate-900 border border-slate-200 shadow-md flex items-center justify-center cursor-pointer transition hover:scale-105"
+            aria-label="Recolher menu lateral"
+            title="Recolher menu"
+          >
+            <ChevronLeft size={16} strokeWidth={2.5} />
+          </button>
+        )}
+
         {/* Fixed Header Section inside sidebar */}
         <div className="shrink-0 bg-[#04213d] text-white p-4 sm:p-5 relative overflow-hidden">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <AppChurchLogo variant="light" className="h-5 sm:h-[22px] w-14 sm:w-16" />
+          {/* Gaveta (celular/tablet ou desktop recolhido): logo (só fora do desktop) e botão de fechar.
+              Menu fixo no desktop: não há linha de topo; o card do usuário abre o menu. */}
+          {!pinned && (
+            <div className={`flex items-center mb-4 ${hideLogo ? 'justify-end' : 'justify-between'}`}>
+              {!hideLogo && (
+                <div className="flex items-center">
+                  <AppChurchLogo variant="light" className="h-5 sm:h-[22px] w-14 sm:w-16" />
+                </div>
+              )}
+              <button
+                id="btn-sidebar-close"
+                type="button"
+                onClick={onClose}
+                className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
+                aria-label="Fechar menu lateral"
+                title="Fechar menu"
+              >
+                <X size={22} />
+              </button>
             </div>
-            <button
-              id="btn-sidebar-close"
-              type="button"
-              onClick={pinned && onCollapse ? onCollapse : onClose}
-              className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
-              aria-label={pinned ? 'Recolher menu lateral' : 'Fechar menu lateral'}
-              title={pinned ? 'Recolher menu' : 'Fechar menu'}
-            >
-              {pinned ? <ChevronsLeft size={22} /> : <X size={22} />}
-            </button>
-          </div>
+          )}
 
           {/* User Profile Card in Drawer */}
           <div className="flex items-center gap-3 pt-1">
