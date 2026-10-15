@@ -765,9 +765,19 @@ export default function Home() {
   // 2. Authenticated Church Workspace
   return (
     <div
-      className={`min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative transition-[padding] duration-300 ${
-        isSidebarPinned ? 'pl-72' : ''
-      }`}
+      className="min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative transition-[padding] duration-300"
+      style={
+        isSidebarPinned
+          ? {
+              // Esquerda: largura do menu (18rem = 288 px).
+              paddingLeft: '18rem',
+              // Direita: espelha o menu aos poucos conforme a janela alarga (0 até 1440 px, 288 px a
+              // partir de 1728 px), para o conteúdo ficar centralizado na TELA sem ficar mais estreito
+              // que ~1152 px em telas menores.
+              paddingRight: 'clamp(0px, calc(100vw - 1440px), 18rem)',
+            }
+          : undefined
+      }
     >
       {/* Top Header replicating user screenshot */}
       <Header
