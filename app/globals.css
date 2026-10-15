@@ -34,3 +34,26 @@
     scrollbar-gutter: stable;
   }
 }
+
+/* Desktop: barra de rolagem fina e discreta, no tom azulado do app. */
+@media (min-width: 1280px) and (pointer: fine) {
+  html {
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: #94a3b8 #e9eff6;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #e9eff6;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #b4c0d0;
+    border-radius: 999px;
+    border: 2px solid #e9eff6;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #8fa0b6;
+  }
+}
