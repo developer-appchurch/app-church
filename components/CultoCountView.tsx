@@ -100,10 +100,12 @@ export const CultoCountView: React.FC<Props> = ({ currentUser }) => {
   // Trocar de aba não busca nada; só salvar/editar/excluir busca de novo.
   const overviewQuery = useQuery(cultoOverviewQuery(churchId));
 
-  const refreshAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['culto-overview', churchId ?? ''] });
+  // Espera a busca terminar: assim a tela nunca mostra o dado antigo logo depois de salvar
+  // (o que parecia que "não salvou" e levava a salvar de novo).
+  const refreshAll = async () => {
     // Gráficos de Indicadores: só marcados como desatualizados (buscam ao abrir a aba)
     markStale(queryClient, ['culto-indicators']);
+    await queryClient.invalidateQueries({ queryKey: ['culto-overview', churchId ?? ''] });
   };
 
   const campuses = overviewQuery.data?.campuses || [];
@@ -163,9 +165,9 @@ export const CultoCountView: React.FC<Props> = ({ currentUser }) => {
               counts={counts}
               churchId={churchId}
               editing={editing}
-              onDone={() => {
+              onDone={async () => {
                 setEditing(null);
-                refreshAll();
+                await refreshAll();
               }}
               onCancelEdit={() => setEditing(null)}
             />
@@ -211,7 +213,7 @@ const LaunchForm: React.FC<{
   counts: CultoCount[];
   churchId?: string;
   editing: CultoCount | null;
-  onDone: () => void;
+  onDone: () => Promise<void> | void;
   onCancelEdit: () => void;
 }> = ({ campuses, counts, churchId, editing, onDone, onCancelEdit }) => {
   const options = useMemo(
@@ -237,6 +239,8 @@ const LaunchForm: React.FC<{
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  // Culto+data que acabou de ser salvo nesta tela (não é preciso avisar "já existe": fomos nós)
+  const [justSavedKey, setJustSavedKey] = useState('');
 
   // Lançamento já existente para o culto e a data escolhidos (evita duplicar: abre para editar)
   const existing = useMemo(
@@ -305,14 +309,29 @@ const LaunchForm: React.FC<{
       note: form.note.trim(),
     };
     try {
+      const savedLabel = options.find((o) => o.id === scheduleId)?.label || 'culto';
       if (existing) {
         await CultoClient.updateCount(existing.id, input, churchId);
-        setSuccess(`Lançamento de ${formatDate(date)} atualizado. Total: ${total}.`);
+        setSuccess(`Atualizado: ${savedLabel} · ${formatDate(date)}. Total: ${total}.`);
       } else {
         await CultoClient.createCount(scheduleId, date, input, churchId);
-        setSuccess(`Contagem de ${formatDate(date)} salva. Total: ${total}.`);
+        setSuccess(`Salvo: ${savedLabel} · ${formatDate(date)}. Total: ${total}.`);
       }
-      onDone();
+      setJustSavedKey(`${scheduleId}|${date}`);
+
+      // Depois de lançar um culto, já deixa pronto o próximo do mesmo dia que ainda não tem contagem
+      const nextOption = existing
+        ? undefined
+        : options.find(
+            (o) =>
+              o.id !== scheduleId &&
+              o.dayOfWeek === weekdayOf(date) &&
+              !counts.some((c) => c.scheduleId === o.id && c.date === date)
+          );
+
+      // Espera a lista ser atualizada antes de liberar o botão (evita salvar de novo sem querer)
+      await onDone();
+      if (nextOption) setScheduleId(nextOption.id);
     } catch (err: any) {
       setError(err?.message || 'Não foi possível salvar.');
     } finally {
@@ -343,6 +362,7 @@ const LaunchForm: React.FC<{
             onChange={(e) => {
               setScheduleId(e.target.value);
               setSuccess('');
+              setJustSavedKey('');
             }}
             className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800"
           >
@@ -363,6 +383,7 @@ const LaunchForm: React.FC<{
               if (e.target.value) {
                 setDate(e.target.value);
                 setSuccess('');
+                setJustSavedKey('');
               }
             }}
             className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800"
@@ -370,7 +391,7 @@ const LaunchForm: React.FC<{
         </div>
       </div>
 
-      {existing && (
+      {existing && justSavedKey !== `${scheduleId}|${date}` && (
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs flex items-center justify-between gap-2">
           <span>Este culto já tem contagem nesta data. Você está editando o lançamento existente.</span>
           {editing && (
@@ -437,7 +458,7 @@ const HistoryList: React.FC<{
   error: string;
   churchId?: string;
   onEdit: (c: CultoCount) => void;
-  onChanged: () => void;
+  onChanged: () => Promise<void> | void;
 }> = ({ counts, loading, error, churchId, onEdit, onChanged }) => {
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -448,8 +469,8 @@ const HistoryList: React.FC<{
     setMessage('');
     try {
       await CultoClient.deleteCount(id, churchId);
+      await onChanged();
       setConfirmId(null);
-      onChanged();
     } catch (err: any) {
       setMessage(err?.message || 'Não foi possível excluir.');
     } finally {
@@ -551,7 +572,7 @@ const HistoryList: React.FC<{
 const ConfigPanel: React.FC<{
   campuses: CultoCampus[];
   churchId?: string;
-  onChanged: () => void;
+  onChanged: () => Promise<void> | void;
 }> = ({ campuses, churchId, onChanged }) => {
   const [newCampus, setNewCampus] = useState('');
   const [error, setError] = useState('');
@@ -562,7 +583,9 @@ const ConfigPanel: React.FC<{
     setError('');
     try {
       await fn();
-      onChanged();
+      // Espera a lista atualizar antes de fechar o formulário: senão a linha mostra por um
+      // instante o valor antigo e parece que a alteração não foi salva.
+      await onChanged();
       return true;
     } catch (err: any) {
       setError(err?.message || 'Não foi possível salvar.');
