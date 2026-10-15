@@ -766,18 +766,9 @@ export default function Home() {
   return (
     <div
       className="min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative transition-[padding] duration-300"
-      style={
-        isSidebarPinned
-          ? {
-              // Esquerda: largura do menu (18rem = 288 px).
-              paddingLeft: '18rem',
-              // Direita: espelha o menu aos poucos conforme a janela alarga (0 até 1440 px, 288 px a
-              // partir de 1728 px), para o conteúdo ficar centralizado na TELA sem ficar mais estreito
-              // que ~1152 px em telas menores.
-              paddingRight: 'clamp(0px, calc(100vw - 1440px), 18rem)',
-            }
-          : undefined
-      }
+      // Menu fixo (desktop): o cabeçalho e os avisos começam depois do menu (18rem = 288 px) e vão
+      // até o fim da tela.
+      style={isSidebarPinned ? { paddingLeft: '18rem' } : undefined}
     >
       {/* Top Header replicating user screenshot */}
       <Header
@@ -838,7 +829,12 @@ export default function Home() {
 
       {/* Main Dynamic View com PullToRefresh mobile integrado */}
       <PullToRefresh onRefresh={handleRefresh} isRefreshing={isRefreshing}>
-        <main className="flex-1">
+        <main
+          className="flex-1 transition-[padding] duration-300"
+          // Só o conteúdo (não o cabeçalho) ganha um espaço à direita que espelha o menu aos poucos
+          // (0 até 1440 px, 288 px a partir de 1728 px): centraliza na TELA sem estreitar telas menores.
+          style={isSidebarPinned ? { paddingRight: 'clamp(0px, calc(100vw - 1440px), 18rem)' } : undefined}
+        >
           {activeScreen === 'feed' && (
             <FeedView
               posts={posts}
