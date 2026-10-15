@@ -63,6 +63,8 @@ interface SidebarProps {
   pinned?: boolean;
   /** Desktop: recolhe o menu fixo (a escolha fica salva). */
   onCollapse?: () => void;
+  /** Desktop: a logo fica centralizada no cabeçalho, então não repete no menu. */
+  hideLogo?: boolean;
   activeScreen: ActiveScreen;
   onNavigate: (screen: ActiveScreen) => void;
   user: UserProfile;
@@ -87,6 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onClose,
   pinned = false,
   onCollapse,
+  hideLogo = false,
   activeScreen,
   onNavigate,
   user,
@@ -762,9 +765,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {/* Fixed Header Section inside sidebar */}
         <div className="shrink-0 bg-[#04213d] text-white p-4 sm:p-5 relative overflow-hidden">
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center">
-              <AppChurchLogo variant="light" className="h-5 sm:h-[22px] w-14 sm:w-16" />
-            </div>
+            {!hideLogo ? (
+              <div className="flex items-center">
+                <AppChurchLogo variant="light" className="h-5 sm:h-[22px] w-14 sm:w-16" />
+              </div>
+            ) : (
+              <span className="text-xs font-bold tracking-wide text-sky-200/90 uppercase">Menu</span>
+            )}
             <button
               id="btn-sidebar-close"
               type="button"

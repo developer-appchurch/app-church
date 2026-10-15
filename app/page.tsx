@@ -787,6 +787,7 @@ export default function Home() {
         onSelectCell={setSelectedCellId}
         onToggleSidebar={() => (isDesktop ? setSidebarCollapsed(false) : setIsSidebarOpen(true))}
         hideMenuButton={isSidebarPinned}
+        showCenterLogo={isDesktop}
         onRefreshData={handleRefresh}
         isRefreshing={isRefreshing}
         onLogout={handleLogout}
@@ -822,6 +823,7 @@ export default function Home() {
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         pinned={isSidebarPinned}
+        hideLogo={isDesktop}
         onCollapse={() => setSidebarCollapsed(true)}
         activeScreen={activeScreen}
         onNavigate={(screen) => setActiveScreen(screen)}

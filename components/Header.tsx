@@ -3,6 +3,7 @@
 import React from 'react';
 import { Menu, RotateCw } from 'lucide-react';
 import { UserProfile, CellGroup } from '../types';
+import { AppChurchLogo } from './AppChurchLogo';
 
 interface HeaderProps {
   user: UserProfile;
@@ -12,6 +13,8 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   /** Desktop com menu fixo: o botão de menu some (o menu já está visível). */
   hideMenuButton?: boolean;
+  /** Desktop: logo do AppChurch centralizada na barra (no celular/tablet ela fica no menu lateral). */
+  showCenterLogo?: boolean;
   onRefreshData?: () => void;
   isRefreshing?: boolean;
   onLogout?: () => void;
@@ -21,12 +24,18 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   onToggleSidebar,
   hideMenuButton = false,
+  showCenterLogo = false,
   onRefreshData,
   isRefreshing = false,
 }) => {
   return (
     <header className="bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 relative">
+        {showCenterLogo && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
+            <AppChurchLogo variant="light" className="h-9 w-24" />
+          </div>
+        )}
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           {/* Left section: Hamburger + User Info */}
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
