@@ -11,6 +11,8 @@ interface HeaderProps {
   selectedCellId?: string;
   onSelectCell?: (cellId: string) => void;
   onToggleSidebar: () => void;
+  /** Desktop com menu fixo: o botão de menu some (o menu já está visível). */
+  hideMenuButton?: boolean;
   /** Desktop: logo do AppChurch centralizada na barra (no celular/tablet ela fica no menu lateral). */
   showCenterLogo?: boolean;
   onRefreshData?: () => void;
@@ -21,27 +23,24 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   user,
   onToggleSidebar,
+  hideMenuButton = false,
   showCenterLogo = false,
   onRefreshData,
   isRefreshing = false,
 }) => {
   return (
-    <header
-      className={`bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none ${showCenterLogo ? 'h-16' : ''}`}
-    >
-      {/* Desktop: altura fixa (64 px) — o menu lateral começa logo abaixo e o cabeçalho nunca muda de lugar */}
-      <div
-        className={`max-w-7xl mx-auto px-3 sm:px-6 relative ${showCenterLogo ? 'h-full flex items-center' : 'py-3'}`}
-      >
+    <header className="bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none">
+      <div className={`${showCenterLogo ? '' : 'max-w-7xl mx-auto '}px-3 sm:px-6 py-3 relative`}>
         {showCenterLogo && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
             <AppChurchLogo variant="light" className="h-8 w-24" />
           </div>
         )}
-        <div className={`flex items-center justify-between gap-2 sm:gap-4 ${showCenterLogo ? 'w-full' : ''}`}>
+        <div className="flex items-center justify-between gap-2 sm:gap-4">
           {/* Left section: Hamburger + User Info */}
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-            <button
+            {!hideMenuButton && (
+              <button
                 id="btn-sidebar-toggle"
                 type="button"
                 onClick={onToggleSidebar}
@@ -51,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Menu size={26} className="stroke-[2.2]" />
               </button>
+            )}
 
             <div className="flex flex-col min-w-0">
               <h1 className="text-sm sm:text-lg font-bold tracking-tight text-white leading-tight truncate max-w-[220px] sm:max-w-none">

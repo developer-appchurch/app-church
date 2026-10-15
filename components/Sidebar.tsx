@@ -755,11 +755,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Drawer panel with responsive height, scrollable navigation, and fixed header/footer */}
       <aside
         id="app-sidebar-drawer"
-        className={`fixed left-0 bg-white flex flex-col transform transition-transform duration-300 ease-in-out select-none ${
+        className={`fixed top-0 left-0 h-full bg-white flex flex-col transform transition-transform duration-300 ease-in-out select-none ${
           pinned
-            ? // Menu fixo (desktop): começa logo abaixo do cabeçalho (64 px) e vai até o fim da tela
-              'top-16 bottom-0 w-72 z-30 border-r border-slate-200 shadow-md translate-x-0'
-            : `top-0 h-full w-80 max-w-[85vw] sm:max-w-sm z-50 shadow-2xl ${isOpen ? 'translate-x-0' : '-translate-x-full'}`
+            ? 'w-72 z-30 border-r border-slate-200 shadow-md translate-x-0'
+            : `w-80 max-w-[85vw] sm:max-w-sm z-50 shadow-2xl ${isOpen ? 'translate-x-0' : '-translate-x-full'}`
         }`}
         aria-label="Navegação Lateral"
       >
