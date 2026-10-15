@@ -778,6 +778,7 @@ export default function Home() {
         onSelectCell={setSelectedCellId}
         onToggleSidebar={() => (isDesktop ? setSidebarCollapsed(false) : setIsSidebarOpen(true))}
         hideMenuButton={isSidebarPinned}
+        pinned={isSidebarPinned}
         showCenterLogo={isDesktop}
         onRefreshData={handleRefresh}
         isRefreshing={isRefreshing}
