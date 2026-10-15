@@ -799,7 +799,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
 
         {/* Post Creation Box - Restrito por liderança */}
         {canUserPost && (
-          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 xl:border-slate-300 shadow-2xs xl:shadow-md mb-4">
+          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-300 shadow-md mb-4">
             <div className="flex items-center gap-3 mb-3">
               {/* Miniatura do Avatar do Autor (~96px) */}
               <div className="w-10 h-10 rounded-full bg-slate-200 overflow-hidden border border-slate-300 shrink-0 relative">
@@ -937,7 +937,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                   type="submit"
                   id="btn-publish-post"
                   disabled={isOptimizingImage || (!newPostCaption.trim() && !previewDataUrl)}
-                  className="px-3.5 sm:px-5 py-1.5 bg-[#052447] xl:bg-sky-600 hover:bg-[#073366] xl:hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-xs disabled:opacity-50 transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                  className="px-3.5 sm:px-5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-xl shadow-xs disabled:opacity-50 transition flex items-center gap-1.5 cursor-pointer shrink-0"
                 >
                   <Send size={13} />
                   <span>Publicar</span>
@@ -997,7 +997,7 @@ export const FeedView: React.FC<FeedViewProps> = ({
                   <article
                     key={post.id}
                     id={`feed-post-${post.id}`}
-                    className={`bg-white rounded-2xl border xl:shadow-md shadow-2xs overflow-hidden transition ${
+                    className={`bg-white rounded-2xl border shadow-md overflow-hidden transition ${
                       post.isPending
                         ? 'border-sky-300 ring-2 ring-sky-100 opacity-90'
                         : post.isError
