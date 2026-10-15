@@ -56,6 +56,11 @@ const TadelPresenceView = dynamic(
   { loading: ViewLoading, ssr: false }
 );
 
+const CultoCountView = dynamic(
+  () => import('../components/CultoCountView').then((m) => m.CultoCountView),
+  { loading: ViewLoading, ssr: false }
+);
+
 const LeadershipTrackModal = dynamic(
   () => import('../components/LeadershipTrackModal').then((m) => m.LeadershipTrackModal),
   { ssr: false }
@@ -982,6 +987,10 @@ export default function Home() {
           )}
 
           {activeScreen === 'tadel' && user && <TadelPresenceView currentUser={user} />}
+
+          {activeScreen === 'culto_count' && user && (
+            <CultoCountView currentUser={user} onBack={() => setActiveScreen('feed')} />
+          )}
 
           {activeScreen === 'church_indicators' && user && (
             <ChurchIndicatorsView currentUser={user} onBack={() => setActiveScreen('feed')} />

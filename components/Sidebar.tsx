@@ -12,6 +12,7 @@ import {
   X,
   ChevronRight,
   Building2,
+  Church,
   Layers,
   Network,
   Camera,
@@ -306,6 +307,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     userRoleNorm.includes('pastor') ||
     AppChurchService.hasPermission(user, 'church:admin', userPermissions) ||
     AppChurchService.hasPermission(user, 'permissions:manage', userPermissions);
+
+  // Gestor de Culto: lança a contagem dos cultos (permissão especial, independe de cargo)
+  const canManageCultoCount =
+    isSystemAdmin ||
+    userRoleNorm.includes('pastor') ||
+    AppChurchService.hasPermission(user, 'church:admin', userPermissions) ||
+    AppChurchService.hasPermission(user, 'culto:gerenciar', userPermissions);
 
   const canAccessChurchSettings =
     isSystemAdmin ||
@@ -664,6 +672,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             icon: Compass,
           },
         ]),
+    ...(canManageCultoCount
+      ? [
+          {
+            id: 'culto_count' as ActiveScreen,
+            label: 'Contagem de Culto',
+            sublabel: 'Lançar pessoas, conversões & campus',
+            icon: Church,
+          },
+        ]
+      : []),
     ...(canManagePermissions
       ? [
           {
