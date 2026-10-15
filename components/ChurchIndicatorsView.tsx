@@ -17,6 +17,7 @@ import {
 import {
   Award,
   BarChart3,
+  Church,
   ClipboardCheck,
   Network,
   Flame,
@@ -32,6 +33,7 @@ import { AppChurchService } from '../lib/supabase';
 import { THRESHOLD_COLORS, colorForPercent } from '@/lib/trackColors';
 import { SupervisionIndicatorsTab, supervisionQuery } from './SupervisionIndicatorsTab';
 import { OrgChartTab } from './OrgChartTab';
+import { CultoIndicatorsTab, cultoIndicatorsQuery } from './CultoIndicatorsTab';
 
 interface ChurchIndicatorsViewProps {
   currentUser: UserProfile;
@@ -40,11 +42,12 @@ interface ChurchIndicatorsViewProps {
 
 type ScopeTab = 'church' | 'area' | 'sector';
 type ViewMode = 'charts' | 'compare';
-type IndicatorsTab = 'track' | 'supervision' | 'orgchart';
+type IndicatorsTab = 'track' | 'supervision' | 'orgchart' | 'culto';
 
 const TABS: { id: IndicatorsTab; label: string; icon: React.ElementType }[] = [
   { id: 'orgchart', label: 'Organograma', icon: Network },
   { id: 'supervision', label: 'Supervisão', icon: ClipboardCheck },
+  { id: 'culto', label: 'Cultos', icon: Church },
   { id: 'track', label: 'Trilho de Liderança', icon: Award },
 ];
 
@@ -76,6 +79,9 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
     if (tab === 'supervision' && churchId) {
       // não refaz a busca se o cache (5 min) ainda é válido
       queryClient.prefetchQuery(supervisionQuery(churchId, currentUser.id));
+    }
+    if (tab === 'culto' && churchId) {
+      queryClient.prefetchQuery(cultoIndicatorsQuery(churchId, currentUser.id));
     }
   };
 
@@ -249,6 +255,10 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
       {activeTab === 'supervision' ? (
         <div className="max-w-6xl mx-auto space-y-3">
           <SupervisionIndicatorsTab currentUser={currentUser} />
+        </div>
+      ) : activeTab === 'culto' ? (
+        <div className="max-w-6xl mx-auto space-y-3">
+          <CultoIndicatorsTab currentUser={currentUser} />
         </div>
       ) : activeTab === 'orgchart' ? (
         <div className="max-w-6xl mx-auto space-y-3">

@@ -305,6 +305,7 @@ export type ActiveScreen =
   | 'church_settings'
   | 'church_indicators'
   | 'tadel'
+  | 'culto_count'
   | 'rankings';
 
 export interface CelulaCardItem {
