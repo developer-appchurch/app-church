@@ -30,10 +30,10 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   return (
     <header className="bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 py-3 relative">
+      <div className={`${showCenterLogo ? '' : 'max-w-7xl mx-auto '}px-3 sm:px-6 py-3 relative`}>
         {showCenterLogo && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
-            <AppChurchLogo variant="light" className="h-9 w-24" />
+            <AppChurchLogo variant="light" className="h-8 w-24" />
           </div>
         )}
         <div className="flex items-center justify-between gap-2 sm:gap-4">
