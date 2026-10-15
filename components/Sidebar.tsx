@@ -10,6 +10,7 @@ import {
   FileText,
   LogOut,
   X,
+  ChevronsLeft,
   ChevronRight,
   Building2,
   Church,
@@ -58,6 +59,10 @@ import { tadelStatusQueryOptions } from '../lib/tadelClient';
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Desktop: menu fixo na lateral (sem fundo escurecido e sem fechar ao navegar). */
+  pinned?: boolean;
+  /** Desktop: recolhe o menu fixo (a escolha fica salva). */
+  onCollapse?: () => void;
   activeScreen: ActiveScreen;
   onNavigate: (screen: ActiveScreen) => void;
   user: UserProfile;
@@ -80,6 +85,8 @@ const SUGGESTED_AVATARS = [
 export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   onClose,
+  pinned = false,
+  onCollapse,
   activeScreen,
   onNavigate,
   user,
@@ -721,6 +728,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
       : []),
   ];
 
+  // Com o menu fixo (desktop) ele continua aberto ao navegar; na gaveta (celular/tablet) fecha.
+  const closeAfterNavigate = () => {
+    if (!pinned) onClose();
+  };
+
   const handleLogoutClick = () => {
     onClose();
     onLogout();
@@ -729,7 +741,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <>
       {/* Backdrop overlay */}
-      {isOpen && (
+      {isOpen && !pinned && (
         <div
           className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 transition-opacity animate-in fade-in"
           onClick={onClose}
@@ -740,8 +752,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Drawer panel with responsive height, scrollable navigation, and fixed header/footer */}
       <aside
         id="app-sidebar-drawer"
-        className={`fixed top-0 left-0 h-full w-80 max-w-[85vw] sm:max-w-sm bg-white z-50 shadow-2xl flex flex-col transform transition-transform duration-300 ease-in-out select-none ${
-          isOpen ? 'translate-x-0' : '-translate-x-full'
+        className={`fixed top-0 left-0 h-full bg-white flex flex-col transform transition-transform duration-300 ease-in-out select-none ${
+          pinned
+            ? 'w-72 z-30 border-r border-slate-200 shadow-md translate-x-0'
+            : `w-80 max-w-[85vw] sm:max-w-sm z-50 shadow-2xl ${isOpen ? 'translate-x-0' : '-translate-x-full'}`
         }`}
         aria-label="Navegação Lateral"
       >
@@ -754,11 +768,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               id="btn-sidebar-close"
               type="button"
-              onClick={onClose}
+              onClick={pinned && onCollapse ? onCollapse : onClose}
               className="p-2 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition cursor-pointer"
-              aria-label="Fechar menu lateral"
+              aria-label={pinned ? 'Recolher menu lateral' : 'Fechar menu lateral'}
+              title={pinned ? 'Recolher menu' : 'Fechar menu'}
             >
-              <X size={22} />
+              {pinned ? <ChevronsLeft size={22} /> : <X size={22} />}
             </button>
           </div>
 
@@ -820,7 +835,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 id="btn-sidebar-new-cell"
                 onClick={() => {
                   handleOpenNewCellModal();
-                  onClose();
+                  closeAfterNavigate();
                 }}
                 className="w-full flex items-center gap-3 px-3.5 py-2.5 sm:py-3 rounded-xl text-left transition-all cursor-pointer border-2 border-dashed border-sky-300 bg-sky-50 hover:bg-sky-100 hover:border-sky-400 mb-1.5"
               >
@@ -850,7 +865,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   onFocus={() => handlePrefetchItem(item.id)}
                   onClick={() => {
                     onNavigate(item.id);
-                    onClose();
+                    closeAfterNavigate();
                   }}
                   className={`w-full flex items-center justify-between px-3.5 py-2.5 sm:py-3 rounded-xl text-left transition-all cursor-pointer ${
                     isActive

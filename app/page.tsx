@@ -19,6 +19,7 @@ import { AppChurchLogo } from '../components/AppChurchLogo';
 import { LoginScreen } from '../components/LoginScreen';
 import { Header } from '../components/Header';
 import { Sidebar } from '../components/Sidebar';
+import { useDesktopSidebar } from '../hooks/useDesktopSidebar';
 import { ConnectionBadge } from '../components/ConnectionBadge';
 import { PullToRefresh } from '../components/PullToRefresh';
 import { Plus, AlertCircle, Layers, X, CheckCircle2, Loader2 } from 'lucide-react';
@@ -132,6 +133,8 @@ export default function Home() {
   // Tela inicial após login direcionada para Feed de Notícias
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>('feed');
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  // Desktop (>= 1280 px com mouse): menu lateral fixo; celular e tablet seguem com a gaveta
+  const { isDesktop, setCollapsed: setSidebarCollapsed, pinned: isSidebarPinned } = useDesktopSidebar();
 
   // Logged in user profile (contains churchId, churchName, role, sector, etc.)
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -761,14 +764,19 @@ export default function Home() {
 
   // 2. Authenticated Church Workspace
   return (
-    <div className="min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative">
+    <div
+      className={`min-h-screen bg-[#e9eff6] flex flex-col font-sans selection:bg-sky-900 selection:text-white relative transition-[padding] duration-300 ${
+        isSidebarPinned ? 'pl-72' : ''
+      }`}
+    >
       {/* Top Header replicating user screenshot */}
       <Header
         user={user}
         cells={effectiveCells}
         selectedCellId={selectedCellId}
         onSelectCell={setSelectedCellId}
-        onToggleSidebar={() => setIsSidebarOpen(true)}
+        onToggleSidebar={() => (isDesktop ? setSidebarCollapsed(false) : setIsSidebarOpen(true))}
+        hideMenuButton={isSidebarPinned}
         onRefreshData={handleRefresh}
         isRefreshing={isRefreshing}
         onLogout={handleLogout}
@@ -803,6 +811,8 @@ export default function Home() {
       <Sidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
+        pinned={isSidebarPinned}
+        onCollapse={() => setSidebarCollapsed(true)}
         activeScreen={activeScreen}
         onNavigate={(screen) => setActiveScreen(screen)}
         user={user}

@@ -10,6 +10,8 @@ interface HeaderProps {
   selectedCellId?: string;
   onSelectCell?: (cellId: string) => void;
   onToggleSidebar: () => void;
+  /** Desktop com menu fixo: o botão de menu some (o menu já está visível). */
+  hideMenuButton?: boolean;
   onRefreshData?: () => void;
   isRefreshing?: boolean;
   onLogout?: () => void;
@@ -18,6 +20,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   user,
   onToggleSidebar,
+  hideMenuButton = false,
   onRefreshData,
   isRefreshing = false,
 }) => {
@@ -27,16 +30,18 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center justify-between gap-2 sm:gap-4">
           {/* Left section: Hamburger + User Info */}
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-            <button
-              id="btn-sidebar-toggle"
-              type="button"
-              onClick={onToggleSidebar}
-              className="p-1.5 sm:p-2 text-white hover:bg-white/10 rounded-lg transition-colors focus:outline-none cursor-pointer shrink-0"
-              aria-label="Abrir Menu Lateral"
-              title="Menu Principal"
-            >
-              <Menu size={26} className="stroke-[2.2]" />
-            </button>
+            {!hideMenuButton && (
+              <button
+                id="btn-sidebar-toggle"
+                type="button"
+                onClick={onToggleSidebar}
+                className="p-1.5 sm:p-2 text-white hover:bg-white/10 rounded-lg transition-colors focus:outline-none cursor-pointer shrink-0"
+                aria-label="Abrir Menu Lateral"
+                title="Menu Principal"
+              >
+                <Menu size={26} className="stroke-[2.2]" />
+              </button>
+            )}
 
             <div className="flex flex-col min-w-0">
               <h1 className="text-sm sm:text-lg font-bold tracking-tight text-white leading-tight truncate max-w-[220px] sm:max-w-none">
