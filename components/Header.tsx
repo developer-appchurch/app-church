@@ -13,6 +13,8 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   /** Desktop com menu fixo: o botão de menu some (o menu já está visível). */
   hideMenuButton?: boolean;
+  /** Desktop com menu fixo: o cabeçalho começa depois do menu (18rem) e o conteúdo é posicionado pela tela inteira. */
+  pinned?: boolean;
   /** Desktop: logo do AppChurch centralizada na barra (no celular/tablet ela fica no menu lateral). */
   showCenterLogo?: boolean;
   onRefreshData?: () => void;
@@ -24,22 +26,47 @@ export const Header: React.FC<HeaderProps> = ({
   user,
   onToggleSidebar,
   hideMenuButton = false,
+  pinned = false,
   showCenterLogo = false,
   onRefreshData,
   isRefreshing = false,
 }) => {
   return (
     <header className="bg-[#04213d] text-white shadow-md sticky top-0 z-30 select-none">
-      <div className={`${showCenterLogo ? '' : 'max-w-7xl mx-auto '}px-3 sm:px-6 py-3 relative`}>
-        {showCenterLogo && (
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
-            <AppChurchLogo variant="light" className="h-8 w-24" />
-          </div>
+      <div className={`${showCenterLogo ? '' : 'max-w-7xl mx-auto px-3 sm:px-6 '}py-3 relative`}>
+        {/* Desktop: botão de menu fixo no canto esquerdo (só aparece com o menu recolhido) */}
+        {showCenterLogo && !hideMenuButton && (
+          <button
+            id="btn-sidebar-toggle"
+            type="button"
+            onClick={onToggleSidebar}
+            className="absolute left-4 top-1/2 -translate-y-1/2 p-2 text-white hover:bg-white/10 rounded-lg transition-colors focus:outline-none cursor-pointer"
+            aria-label="Abrir Menu Lateral"
+            title="Menu Principal"
+          >
+            <Menu size={26} className="stroke-[2.2]" />
+          </button>
         )}
-        <div className="flex items-center justify-between gap-2 sm:gap-4">
+        <div
+          className={`relative flex items-center justify-between gap-2 sm:gap-4 ${showCenterLogo ? '' : ''}`}
+          style={
+            showCenterLogo
+              ? {
+                  // Bloco centralizado na tela inteira (não no espaço ao lado do menu): não se move ao abrir/fechar o menu.
+                  width: 'min(850px, calc(100vw - 36rem))',
+                  marginLeft: `calc((100vw - min(850px, calc(100vw - 36rem))) / 2 - ${pinned ? '18rem' : '0rem'})`,
+                }
+              : undefined
+          }
+        >
+          {showCenterLogo && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
+              <AppChurchLogo variant="light" className="h-8 w-24" />
+            </div>
+          )}
           {/* Left section: Hamburger + User Info */}
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-            {!hideMenuButton && (
+            {!hideMenuButton && !showCenterLogo && (
               <button
                 id="btn-sidebar-toggle"
                 type="button"
