@@ -860,17 +860,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   handleOpenNewCellModal();
                   closeAfterNavigate();
                 }}
-                className="w-full flex items-center gap-3 px-3.5 py-2.5 sm:py-3 rounded-xl text-left transition-all cursor-pointer border-2 border-dashed border-sky-300 bg-sky-50 hover:bg-sky-100 hover:border-sky-400 mb-1.5"
+                className={`w-full flex items-center gap-3 px-3.5 py-2.5 sm:py-3 rounded-xl text-left transition-all cursor-pointer border-2 mb-1.5 ${
+                  pinned
+                    ? 'border-[#04213d] bg-transparent hover:bg-slate-50'
+                    : 'border-dashed border-sky-300 bg-sky-50 hover:bg-sky-100 hover:border-sky-400'
+                }`}
               >
-                <div className="w-8 h-8 rounded-lg bg-sky-600 text-white flex items-center justify-center shrink-0">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${pinned ? 'border-2 border-[#04213d] text-[#04213d]' : 'bg-sky-600 text-white'}`}>
                   <Plus size={18} />
                 </div>
                 <div className="min-w-0">
-                  <div className="text-sm font-bold text-sky-950 truncate">
+                  <div className={`text-sm font-bold truncate ${pinned ? 'text-[#04213d]' : 'text-sky-950'}`}>
                     Novo(a) {leafLevel?.name || 'Célula'}
                   </div>
-                  <div className="text-[11px] text-sky-700 truncate">
-                    Cadastro rápido, sem sair da tela atual
+                  <div className={`text-[11px] truncate ${pinned ? 'text-slate-600' : 'text-sky-700'}`}>
+                    {pinned ? 'Cadastro rápido na tela' : 'Cadastro rápido, sem sair da tela atual'}
                   </div>
                 </div>
               </button>

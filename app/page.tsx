@@ -122,6 +122,26 @@ const NotificationPermissionBanner = dynamic(
   { ssr: false }
 );
 
+// Título e linha de apoio mostrados no cabeçalho (desktop) para cada tela.
+const SCREEN_TITLES: Partial<Record<ActiveScreen, [string, string]>> = {
+  feed: ['Feed de Notícias', 'Momentos, fotos e avisos gerais'],
+  my_cell: ['Minha Célula', 'Membros, frequência e trilho'],
+  our_cells: ['Nossas Células', 'Galeria e busca de todas as células'],
+  multiply_cell: ['Multiplicar Célula', 'Multiplique em poucos passos'],
+  leadership_track: ['Trilho de Liderança', 'Visão geral do discipulado'],
+  reports: ['Relatório Semanal', 'Lançar relatório de presença'],
+  tadel: ['Presença no TADEL', 'Registro semanal do líder'],
+  member_pool: ['Nossos Membros', 'Gestão geral e vínculo de membros'],
+  rankings: ['Conquistas', 'Fiel no Pouco e Guardiões da Constância'],
+  church_indicators: ['Indicadores da Igreja', 'Trilho de liderança em gráficos'],
+  hierarchy_units: ['Níveis Organizacionais', 'Cadastro por nível'],
+  church_overview: ['Visão Geral da Igreja', 'Organograma e árvore hierárquica'],
+  permissions_manage: ['Gestão de Permissões', 'Permissões especiais por membro'],
+  church_settings: ['Configurações da Igreja', 'Trilho, setores, bairros e logins'],
+  culto_count: ['Contagem de Culto', 'Lançar pessoas, conversões e campus'],
+  register_church: ['Cadastrar Igreja', 'Nova congregação e hierarquia'],
+};
+
 export default function Home() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -777,6 +797,8 @@ export default function Home() {
         hideMenuButton={isSidebarPinned}
         pinned={isSidebarPinned}
         showCenterLogo={isDesktop}
+        title={SCREEN_TITLES[activeScreen]?.[0]}
+        subtitle={SCREEN_TITLES[activeScreen]?.[1]}
         onRefreshData={handleRefresh}
         isRefreshing={isRefreshing}
         onLogout={handleLogout}
