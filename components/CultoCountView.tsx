@@ -18,7 +18,8 @@ import {
   Power,
 } from 'lucide-react';
 import { UserProfile } from '@/types';
-import { CultoClient, CultoCampus, CultoCount, CultoSchedule } from '@/lib/cultoClient';
+import { CultoClient, CultoCampus, CultoCount, CultoSchedule, cultoOverviewQuery } from '@/lib/cultoClient';
+import { markStale } from '@/lib/queryCache';
 
 /**
  * Contagem de Cultos — lançamento e cadastro de campus/horários.
@@ -71,12 +72,6 @@ function todayLocal(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
 }
 
-function shiftDays(date: string, days: number): string {
-  const d = new Date(`${date}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 function weekdayOf(date: string): number {
   return new Date(`${date}T00:00:00Z`).getUTCDay();
 }
@@ -101,27 +96,18 @@ export const CultoCountView: React.FC<Props> = ({ currentUser }) => {
   const [tab, setTab] = useState<Tab>('launch');
   const [editing, setEditing] = useState<CultoCount | null>(null);
 
-  const configQuery = useQuery({
-    queryKey: ['culto-config', churchId],
-    queryFn: () => CultoClient.getConfig(churchId),
-    staleTime: 5 * 60 * 1000,
-  });
+  // UMA consulta (uma ida ao servidor) traz campus, horários e lançamentos recentes.
+  // Trocar de aba não busca nada; só salvar/editar/excluir busca de novo.
+  const overviewQuery = useQuery(cultoOverviewQuery(churchId));
 
-  const countsQuery = useQuery({
-    queryKey: ['culto-counts', churchId],
-    queryFn: () => CultoClient.getCounts({ from: shiftDays(todayLocal(), -180), limit: 400, churchId }),
-    staleTime: 60 * 1000,
-  });
-
-  const refreshCounts = () => {
-    queryClient.invalidateQueries({ queryKey: ['culto-counts', churchId] });
-    // Gráficos de Indicadores (fase seguinte) leem estes dados
-    queryClient.invalidateQueries({ queryKey: ['culto-indicators'] });
+  const refreshAll = () => {
+    queryClient.invalidateQueries({ queryKey: ['culto-overview', churchId ?? ''] });
+    // Gráficos de Indicadores: só marcados como desatualizados (buscam ao abrir a aba)
+    markStale(queryClient, ['culto-indicators']);
   };
-  const refreshConfig = () => queryClient.invalidateQueries({ queryKey: ['culto-config', churchId] });
 
-  const campuses = configQuery.data || [];
-  const counts = countsQuery.data || [];
+  const campuses = overviewQuery.data?.campuses || [];
+  const counts = overviewQuery.data?.counts || [];
   const hasSchedules = campuses.some((c) => c.active && c.schedules.some((s) => s.active));
 
   return (
@@ -159,14 +145,14 @@ export const CultoCountView: React.FC<Props> = ({ currentUser }) => {
           })}
         </div>
 
-        {configQuery.isError && (
+        {overviewQuery.isError && (
           <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-center gap-2">
             <AlertCircle size={16} className="shrink-0" />
-            <span>{(configQuery.error as Error)?.message || 'Não foi possível carregar os cultos.'}</span>
+            <span>{(overviewQuery.error as Error)?.message || 'Não foi possível carregar os cultos.'}</span>
           </div>
         )}
 
-        {configQuery.isLoading ? (
+        {overviewQuery.isLoading ? (
           <div className="bg-white rounded-2xl border border-slate-200 p-10 flex justify-center text-slate-400">
             <Loader2 className="animate-spin" size={22} />
           </div>
@@ -179,7 +165,7 @@ export const CultoCountView: React.FC<Props> = ({ currentUser }) => {
               editing={editing}
               onDone={() => {
                 setEditing(null);
-                refreshCounts();
+                refreshAll();
               }}
               onCancelEdit={() => setEditing(null)}
             />
@@ -201,17 +187,17 @@ export const CultoCountView: React.FC<Props> = ({ currentUser }) => {
         ) : tab === 'history' ? (
           <HistoryList
             counts={counts}
-            loading={countsQuery.isLoading}
-            error={countsQuery.isError ? (countsQuery.error as Error)?.message : ''}
+            loading={false}
+            error=""
             churchId={churchId}
             onEdit={(c) => {
               setEditing(c);
               setTab('launch');
             }}
-            onChanged={refreshCounts}
+            onChanged={refreshAll}
           />
         ) : (
-          <ConfigPanel campuses={campuses} churchId={churchId} onChanged={refreshConfig} />
+          <ConfigPanel campuses={campuses} churchId={churchId} onChanged={refreshAll} />
         )}
       </div>
     </div>

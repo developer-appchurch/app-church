@@ -4,7 +4,6 @@ import {
   friendlyDbError,
   isValidDate,
   isValidUuid,
-  mapCount,
   parseCounts,
   parseNote,
   todayInSaoPaulo,
@@ -12,65 +11,15 @@ import {
 
 /**
  * Contagens de culto (uma por horário e data).
- * GET    -> ?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=  lista (mais recentes primeiro)
  * POST   -> { scheduleId, date, adults, children, volunteers, conversions, reconciliations, guests, note? }
  * PATCH  -> { id, adults?, children?, ... , note? }   (horário e data não mudam: exclua e lance de novo)
  * DELETE -> ?id=...
+ * (A leitura é feita por GET /api/culto/overview.)
  * Exige a permissão 'culto:gerenciar' (ou church:admin / Pastor / Administrador).
  * Total = adultos + crianças (calculado pelo banco); voluntários ficam à parte.
  */
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
-
-export async function GET(req: NextRequest) {
-  try {
-    const sp = req.nextUrl.searchParams;
-    const auth = await authorizeCulto(req, sp.get('churchId'));
-    if (auth instanceof NextResponse) return auth;
-    const { supabase, churchId } = auth;
-
-    const from = sp.get('from');
-    const to = sp.get('to');
-    if ((from && !isValidDate(from)) || (to && !isValidDate(to))) {
-      return NextResponse.json({ error: 'Período inválido.' }, { status: 400 });
-    }
-    const limit = Math.min(Math.max(Number(sp.get('limit')) || 100, 1), 500);
-
-    let query = supabase
-      .from('culto_contagens')
-      .select(
-        'id, horario_id, data_culto, adultos, criancas, voluntarios, conversoes, reconciliacoes, convidados, total, observacao, atualizado_em'
-      )
-      .eq('igreja_id', churchId)
-      .order('data_culto', { ascending: false })
-      .limit(limit);
-    if (from) query = query.gte('data_culto', from);
-    if (to) query = query.lte('data_culto', to);
-
-    const [countsRes, schedRes, campusRes] = await Promise.all([
-      query,
-      supabase.from('culto_horarios').select('id, campus_id, nome').eq('igreja_id', churchId),
-      supabase.from('campus').select('id, nome').eq('igreja_id', churchId),
-    ]);
-    if (countsRes.error) throw countsRes.error;
-    if (schedRes.error) throw schedRes.error;
-    if (campusRes.error) throw campusRes.error;
-
-    const scheduleById = new Map(
-      (schedRes.data || []).map((s) => [s.id as string, { name: s.nome as string, campusId: s.campus_id as string }])
-    );
-    const campusName = new Map((campusRes.data || []).map((c) => [c.id as string, c.nome as string]));
-
-    return NextResponse.json(
-      { success: true, counts: (countsRes.data || []).map((r) => mapCount(r, scheduleById, campusName)) },
-      { headers: NO_STORE }
-    );
-  } catch (err: any) {
-    console.error('Erro em GET /api/culto/contagens:', err);
-    const f = friendlyDbError(err);
-    return NextResponse.json({ error: f.message }, { status: f.status });
-  }
-}
 
 export async function POST(req: NextRequest) {
   try {

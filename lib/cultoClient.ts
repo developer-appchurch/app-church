@@ -70,9 +70,9 @@ const qs = (params: Record<string, string | number | undefined>) =>
   ).toString();
 
 export const CultoClient = {
-  async getConfig(churchId?: string) {
-    const r = await request<{ campuses: CultoCampus[] }>(`/api/culto/config?${qs({ churchId })}`);
-    return r.campuses;
+  /** Campus, horários e lançamentos recentes numa única chamada. */
+  getOverview(churchId?: string) {
+    return request<{ campuses: CultoCampus[]; counts: CultoCount[] }>(`/api/culto/overview?${qs({ churchId })}`);
   },
   createCampus(name: string, churchId?: string) {
     return request<{ id: string }>('/api/culto/config', {
@@ -110,10 +110,6 @@ export const CultoClient = {
     return request<{ success: true }>(`/api/culto/config?${qs({ type, id, churchId })}`, { method: 'DELETE' });
   },
 
-  async getCounts(params: { from?: string; to?: string; limit?: number; churchId?: string }) {
-    const r = await request<{ counts: CultoCount[] }>(`/api/culto/contagens?${qs(params)}`);
-    return r.counts;
-  },
   createCount(scheduleId: string, date: string, input: CultoCountInput, churchId?: string) {
     return request<{ id: string }>('/api/culto/contagens', {
       method: 'POST',
@@ -130,3 +126,10 @@ export const CultoClient = {
     return request<{ success: true }>(`/api/culto/contagens?${qs({ id, churchId })}`, { method: 'DELETE' });
   },
 };
+
+/** Opções da consulta do React Query (usada pela tela e pelo pré-carregamento do menu). */
+export const cultoOverviewQuery = (churchId?: string) => ({
+  queryKey: ['culto-overview', churchId ?? ''] as const,
+  queryFn: () => CultoClient.getOverview(churchId),
+  staleTime: 5 * 60 * 1000,
+});

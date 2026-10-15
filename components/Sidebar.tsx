@@ -45,6 +45,7 @@ import {
   IMAGE_PRESETS,
   formatFileSize,
 } from '../lib/imageOptimizer';
+import { cultoOverviewQuery } from '../lib/cultoClient';
 import { ActiveScreen, UserProfile, CellGroup, ChurchHierarchicalLevel, OrganizationalUnit } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService, invalidateMemoryCache } from '../lib/supabase';
@@ -116,6 +117,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       // Pré-carrega o chunk da tela e a situação do TADEL no cache do React Query
       import('./TadelPresenceView').catch(() => {});
       queryClient.prefetchQuery(tadelStatusQueryOptions(user.churchId)).catch(() => {});
+      return;
+    }
+    if (screenId === 'culto_count' && user) {
+      // Pré-carrega o chunk da tela e a consulta única (campus, horários e lançamentos)
+      import('./CultoCountView').catch(() => {});
+      queryClient.prefetchQuery(cultoOverviewQuery(user.churchId || undefined)).catch(() => {});
       return;
     }
     if (screenId === 'reports' && currentCell?.id) {
@@ -580,6 +587,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
+  const cultoMenuItem = {
+    id: 'culto_count' as ActiveScreen,
+    label: 'Contagem de Culto',
+    sublabel: 'Lançar pessoas, conversões & campus',
+    icon: Church,
+  };
+
   const menuItems = [
     {
       id: 'feed' as ActiveScreen,
@@ -631,6 +645,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             sublabel: 'Galeria & busca de todas as células',
             icon: Compass,
           },
+          ...(canManageCultoCount ? [cultoMenuItem] : []),
           ...(isCellLeaderOrAbove
             ? [
                 {
@@ -671,17 +686,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             sublabel: 'Galeria & busca de todas as células',
             icon: Compass,
           },
+          ...(canManageCultoCount ? [cultoMenuItem] : []),
         ]),
-    ...(canManageCultoCount
-      ? [
-          {
-            id: 'culto_count' as ActiveScreen,
-            label: 'Contagem de Culto',
-            sublabel: 'Lançar pessoas, conversões & campus',
-            icon: Church,
-          },
-        ]
-      : []),
     ...(canManagePermissions
       ? [
           {
