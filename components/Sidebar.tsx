@@ -330,7 +330,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     AppChurchService.hasPermission(user, 'unit:transfer_delete', userPermissions) ||
     AppChurchService.hasPermission(user, 'neighborhood:manage', userPermissions) ||
     AppChurchService.hasPermission(user, 'member:access_manage', userPermissions) ||
-    AppChurchService.hasPermission(user, 'tadel:manage', userPermissions);
+    AppChurchService.hasPermission(user, 'tadel:manage', userPermissions) ||
+    AppChurchService.hasPermission(user, 'culto:configurar', userPermissions);
 
   // Restrito a Líder de Célula ou funções acima (Setor, Área, Rede, Distrito, Pastor, Supervisor, Admin) —
   // deliberadamente mais estrito que canAccessLeadershipFeatures, que também libera Discipulador/Anfitrião/etc.

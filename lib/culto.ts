@@ -17,7 +17,10 @@ import {
  * Total = adultos + crianças (voluntários ficam à parte) — calculado pelo banco.
  */
 
+/** Lançar contagens e ver a lista de lançamentos: Gestor de Culto. */
 export const CULTO_PERMISSION_CODES = ['culto:gerenciar', 'church:admin'];
+/** Cadastrar campus e horários (Configurações da Igreja): NÃO vem com o Gestor de Culto. */
+export const CULTO_CONFIG_PERMISSION_CODES = ['culto:configurar', 'church:admin'];
 
 export const COUNT_FIELDS = [
   ['adults', 'adultos', 'Adultos'],
@@ -34,10 +37,11 @@ export interface CultoAuthorized {
   churchId: string;
 }
 
-/** Sessão + igreja + permissão de Gestor de Culto. Devolve a resposta de erro pronta se negar. */
+/** Sessão + igreja + permissão (por padrão, a de Gestor de Culto). Devolve a resposta de erro pronta se negar. */
 export async function authorizeCulto(
   req: NextRequest,
-  churchIdHint: string | null
+  churchIdHint: string | null,
+  permissionCodes: string[] = CULTO_PERMISSION_CODES
 ): Promise<CultoAuthorized | NextResponse> {
   const auth = await requireSession(req);
   if (auth.error) return auth.error;
@@ -46,7 +50,7 @@ export async function authorizeCulto(
   const churchId = resolveChurchId(actor, churchIdHint);
   if (!churchId) return forbiddenChurch();
 
-  const permErr = await requireAnyPermission(actor, CULTO_PERMISSION_CODES);
+  const permErr = await requireAnyPermission(actor, permissionCodes);
   if (permErr) return permErr;
 
   const supabase = getSupabaseAdminClient();
