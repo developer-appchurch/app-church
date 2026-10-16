@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Bar,
   BarChart,
@@ -34,6 +34,7 @@ import { THRESHOLD_COLORS, colorForPercent } from '@/lib/trackColors';
 import { SupervisionIndicatorsTab, supervisionQuery } from './SupervisionIndicatorsTab';
 import { OrgChartTab } from './OrgChartTab';
 import { CultoIndicatorsTab, cultoIndicatorsQuery } from './CultoIndicatorsTab';
+import { CelulasIndicatorsTab, celulasIndicatorsQuery, pluralizeLevel } from './CelulasIndicatorsTab';
 
 interface ChurchIndicatorsViewProps {
   currentUser: UserProfile;
@@ -42,11 +43,12 @@ interface ChurchIndicatorsViewProps {
 
 type ScopeTab = 'church' | 'area' | 'sector';
 type ViewMode = 'charts' | 'compare';
-type IndicatorsTab = 'track' | 'supervision' | 'orgchart' | 'culto';
+type IndicatorsTab = 'track' | 'supervision' | 'orgchart' | 'culto' | 'celulas';
 
 const TABS: { id: IndicatorsTab; label: string; icon: React.ElementType }[] = [
   { id: 'orgchart', label: 'Organograma', icon: Network },
   { id: 'supervision', label: 'Supervisão', icon: ClipboardCheck },
+  { id: 'celulas', label: 'Células', icon: Users },
   { id: 'culto', label: 'Cultos', icon: Church },
   { id: 'track', label: 'Trilho de Liderança', icon: Award },
 ];
@@ -70,6 +72,27 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
   const [activeTab, setActiveTab] = useState<IndicatorsTab>('orgchart');
   const queryClient = useQueryClient();
 
+  // Nome da aba = menor nível da hierarquia da igreja (ex.: "Células"). Vem da própria consulta da aba;
+  // até ela ser carregada, usa o último nome guardado neste aparelho (ou "Células").
+  const labelStorageKey = `appchurch:celulas-tab-label:${churchId || ''}`;
+  const { data: celulasData } = useQuery({
+    ...celulasIndicatorsQuery(churchId || '', currentUser.id),
+    enabled: false,
+  });
+  const [storedLabel, setStoredLabel] = useState('');
+  useEffect(() => {
+    try {
+      setStoredLabel(localStorage.getItem(labelStorageKey) || '');
+    } catch {}
+  }, [labelStorageKey]);
+  const celulasLabel = celulasData?.label ? pluralizeLevel(celulasData.label) : storedLabel || 'Células';
+  useEffect(() => {
+    if (!celulasData?.label) return;
+    try {
+      localStorage.setItem(labelStorageKey, pluralizeLevel(celulasData.label));
+    } catch {}
+  }, [celulasData?.label, labelStorageKey]);
+
   // Os dados do Trilho (níveis, unidades e indicadores) só são buscados quando o usuário aponta para
   // a aba ou a abre — a tela agora abre no Organograma e não precisa deles. Apontar/tocar na aba já
   // dispara a busca (um instante antes do clique), então ao abrir o Trilho ele costuma estar pronto.
@@ -82,6 +105,9 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
     }
     if (tab === 'culto' && churchId) {
       queryClient.prefetchQuery(cultoIndicatorsQuery(churchId, currentUser.id));
+    }
+    if (tab === 'celulas' && churchId) {
+      queryClient.prefetchQuery(celulasIndicatorsQuery(churchId, currentUser.id));
     }
   };
 
@@ -245,7 +271,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                 }`}
               >
                 <Icon size={15} />
-                {tab.label}
+                {tab.id === 'celulas' ? celulasLabel : tab.label}
               </button>
             );
           })}
@@ -255,6 +281,10 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
       {activeTab === 'supervision' ? (
         <div className="max-w-6xl mx-auto space-y-3">
           <SupervisionIndicatorsTab currentUser={currentUser} />
+        </div>
+      ) : activeTab === 'celulas' ? (
+        <div className="max-w-6xl mx-auto space-y-3">
+          <CelulasIndicatorsTab currentUser={currentUser} />
         </div>
       ) : activeTab === 'culto' ? (
         <div className="max-w-6xl mx-auto space-y-3">
