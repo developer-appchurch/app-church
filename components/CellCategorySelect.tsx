@@ -28,16 +28,17 @@ export const CellCategorySelect: React.FC<CellCategorySelectProps> = ({
   const options = categories.filter((c) => c.active || c.id === value);
   if (options.length === 0) return null;
 
+  // Compacto: rótulo e campo na MESMA linha (ocupa só uma linha do formulário, também no celular)
   return (
-    <div>
-      <label className="block text-xs font-bold text-slate-700 mb-1">Categoria</label>
+    <div className="flex items-center gap-2">
+      <label className="text-xs font-bold text-slate-700 w-[4.6rem] shrink-0">Categoria</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
         className={
           className ||
-          'w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer disabled:opacity-60'
+          'flex-1 min-w-0 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer disabled:opacity-60'
         }
       >
         <option value="">Sem categoria</option>

@@ -869,14 +869,13 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
                   churchId={selectedCell.churchId || churchId}
                   value={editCategoryId}
                   onChange={setEditCategoryId}
-                  className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white cursor-pointer"
                 />
               ) : selectedCell.categoryId && categoryNameById.get(selectedCell.categoryId) ? (
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Categoria</label>
-                  <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-700 w-[4.6rem] shrink-0">Categoria</span>
+                  <span className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800">
                     {categoryNameById.get(selectedCell.categoryId)}
-                  </div>
+                  </span>
                 </div>
               ) : null}
 

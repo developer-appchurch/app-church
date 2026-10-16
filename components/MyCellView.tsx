@@ -2887,7 +2887,6 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   churchId={cell.churchId || currentUser?.churchId}
                   value={editCategoryId}
                   onChange={setEditCategoryId}
-                  className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white cursor-pointer"
                 />
 
                 {/* Grid: Bairro & Endereço */}
