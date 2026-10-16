@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bar,
+  BarChart,
   CartesianGrid,
   ComposedChart,
   Legend,
@@ -24,6 +25,7 @@ import { UserProfile } from '../types';
 
 const COLOR_BARS = '#052447';
 const COLOR_LINE = '#0e7490';
+const COLOR_GUESTS = '#38bdf8';
 
 interface WeeklyRow {
   w: string;
@@ -162,7 +164,7 @@ export const CelulasIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
 
   if (query.isLoading) {
     return (
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-10 flex items-center justify-center text-slate-400">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-10 flex items-center justify-center text-slate-400">
         <Loader2 size={20} className="animate-spin" />
       </div>
     );
@@ -176,7 +178,7 @@ export const CelulasIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
   }
   if (data.weekly.length === 0) {
     return (
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-8 text-center space-y-2">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-8 text-center space-y-2">
         <Users size={28} className="mx-auto text-slate-300" />
         <p className="text-sm font-bold text-slate-800">Ainda não há relatórios semanais lançados.</p>
         <p className="text-xs text-slate-500">
@@ -188,7 +190,7 @@ export const CelulasIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
 
   return (
     <div className="space-y-3">
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4 flex flex-wrap items-center gap-2">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4 flex flex-wrap items-center gap-2">
         {data.areas.length > 0 && (
           <select
             value={areaId}
@@ -230,7 +232,7 @@ export const CelulasIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
         <StatCard label="Reuniões relatadas" value={fmt(summary.reports)} hint={`últimas ${weeks} semanas`} />
       </div>
 
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4">
         <div className="flex items-center justify-between gap-2 mb-2">
           <h3 className="text-sm font-black text-slate-900">Tendência semanal · {plural}</h3>
           <select value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} className={selectClass} aria-label="Período">
@@ -270,12 +272,45 @@ export const CelulasIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
           </ResponsiveContainer>
         </div>
       </div>
+
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4">
+        <h3 className="text-sm font-black text-slate-900">Total de pessoas · {plural}</h3>
+        <p className="text-[11px] text-slate-500 mb-2">
+          Membros + convidados por semana (últimas {weeks} semanas). A altura da barra é o total.
+        </p>
+        <div className="h-72">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+              <XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" minTickGap={18} />
+              <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+              <Tooltip
+                formatter={(v: any, name: any) => [fmt(Number(v)), name]}
+                labelFormatter={(_l: any, payload: any) => {
+                  const p = payload?.[0]?.payload;
+                  return `Semana de ${p?.label ?? ''} · total ${fmt((p?.membros ?? 0) + (p?.convidados ?? 0))}`;
+                }}
+              />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="membros" name="Membros" stackId="total" fill={COLOR_BARS} isAnimationActive={false} />
+              <Bar
+                dataKey="convidados"
+                name="Convidados"
+                stackId="total"
+                fill={COLOR_GUESTS}
+                radius={[3, 3, 0, 0]}
+                isAnimationActive={false}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
     </div>
   );
 };
 
 const StatCard: React.FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
-  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4">
+  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4">
     <p className="text-[11px] font-bold text-slate-500 leading-tight">{label}</p>
     <p className="mt-1 text-2xl font-black tabular-nums text-slate-900">{value}</p>
     {hint && <p className="text-[10px] text-slate-400 mt-0.5 truncate">{hint}</p>}
