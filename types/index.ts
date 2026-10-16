@@ -183,6 +183,8 @@ export interface CellGroup {
   unidade_mae_id?: string | null;
   motherCellId?: string;
   motherCellName?: string;
+  /** Categoria da célula (Crianças, Jovens...); null = sem categoria. */
+  categoryId?: string | null;
 }
 
 export interface CellMember {
@@ -324,6 +326,7 @@ export interface CelulaCardItem {
   leaderMemberIds?: string[];
   sectorName?: string;
   areaName?: string;
+  categoryId?: string | null;
 }
 
 export interface CelulasQueryParams {
@@ -426,6 +429,7 @@ export interface CreateUnitInput {
   unidade_mae_id?: string | null;
   motherCellId?: string;
   motherCellName?: string;
+  categoryId?: string | null;
 }
 
 export interface UpdateUnitLeadersInput {

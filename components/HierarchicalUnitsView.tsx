@@ -1,5 +1,6 @@
 'use client';
 
+import { CellCategorySelect } from './CellCategorySelect';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { markStale } from '@/lib/queryCache';
@@ -204,6 +205,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [neighborhood, setNeighborhood] = useState<string>('Centro');
   const [address, setAddress] = useState<string>('');
   const [meetingDay, setMeetingDay] = useState<string>('Quarta-feira');
+  const [categoryId, setCategoryId] = useState<string>('');
   const [meetingTime, setMeetingTime] = useState<string>('19:30');
 
   // Search filter for unit list
@@ -1395,6 +1397,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         address: isLeafLevel ? address.trim() : undefined,
         meetingDay: isLeafLevel ? meetingDay : undefined,
         meetingTime: isLeafLevel ? meetingTime : undefined,
+        categoryId: isLeafLevel && categoryId ? categoryId : undefined,
         createdByMemberId: user.id || user.login,
         motherCellId: isLeafLevel && effectiveMotherId ? effectiveMotherId : undefined,
       });
@@ -1884,20 +1887,20 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
               {isLeafLevel && (
                 <div className="pt-2 border-t border-slate-100 space-y-3.5">
                   {/* Multiplicada de (opcional) — escolha manual, lista em ordem alfabética */}
-                  <div>
+                  <div className="grid grid-cols-2 gap-2 items-end">
+                  <div className="min-w-0">
                     <label
                       htmlFor="select-multiplicada-de"
-                      className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1"
+                      className="block text-xs font-bold text-slate-700 mb-1 truncate"
+                      title="É multiplicação de qual célula? (opcional)"
                     >
-                      <Sparkles size={13} className="text-sky-600" />
-                      <span>É multiplicação de qual célula?</span>
-                      <span className="font-medium text-slate-400">(opcional)</span>
+                      Multiplicada de:
                     </label>
                     <select
                       id="select-multiplicada-de"
                       value={effectiveMotherId}
                       onChange={(e) => setSelectedMotherId(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer"
+                      className="w-full min-w-0 px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer"
                     >
                       <option value="">Nenhuma (célula nova)</option>
                       {motherCellOptions.map((c) => (
@@ -1907,10 +1910,17 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                         </option>
                       ))}
                     </select>
-                    <p className="text-[10px] text-slate-400 mt-1">
-                      Preencha só se esta célula nasceu da multiplicação de outra. Em branco, ela é cadastrada sem origem.
-                    </p>
                   </div>
+                  <CellCategorySelect
+                    churchId={effectiveChurchId}
+                    value={categoryId}
+                    onChange={setCategoryId}
+                    layout="stacked"
+                  />
+                  </div>
+                  <p className="text-[10px] text-slate-400 -mt-2">
+                    Multiplicada de: preencha só se esta célula nasceu da multiplicação de outra. Em branco, ela é cadastrada sem origem.
+                  </p>
 
                   <div className="flex items-center gap-2 text-xs font-bold text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200">
                     <MapPin size={14} />

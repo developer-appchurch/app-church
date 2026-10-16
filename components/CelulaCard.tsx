@@ -9,9 +9,11 @@ import { MapPin, Calendar, Clock, Users, ChevronRight } from 'lucide-react';
 interface CelulaCardProps {
   celula: CelulaCardItem;
   onSelect?: (celula: CelulaCardItem) => void;
+  /** Nome da categoria da célula (Crianças, Jovens...), se houver. */
+  categoryName?: string;
 }
 
-const CelulaCardComponent: React.FC<CelulaCardProps> = ({ celula, onSelect }) => {
+const CelulaCardComponent: React.FC<CelulaCardProps> = ({ celula, onSelect, categoryName }) => {
   const imageUrl = getCellOptimizedImageUrl(celula.fotoUrl, celula.id || celula.nome, 600, 80);
 
   // Formata dia da semana e horário reais sem valores fictícios fixos
@@ -76,6 +78,11 @@ const CelulaCardComponent: React.FC<CelulaCardProps> = ({ celula, onSelect }) =>
       <div className="p-2.5 sm:p-4 flex-1 flex flex-col justify-between">
         <div>
           {/* Nome da Célula */}
+          {categoryName && (
+            <span className="inline-block mb-1 px-1.5 py-0.5 rounded-md bg-sky-50 text-sky-700 border border-sky-100 text-[9.5px] sm:text-[10.5px] font-bold leading-none">
+              {categoryName}
+            </span>
+          )}
           <h3 className="font-extrabold text-[13px] sm:text-base md:text-[17px] text-[#04213d] group-hover:text-sky-700 transition-colors line-clamp-1 leading-snug">
             {celula.nome}
           </h3>

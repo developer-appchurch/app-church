@@ -10,6 +10,8 @@ import { validateImageFile, formatFileSize } from '@/lib/imageOptimizer';
 import { uploadUnitPhoto, deleteUnitPhoto, isUnitStorageUrl } from '@/lib/unitPhotoStorage';
 import { CelulaCard } from './CelulaCard';
 import { CelulaSearchInput } from './CelulaSearchInput';
+import { CellCategorySelect } from './CellCategorySelect';
+import { useCellCategories } from '@/lib/cellCategories';
 import { DeactivateCellModal, deactivateSuccessMessage } from './DeactivateCellModal';
 import {
   AlertCircle,
@@ -73,6 +75,7 @@ function mapCellGroupToCardItem(c: CellGroup): CelulaCardItem {
     leaderMemberIds: c.leaderMemberIds || [],
     sectorName: c.sectorName,
     areaName: c.areaName,
+    categoryId: c.categoryId || null,
   };
 }
 
@@ -148,6 +151,14 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   // 3. Estados de Filtros Rápidos (Em Memória / Instantâneo)
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedDia, setSelectedDia] = useState<string>('todos');
+  const [selectedCategory, setSelectedCategory] = useState<string>('todas');
+  const { data: categoryList = [] } = useCellCategories(currentUser?.churchId || churchId);
+  const categoryNameById = useMemo(() => new Map(categoryList.map((c) => [c.id, c.name])), [categoryList]);
+  // Filtro mostra categorias ativas e as desativadas que ainda têm células
+  const filterCategories = useMemo(
+    () => categoryList.filter((c) => c.active || c.usageCount > 0).map((c) => ({ id: c.id, name: c.name })),
+    [categoryList]
+  );
   const [isPending, startTransition] = useTransition();
 
   // Filtragem 100% em memória (0ms latency, sem consultas adicionais ao banco ao trocar o dia)
@@ -161,6 +172,11 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
         const cellDia = (c.diaSemana || '').toLowerCase().replace(/-feira/g, '').trim();
         return cellDia.includes(targetDia) || targetDia.includes(cellDia);
       });
+    }
+
+    // Filtro por categoria da célula
+    if (selectedCategory !== 'todas') {
+      list = list.filter((c) => c.categoryId === selectedCategory);
     }
 
     // Filtro por termo de busca (nome, bairro, endereço, líderes)
@@ -177,7 +193,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
     }
 
     return list;
-  }, [allCelulas, selectedDia, searchTerm]);
+  }, [allCelulas, selectedDia, selectedCategory, searchTerm]);
 
   // 4. Nível de Hierarquia do Usuário Logado
   const userHierarchyLevel = useMemo(() => {
@@ -274,6 +290,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   const [editMeetingDay, setEditMeetingDay] = useState<string>('Quarta-feira');
   const [editMeetingTime, setEditMeetingTime] = useState<string>('19:30');
   const [editNeighborhood, setEditNeighborhood] = useState<string>('');
+  const [editCategoryId, setEditCategoryId] = useState<string>('');
   const [editAddress, setEditAddress] = useState<string>('');
   const [editFotoUrl, setEditFotoUrl] = useState<string>('');
 
@@ -305,6 +322,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
     setEditMeetingDay(cellItem.diaSemana || 'Quarta-feira');
     setEditMeetingTime(cellItem.horario || '19:30');
     setEditNeighborhood(cellItem.bairro || '');
+    setEditCategoryId(cellItem.categoryId || '');
     setEditAddress(cellItem.endereco || '');
     setEditFotoUrl(cellItem.fotoUrl || '');
     setPhotoStats(null);
@@ -396,6 +414,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
         meetingDay: editMeetingDay.trim(),
         meetingTime: editMeetingTime.trim(),
         neighborhood: editNeighborhood.trim(),
+        categoryId: editCategoryId,
         address: editAddress.trim(),
         // '' limpa a foto; URL do Storage substitui a anterior
         fotoUrl: editFotoUrl.trim(),
@@ -417,6 +436,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
         diaSemana: updated.meetingDay || editMeetingDay.trim(),
         horario: updated.meetingTime || editMeetingTime.trim(),
         fotoUrl: updated.fotoUrl || editFotoUrl.trim() || undefined,
+        categoryId: updated.categoryId !== undefined ? updated.categoryId : editCategoryId || null,
         memberCount: updated.memberCount ?? selectedCell.memberCount,
         leaderNames: updated.leaderNames || selectedCell.leaderNames,
         leaderMemberIds: updated.leaderMemberIds || selectedCell.leaderMemberIds,
@@ -465,6 +485,9 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
             onSearchChange={setSearchTerm}
             onDiaSemanaChange={setSelectedDia}
             selectedDiaSemana={selectedDia}
+            categories={filterCategories}
+            selectedCategoryId={selectedCategory}
+            onCategoryChange={setSelectedCategory}
             totalCount={filteredCelulas.length}
             isPending={isPending}
           />
@@ -572,6 +595,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
               onClick={() => {
                 setSearchTerm('');
                 setSelectedDia('todos');
+                setSelectedCategory('todas');
               }}
               className="inline-flex items-center gap-2 px-4 py-2 bg-[#052447] hover:bg-[#073366] text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-xs"
             >
@@ -590,6 +614,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
                   key={c.id || c.unidadeId}
                   celula={c}
                   onSelect={(item) => handleOpenDetails(item)}
+                  categoryName={c.categoryId ? categoryNameById.get(c.categoryId) : undefined}
                 />
               ))}
             </div>
@@ -837,6 +862,22 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
                   )}
                 </div>
               </div>
+
+              {/* Categoria (Crianças, Jovens, Casais...) */}
+              {isEditable ? (
+                <CellCategorySelect
+                  churchId={selectedCell.churchId || churchId}
+                  value={editCategoryId}
+                  onChange={setEditCategoryId}
+                />
+              ) : selectedCell.categoryId && categoryNameById.get(selectedCell.categoryId) ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-700 w-[4.6rem] shrink-0">Categoria</span>
+                  <span className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800">
+                    {categoryNameById.get(selectedCell.categoryId)}
+                  </span>
+                </div>
+              ) : null}
 
               {/* Grid: Bairro & Endereço */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

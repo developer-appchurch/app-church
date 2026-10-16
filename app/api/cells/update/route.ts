@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
       ativo,
       motherCellId,
       unidade_criadora_id,
+      categoryId,
     } = body;
 
     // Igreja e usuário vêm da sessão (o Administrador do Sistema pode agir em qualquer igreja)
@@ -195,6 +196,22 @@ export async function POST(req: NextRequest) {
     if (fotoUrl !== undefined) unitUpdatePayload.foto_url = fotoUrl || null;
     if (parentUnitId !== undefined) unitUpdatePayload.pai_id = parentUnitId || null;
     if (ativo !== undefined) unitUpdatePayload.ativo = Boolean(ativo);
+    // Categoria da célula (Crianças, Jovens...): '' / null remove; id precisa ser desta igreja.
+    if (categoryId !== undefined) {
+      const newCategory = typeof categoryId === 'string' && categoryId.trim() !== '' ? categoryId.trim() : null;
+      if (newCategory) {
+        const { data: catCheck } = await supabase
+          .from('celula_categorias')
+          .select('id')
+          .eq('id', newCategory)
+          .eq('igreja_id', currentUnit.igreja_id)
+          .maybeSingle();
+        if (!catCheck) {
+          return NextResponse.json({ error: 'Categoria não encontrada nesta igreja.' }, { status: 400 });
+        }
+      }
+      unitUpdatePayload.categoria_id = newCategory;
+    }
     // "Multiplicada de": '' / null limpa a marca. Alterar a célula mãe é uma mudança significativa,
     // por isso só quem tem permissão de administrador (church:admin) pode fazê-lo.
     const resolvedMother = motherCellId !== undefined ? motherCellId : unidade_criadora_id;
@@ -318,6 +335,7 @@ export async function POST(req: NextRequest) {
       memberCount: updatedUnit.quantidade_membros || 0,
       unidade_criadora_id: updatedUnit.unidade_criadora_id || null,
       motherCellId: updatedUnit.unidade_criadora_id || undefined,
+      categoryId: updatedUnit.categoria_id || null,
     };
 
     return NextResponse.json({
