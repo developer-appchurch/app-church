@@ -2883,12 +2883,6 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   </div>
                 </div>
 
-                <CellCategorySelect
-                  churchId={cell.churchId || currentUser?.churchId}
-                  value={editCategoryId}
-                  onChange={setEditCategoryId}
-                />
-
                 {/* Grid: Bairro & Endereço */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -2919,32 +2913,40 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                   </div>
                 </div>
 
-                {/* Multiplicada de — visível apenas para administradores */}
-                {canEditMotherCell && (
-                  <div>
-                    <label
-                      htmlFor="edit-multiplicada-de"
-                      className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1"
-                    >
-                      <span>Multiplicada de:</span>
-                      <span className="font-medium text-slate-400">(só administradores)</span>
-                    </label>
-                    <select
-                      id="edit-multiplicada-de"
-                      value={editMotherId}
-                      onChange={(e) => setEditMotherId(e.target.value)}
-                      className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white cursor-pointer"
-                    >
-                      <option value="">Nenhuma (sem origem)</option>
-                      {motherCellChoices.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                          {c.parentName ? ` — ${c.parentName}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                {/* Categoria + Multiplicada de (admin) lado a lado: ocupam uma linha só */}
+                <div className={canEditMotherCell ? 'grid grid-cols-2 gap-2 items-end' : ''}>
+                  <CellCategorySelect
+                    churchId={cell.churchId || currentUser?.churchId}
+                    value={editCategoryId}
+                    onChange={setEditCategoryId}
+                    layout={canEditMotherCell ? 'stacked' : 'inline'}
+                  />
+                  {canEditMotherCell && (
+                    <div className="min-w-0">
+                      <label
+                        htmlFor="edit-multiplicada-de"
+                        className="block text-xs font-bold text-slate-700 mb-1 truncate"
+                        title="Multiplicada de (só administradores)"
+                      >
+                        Multiplicada de:
+                      </label>
+                      <select
+                        id="edit-multiplicada-de"
+                        value={editMotherId}
+                        onChange={(e) => setEditMotherId(e.target.value)}
+                        className="w-full min-w-0 text-xs sm:text-sm px-2.5 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:border-sky-800 text-slate-800 bg-slate-50 cursor-pointer"
+                      >
+                        <option value="">Nenhuma (sem origem)</option>
+                        {motherCellChoices.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                            {c.parentName ? ` — ${c.parentName}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
 
                 {/* Seção da Foto da Célula */}
                 <div className="pt-2 border-t border-slate-100 space-y-2.5">
