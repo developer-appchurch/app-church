@@ -33,10 +33,12 @@ import {
   CalendarCheck,
   PowerOff,
   Church,
+  Tags,
 } from 'lucide-react';
 import { TadelSettingsTab } from './TadelSettingsTab';
 import { InactiveCellsTab } from './InactiveCellsTab';
 import { CultoConfigTab } from './CultoConfigTab';
+import { CellCategoriesTab } from './CellCategoriesTab';
 import { UserProfile, Neighborhood, TrackStep, ChurchHierarchicalLevel, OrganizationalUnit } from '@/types';
 import { AppChurchService } from '@/lib/supabase';
 
@@ -48,7 +50,7 @@ interface ChurchSettingsViewProps {
   onNavigateToUnits?: () => void;
 }
 
-type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins' | 'tadel' | 'culto' | 'inactive';
+type SettingsTab = 'track' | 'units' | 'neighborhoods' | 'logins' | 'tadel' | 'culto' | 'categories' | 'inactive';
 
 interface TabDef {
   id: SettingsTab;
@@ -66,6 +68,7 @@ const TABS: TabDef[] = [
   { id: 'logins', label: 'Gestão de Logins', icon: KeyRound, permissionCode: 'member:access_manage' },
   { id: 'tadel', label: 'TADEL', icon: CalendarCheck, permissionCode: 'tadel:manage' },
   { id: 'culto', label: 'Cultos', icon: Church, permissionCode: 'culto:configurar' },
+  { id: 'categories', label: 'Categorias', icon: Tags, permissionCode: 'church:admin' },
   { id: 'inactive', label: 'Células Desativadas', icon: PowerOff, permissionCode: '', systemAdminOnly: true },
 ];
 
@@ -164,6 +167,7 @@ export const ChurchSettingsView: React.FC<ChurchSettingsViewProps> = ({
         {activeTab === 'logins' && <LoginsTab currentUser={currentUser} />}
         {activeTab === 'tadel' && <TadelSettingsTab currentUser={currentUser} />}
         {activeTab === 'culto' && <CultoConfigTab currentUser={currentUser} />}
+        {activeTab === 'categories' && <CellCategoriesTab currentUser={currentUser} />}
         {activeTab === 'inactive' && <InactiveCellsTab currentUser={currentUser} />}
       </div>
     </div>

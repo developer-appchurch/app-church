@@ -50,6 +50,7 @@ import { cultoOverviewQuery } from '../lib/cultoClient';
 import { ActiveScreen, UserProfile, CellGroup, ChurchHierarchicalLevel, OrganizationalUnit } from '../types';
 import { AppChurchLogo } from './AppChurchLogo';
 import { AppChurchService, invalidateMemoryCache } from '../lib/supabase';
+import { CellCategorySelect } from './CellCategorySelect';
 import { uploadUnitPhoto, deleteUnitPhoto } from '../lib/unitPhotoStorage';
 import { uploadAvatarPhoto, deleteAvatarPhoto } from '../lib/avatarPhotoStorage';
 import { usePushNotifications } from '../hooks/usePushNotifications';
@@ -371,6 +372,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [newCellAddress, setNewCellAddress] = useState('');
   const [newCellNeighborhood, setNewCellNeighborhood] = useState('Centro');
   const [newCellDay, setNewCellDay] = useState('Quarta-feira');
+  const [newCellCategoryId, setNewCellCategoryId] = useState('');
   const [newCellTime, setNewCellTime] = useState('19:30');
   const [newCellPhotoPreview, setNewCellPhotoPreview] = useState(''); // data URL local, só para exibição imediata
   const [newCellPhotoUrl, setNewCellPhotoUrl] = useState(''); // URL pública real no Storage, enviada ao backend
@@ -495,6 +497,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     setNewCellSetorId('');
     setNewCellDay('Quarta-feira');
     setNewCellTime('19:30');
+    setNewCellCategoryId('');
     resetNewCellContentFields();
     setCreateCellSuccessMessage('');
     setIsNewCellModalOpen(true);
@@ -576,6 +579,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         meetingDay: newCellDay,
         meetingTime: newCellTime,
         fotoUrl: newCellPhotoUrl || undefined,
+        categoryId: newCellCategoryId || undefined,
         createdByMemberId: user.id || user.login,
       });
 
@@ -1542,6 +1546,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 disabled:opacity-60"
                   />
                 </div>
+
+                <CellCategorySelect
+                  churchId={user.churchId}
+                  value={newCellCategoryId}
+                  onChange={setNewCellCategoryId}
+                  disabled={isCreatingCell}
+                />
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Dia da Reunião</label>

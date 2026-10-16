@@ -9,6 +9,10 @@ interface CelulaSearchInputProps {
   selectedDiaSemana: string;
   totalCount?: number;
   isPending?: boolean;
+  /** Categorias para o filtro (Crianças, Jovens...). Sem itens, a linha de categorias não aparece. */
+  categories?: { id: string; name: string }[];
+  selectedCategoryId?: string;
+  onCategoryChange?: (categoryId: string) => void;
 }
 
 const DIAS_SEMANA = [
@@ -27,6 +31,9 @@ export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
   selectedDiaSemana,
   totalCount,
   isPending = false,
+  categories = [],
+  selectedCategoryId = 'todas',
+  onCategoryChange,
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [, startTransition] = useTransition();
@@ -82,6 +89,29 @@ export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
           </button>
         )}
       </div>
+
+      {/* Filtro por categoria da célula (só aparece se a igreja tem categorias) */}
+      {categories.length > 0 && onCategoryChange && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5" role="group" aria-label="Filtrar por categoria">
+          {[{ id: 'todas', name: 'Todas as categorias' }, ...categories].map((c) => {
+            const isActive = selectedCategoryId === c.id;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => startTransition(() => onCategoryChange(c.id))}
+                className={`shrink-0 px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-full transition-all cursor-pointer border ${
+                  isActive
+                    ? 'bg-sky-600 text-white border-sky-600 font-bold'
+                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 hover:border-slate-400'
+                }`}
+              >
+                {c.name}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Filtros Rápidos de Dia da Semana & Contador de Resultados */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">

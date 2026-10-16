@@ -119,6 +119,7 @@ export async function GET(req: NextRequest) {
           latitude,
           longitude,
           foto_url,
+          categoria_id,
           quantidade_membros
         `)
         .eq('ativo', true);
@@ -244,6 +245,7 @@ export async function GET(req: NextRequest) {
           diaSemana: realDiaSemana || 'Dia a definir',
           horario: realHorario || 'Horário a definir',
           fotoUrl: realFotoUrl,
+          categoryId: u.categoria_id || null,
           memberCount: finalMemberCount,
           quantidade_membros: finalMemberCount,
           leaderNames,

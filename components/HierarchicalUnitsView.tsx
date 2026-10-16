@@ -1,5 +1,6 @@
 'use client';
 
+import { CellCategorySelect } from './CellCategorySelect';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { markStale } from '@/lib/queryCache';
@@ -204,6 +205,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
   const [neighborhood, setNeighborhood] = useState<string>('Centro');
   const [address, setAddress] = useState<string>('');
   const [meetingDay, setMeetingDay] = useState<string>('Quarta-feira');
+  const [categoryId, setCategoryId] = useState<string>('');
   const [meetingTime, setMeetingTime] = useState<string>('19:30');
 
   // Search filter for unit list
@@ -1395,6 +1397,7 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
         address: isLeafLevel ? address.trim() : undefined,
         meetingDay: isLeafLevel ? meetingDay : undefined,
         meetingTime: isLeafLevel ? meetingTime : undefined,
+        categoryId: isLeafLevel && categoryId ? categoryId : undefined,
         createdByMemberId: user.id || user.login,
         motherCellId: isLeafLevel && effectiveMotherId ? effectiveMotherId : undefined,
       });
@@ -1944,6 +1947,13 @@ export const HierarchicalUnitsView: React.FC<HierarchicalUnitsViewProps> = ({
                       />
                     </div>
                   </div>
+
+                  <CellCategorySelect
+                    churchId={effectiveChurchId}
+                    value={categoryId}
+                    onChange={setCategoryId}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:border-sky-800 cursor-pointer"
+                  />
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>

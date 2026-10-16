@@ -1,5 +1,6 @@
 'use client';
 
+import { CellCategorySelect } from './CellCategorySelect';
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
@@ -265,6 +266,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
   const [editMeetingDay, setEditMeetingDay] = useState('');
   const [editMeetingTime, setEditMeetingTime] = useState('');
   const [editNeighborhood, setEditNeighborhood] = useState('');
+  const [editCategoryId, setEditCategoryId] = useState('');
   const [editAddress, setEditAddress] = useState('');
   const [editFotoUrl, setEditFotoUrl] = useState('');
   const [isOptimizingCellPhoto, setIsOptimizingCellPhoto] = useState(false);
@@ -822,6 +824,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
     setEditMeetingDay(cell.meetingDay || 'Quarta-feira');
     setEditMeetingTime(sanitizeTimeValue(cell.meetingTime));
     setEditNeighborhood(cell.bairro || '');
+    setEditCategoryId(cell.categoryId || '');
     setEditAddress(cell.address || '');
     setEditFotoUrl(cell.fotoUrl || '');
     setCellPhotoStats(null);
@@ -901,6 +904,7 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
         meetingDay: editMeetingDay.trim(),
         meetingTime: editMeetingTime.trim(),
         neighborhood: editNeighborhood.trim(),
+        categoryId: editCategoryId,
         address: editAddress.trim(),
         // '' limpa a foto (botão "Remover"); URL do Storage substitui a anterior
         fotoUrl: editFotoUrl.trim(),
@@ -2878,6 +2882,13 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                     </div>
                   </div>
                 </div>
+
+                <CellCategorySelect
+                  churchId={cell.churchId || currentUser?.churchId}
+                  value={editCategoryId}
+                  onChange={setEditCategoryId}
+                  className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white cursor-pointer"
+                />
 
                 {/* Grid: Bairro & Endereço */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

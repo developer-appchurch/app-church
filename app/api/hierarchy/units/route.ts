@@ -177,6 +177,7 @@ export async function GET(req: NextRequest) {
           quantidade_membros,
           dia_semana,
           dia_reuniao,
+          categoria_id,
           horario,
           horario_reuniao,
           bairro,
@@ -355,6 +356,7 @@ export async function GET(req: NextRequest) {
           leaders: unitLeaders,
           leaderCount: unitLeaders.length,
           meetingDay: u.dia_semana || u.dia_reuniao || 'Quarta-feira',
+          categoryId: u.categoria_id || null,
           meetingTime: u.horario || u.horario_reuniao || '19:30',
           neighborhood: u.bairro || 'Centro',
           address: u.endereco || '',
@@ -399,6 +401,7 @@ export async function GET(req: NextRequest) {
         quantidade_membros,
         dia_semana,
         dia_reuniao,
+        categoria_id,
         horario,
         horario_reuniao,
         bairro,
@@ -589,6 +592,7 @@ export async function GET(req: NextRequest) {
         memberCount: memberCount,
         quantidade_membros: memberCount,
         meetingDay: u.dia_semana || u.dia_reuniao || 'Quarta-feira',
+        categoryId: u.categoria_id || null,
         meetingTime: u.horario || u.horario_reuniao || '19:30',
         neighborhood: u.bairro || 'Centro',
         address: u.endereco || '',
@@ -869,6 +873,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Categoria da célula (opcional): precisa existir nesta igreja
+    let validCategoryId: string | null = null;
+    if (isLeafLevel && typeof input.categoryId === 'string' && input.categoryId.trim() !== '') {
+      const { data: catCheck } = await supabase
+        .from('celula_categorias')
+        .select('id')
+        .eq('id', input.categoryId.trim())
+        .eq('igreja_id', input.churchId)
+        .maybeSingle();
+      if (!catCheck) {
+        return NextResponse.json({ error: 'Categoria não encontrada nesta igreja.' }, { status: 400 });
+      }
+      validCategoryId = catCheck.id;
+    }
+
     // 3. Inserir na tabela unidades com atributos consolidados
     const unitPayload: any = {
       id: unitId,
@@ -885,6 +904,7 @@ export async function POST(req: NextRequest) {
       horario: input.meetingTime?.trim() || (isLeafLevel ? '19:30' : null),
       horario_reuniao: input.meetingTime?.trim() || (isLeafLevel ? '19:30' : null),
       foto_url: input.fotoUrl?.trim() || null,
+      categoria_id: isLeafLevel ? validCategoryId : null,
       latitude: input.latitude !== undefined ? Number(input.latitude) : null,
       longitude: input.longitude !== undefined ? Number(input.longitude) : null,
       quantidade_membros: isLeafLevel ? (input.leaderMemberIds?.length || 0) : 0,

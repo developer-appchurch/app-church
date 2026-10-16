@@ -1645,7 +1645,7 @@ export const AppChurchService = {
           // 2. Consulta diretamente 'public.unidades' como fonte única de verdade
           let unitQuery = supabase
             .from('unidades')
-            .select('id, igreja_id, nome, pai_id, unidade_criadora_id, dia_semana, dia_reuniao, horario, horario_reuniao, bairro, endereco, foto_url, quantidade_membros')
+            .select('id, igreja_id, nome, pai_id, unidade_criadora_id, dia_semana, dia_reuniao, horario, horario_reuniao, bairro, endereco, foto_url, categoria_id, quantidade_membros')
             .eq('ativo', true);
 
           if (churchId && churchId !== 'church-master' && churchId !== 'all') {
@@ -1763,6 +1763,7 @@ export const AppChurchService = {
                 address: u.endereco || (u.bairro ? `Bairro ${u.bairro}` : 'Endereço da Célula'),
                 bairro: u.bairro || undefined,
                 fotoUrl: u.foto_url || undefined,
+                categoryId: u.categoria_id || null,
                 meetingDay: u.dia_semana || u.dia_reuniao || 'Quinta-feira',
                 meetingTime: u.horario || u.horario_reuniao || '19:30',
                 memberCount: finalCount,
@@ -1889,6 +1890,8 @@ export const AppChurchService = {
     userMemberId?: string;
     /** Célula de origem ('Multiplicada de'); '' limpa. Só administradores conseguem alterar. */
     motherCellId?: string | null;
+    /** Categoria da célula; '' / null remove. */
+    categoryId?: string | null;
   }): Promise<CellGroup> {
     if (typeof window !== 'undefined') {
       try {
@@ -1951,6 +1954,7 @@ export const AppChurchService = {
       ...(payload.neighborhood ? { bairro: payload.neighborhood } : {}),
       ...(payload.address ? { address: payload.address } : {}),
       ...(payload.fotoUrl ? { fotoUrl: payload.fotoUrl } : {}),
+      ...(payload.categoryId !== undefined ? { categoryId: payload.categoryId || null } : {}),
     };
 
     saveToStorage(
