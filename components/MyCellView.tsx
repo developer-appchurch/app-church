@@ -2868,22 +2868,6 @@ export const MyCellView: React.FC<MyCellViewProps> = ({
                       onChange={(e) => setEditMeetingTime(e.target.value)}
                       className="w-full text-xs sm:text-sm p-2 sm:p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 font-medium bg-white cursor-pointer"
                     />
-                    <div className="hidden sm:flex items-center gap-1 mt-1.5 overflow-x-auto no-scrollbar">
-                      {['19:00', '19:30', '20:00'].map((preset) => (
-                        <button
-                          key={preset}
-                          type="button"
-                          onClick={() => setEditMeetingTime(preset)}
-                          className={`text-[9.5px] sm:text-[10px] font-semibold px-1.5 sm:px-2 py-0.5 rounded-md transition cursor-pointer shrink-0 ${
-                            editMeetingTime === preset
-                              ? 'bg-[#052447] text-white font-bold'
-                              : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {preset}
-                        </button>
-                      ))}
-                    </div>
                   </div>
                 </div>
 
