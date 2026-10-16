@@ -614,7 +614,6 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
                   key={c.id || c.unidadeId}
                   celula={c}
                   onSelect={(item) => handleOpenDetails(item)}
-                  categoryName={c.categoryId ? categoryNameById.get(c.categoryId) : undefined}
                 />
               ))}
             </div>
