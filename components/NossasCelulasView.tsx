@@ -10,7 +10,6 @@ import { validateImageFile, formatFileSize } from '@/lib/imageOptimizer';
 import { uploadUnitPhoto, deleteUnitPhoto, isUnitStorageUrl } from '@/lib/unitPhotoStorage';
 import { CelulaCard } from './CelulaCard';
 import { CelulaSearchInput } from './CelulaSearchInput';
-import { CellCategorySelect } from './CellCategorySelect';
 import { useCellCategories } from '@/lib/cellCategories';
 import { DeactivateCellModal, deactivateSuccessMessage } from './DeactivateCellModal';
 import {
@@ -33,6 +32,7 @@ import {
   CheckCircle2,
   Info,
   PowerOff,
+  Tag,
 } from 'lucide-react';
 
 interface NossasCelulasViewProps {
@@ -291,6 +291,11 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   const [editMeetingTime, setEditMeetingTime] = useState<string>('19:30');
   const [editNeighborhood, setEditNeighborhood] = useState<string>('');
   const [editCategoryId, setEditCategoryId] = useState<string>('');
+  // Campo Categoria do modal: ativas + a categoria atual da célula (mesmo se desativada)
+  const editableCategories = useMemo(
+    () => categoryList.filter((c) => c.active || c.id === editCategoryId),
+    [categoryList, editCategoryId]
+  );
   const [editAddress, setEditAddress] = useState<string>('');
   const [editFotoUrl, setEditFotoUrl] = useState<string>('');
 
@@ -470,6 +475,10 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   };
 
   const isEditable = canEditCell(selectedCell);
+  // Mostra o campo Categoria só se a igreja tem categorias (ou, sem permissão de editar, se a célula tem uma)
+  const showCategoryField = isEditable
+    ? editableCategories.length > 0
+    : Boolean(selectedCell.categoryId && categoryNameById.get(selectedCell.categoryId));
   // Desativar: Líder de Setor ou acima, somente células sob a sua cobertura (o servidor confere de novo)
   const canDeactivate = isEditable && userHierarchyLevel >= 3;
 
@@ -697,7 +706,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
               {/* Foto da Célula */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-slate-700">Foto da Célula:</label>
-                <div className="relative w-full aspect-[16/9] rounded-xl overflow-hidden bg-slate-100 border border-slate-200">
+                <div className="relative w-full aspect-[20/9] rounded-xl overflow-hidden bg-slate-100 border border-slate-200">
                   {editFotoUrl ? (
                     <Image
                       src={editFotoUrl}
@@ -837,7 +846,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
                         className="w-full text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white font-medium"
                         required
                       />
-                      <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-0.5">
+                      <div className="hidden sm:flex items-center gap-1 overflow-x-auto no-scrollbar pb-0.5">
                         {PRESET_HORARIOS.map((preset) => (
                           <button
                             key={preset}
@@ -863,27 +872,11 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
                 </div>
               </div>
 
-              {/* Categoria (Crianças, Jovens, Casais...) */}
-              {isEditable ? (
-                <CellCategorySelect
-                  churchId={selectedCell.churchId || churchId}
-                  value={editCategoryId}
-                  onChange={setEditCategoryId}
-                />
-              ) : selectedCell.categoryId && categoryNameById.get(selectedCell.categoryId) ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-700 w-[4.6rem] shrink-0">Categoria</span>
-                  <span className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800">
-                    {categoryNameById.get(selectedCell.categoryId)}
-                  </span>
-                </div>
-              ) : null}
-
-              {/* Grid: Bairro & Endereço */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
+              {/* Bairro e Categoria lado a lado; Endereço logo abaixo */}
+              <div className={showCategoryField ? 'grid grid-cols-2 gap-3' : ''}>
+                <div className="min-w-0">
                   <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
-                    <MapPin size={13} className="text-rose-500" />
+                    <MapPin size={13} className="text-rose-500 shrink-0" />
                     <span>Bairro:</span>
                   </label>
                   {isEditable ? (
@@ -902,6 +895,36 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
                   )}
                 </div>
 
+                {showCategoryField && (
+                  <div className="min-w-0">
+                    <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1">
+                      <Tag size={13} className="text-sky-600 shrink-0" />
+                      <span>Categoria:</span>
+                    </label>
+                    {isEditable ? (
+                      <select
+                        value={editCategoryId}
+                        onChange={(e) => setEditCategoryId(e.target.value)}
+                        className="w-full min-w-0 text-xs sm:text-sm p-2.5 rounded-xl border border-slate-300 focus:outline-none focus:border-sky-800 text-slate-800 bg-white cursor-pointer"
+                      >
+                        <option value="">Sem categoria</option>
+                        {editableCategories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                            {c.active ? '' : ' (desativada)'}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 truncate">
+                        {categoryNameById.get(selectedCell.categoryId || '')}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Endereço Completo:
