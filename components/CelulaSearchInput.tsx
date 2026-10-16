@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useTransition } from 'react';
-import { Search, X, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useTransition } from 'react';
+import { Search, X, Loader2, ChevronDown, Check, Tag } from 'lucide-react';
 
 interface CelulaSearchInputProps {
   onSearchChange: (search: string) => void;
@@ -37,6 +37,33 @@ export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [, startTransition] = useTransition();
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const categoryRef = useRef<HTMLDivElement>(null);
+
+  // Fecha a lista de categorias ao tocar fora ou apertar Esc
+  useEffect(() => {
+    if (!categoryOpen) return;
+    const onPointer = (e: MouseEvent | TouchEvent) => {
+      if (categoryRef.current && !categoryRef.current.contains(e.target as Node)) setCategoryOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCategoryOpen(false);
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('touchstart', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('touchstart', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [categoryOpen]);
+
+  const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
+  const pickCategory = (id: string) => {
+    setCategoryOpen(false);
+    startTransition(() => onCategoryChange?.(id));
+  };
 
   // Debounce de 300ms antes de disparar a busca no servidor
   useEffect(() => {
@@ -90,29 +117,6 @@ export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
         )}
       </div>
 
-      {/* Filtro por categoria da célula (só aparece se a igreja tem categorias) */}
-      {categories.length > 0 && onCategoryChange && (
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5" role="group" aria-label="Filtrar por categoria">
-          {[{ id: 'todas', name: 'Todas as categorias' }, ...categories].map((c) => {
-            const isActive = selectedCategoryId === c.id;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => startTransition(() => onCategoryChange(c.id))}
-                className={`shrink-0 px-2.5 py-1 text-[11px] sm:text-xs font-semibold rounded-full transition-all cursor-pointer border ${
-                  isActive
-                    ? 'bg-sky-600 text-white border-sky-600 font-bold'
-                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300 hover:border-slate-400'
-                }`}
-              >
-                {c.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       {/* Filtros Rápidos de Dia da Semana & Contador de Resultados */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-1">
         <div className="grid grid-cols-7 gap-1 sm:flex sm:items-center sm:gap-1.5 w-full sm:w-auto">
@@ -139,11 +143,76 @@ export const CelulaSearchInput: React.FC<CelulaSearchInputProps> = ({
           })}
         </div>
 
-        {typeof totalCount === 'number' && (
-          <div className="text-[11px] font-semibold text-slate-500 text-right shrink-0">
-            Total: <span className="font-bold text-[#052447]">{totalCount}</span> células
-          </div>
-        )}
+        <div className="flex items-center justify-between sm:justify-end gap-3 min-w-0">
+          {categories.length > 0 && onCategoryChange ? (
+            <div ref={categoryRef} className="relative min-w-0">
+              <div
+                className={`inline-flex items-center rounded-full border text-[11px] sm:text-xs font-semibold transition-colors ${
+                  selectedCategory
+                    ? 'bg-sky-600 border-sky-600 text-white'
+                    : 'bg-white border-slate-300 text-slate-700 hover:border-slate-400'
+                }`}
+              >
+                <button
+                  type="button"
+                  onClick={() => setCategoryOpen((o) => !o)}
+                  aria-haspopup="listbox"
+                  aria-expanded={categoryOpen}
+                  className="inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 cursor-pointer min-w-0"
+                >
+                  <Tag size={12} className="shrink-0" />
+                  <span className="truncate max-w-[9rem]">{selectedCategory ? selectedCategory.name : 'Categoria'}</span>
+                  {!selectedCategory && <ChevronDown size={13} className={`shrink-0 transition-transform ${categoryOpen ? 'rotate-180' : ''}`} />}
+                </button>
+                {selectedCategory && (
+                  <button
+                    type="button"
+                    onClick={() => pickCategory('todas')}
+                    aria-label="Limpar filtro de categoria"
+                    className="pr-2 pl-0.5 py-1 cursor-pointer hover:text-sky-100"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </div>
+
+              {categoryOpen && (
+                <div
+                  role="listbox"
+                  aria-label="Categoria da célula"
+                  className="absolute left-0 top-full mt-1.5 z-30 w-[min(18rem,calc(100vw-2.5rem))] max-h-64 overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-lg py-1"
+                >
+                  {[{ id: 'todas', name: 'Todas as categorias' }, ...categories].map((c) => {
+                    const isActive = selectedCategoryId === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="option"
+                        aria-selected={isActive}
+                        onClick={() => pickCategory(c.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-3.5 min-h-[2.5rem] text-left text-xs sm:text-sm cursor-pointer transition-colors ${
+                          isActive ? 'bg-sky-50 text-sky-800 font-bold' : 'text-slate-700 hover:bg-slate-50 font-medium'
+                        }`}
+                      >
+                        <span className="truncate">{c.name}</span>
+                        {isActive && <Check size={15} className="shrink-0 text-sky-600" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span />
+          )}
+
+          {typeof totalCount === 'number' && (
+            <div className="text-[11px] font-semibold text-slate-500 text-right shrink-0">
+              Total: <span className="font-bold text-[#052447]">{totalCount}</span> células
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
