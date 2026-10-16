@@ -73,25 +73,34 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
   const queryClient = useQueryClient();
 
   // Nome da aba = menor nível da hierarquia da igreja (ex.: "Células"). Vem da própria consulta da aba;
-  // até ela ser carregada, usa o último nome guardado neste aparelho (ou "Células").
+  // até ela ser carregada, usa o último nome guardado neste aparelho (sem nome, o espaço fica reservado).
   const labelStorageKey = `appchurch:celulas-tab-label:${churchId || ''}`;
   const { data: celulasData } = useQuery({
     ...celulasIndicatorsQuery(churchId || '', currentUser.id),
     enabled: false,
   });
-  const [storedLabel, setStoredLabel] = useState('');
-  useEffect(() => {
+  // Lê o nome guardado já na primeira renderização (esta tela só é desenhada no navegador), para o
+  // nome da aba não "piscar" de "Células" para o nome real da igreja.
+  const [storedLabel] = useState(() => {
     try {
-      setStoredLabel(localStorage.getItem(labelStorageKey) || '');
-    } catch {}
-  }, [labelStorageKey]);
-  const celulasLabel = celulasData?.label ? pluralizeLevel(celulasData.label) : storedLabel || 'Células';
+      return typeof window === 'undefined' ? '' : localStorage.getItem(labelStorageKey) || '';
+    } catch {
+      return '';
+    }
+  });
+  const celulasLabel = celulasData?.label ? pluralizeLevel(celulasData.label) : storedLabel;
   useEffect(() => {
     if (!celulasData?.label) return;
     try {
       localStorage.setItem(labelStorageKey, pluralizeLevel(celulasData.label));
     } catch {}
   }, [celulasData?.label, labelStorageKey]);
+  // Primeira vez neste aparelho (nome ainda desconhecido): busca uma vez, em segundo plano. O resultado
+  // fica em cache por 5 min e a aba abre pronta; nas próximas visitas o nome vem guardado, sem busca.
+  useEffect(() => {
+    if (storedLabel || celulasData?.label || !churchId) return;
+    queryClient.prefetchQuery(celulasIndicatorsQuery(churchId, currentUser.id));
+  }, [storedLabel, celulasData?.label, churchId, currentUser.id, queryClient]);
 
   // Os dados do Trilho (níveis, unidades e indicadores) só são buscados quando o usuário aponta para
   // a aba ou a abre — a tela agora abre no Organograma e não precisa deles. Apontar/tocar na aba já
@@ -271,7 +280,11 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
                 }`}
               >
                 <Icon size={15} />
-                {tab.id === 'celulas' ? celulasLabel : tab.label}
+                {tab.id === 'celulas' ? (
+                  celulasLabel || <span className="invisible">Células</span>
+                ) : (
+                  tab.label
+                )}
               </button>
             );
           })}
