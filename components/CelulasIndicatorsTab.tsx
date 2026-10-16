@@ -28,6 +28,7 @@ const COLOR_LINE = '#0e7490';
 interface WeeklyRow {
   w: string;
   s: string | null;
+  a: string | null;
   n: number;
   m: number;
   g: number;
@@ -110,19 +111,9 @@ export const CelulasIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
     [data, areaId]
   );
 
-  const allowedSectors = useMemo(() => {
-    const set = new Set<string>();
-    (data?.sectors || []).forEach((s) => {
-      if (areaId && s.areaId !== areaId) return;
-      if (sectorId && s.id !== sectorId) return;
-      set.add(s.id);
-    });
-    return set;
-  }, [data, areaId, sectorId]);
-
   const filtered = useMemo(
-    () => (data?.weekly || []).filter((r) => (r.s ? allowedSectors.has(r.s) : !areaId && !sectorId)),
-    [data, allowedSectors, areaId, sectorId]
+    () => (data?.weekly || []).filter((r) => (!areaId || r.a === areaId) && (!sectorId || r.s === sectorId)),
+    [data, areaId, sectorId]
   );
 
   const chartData = useMemo(() => {
