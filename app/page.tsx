@@ -133,7 +133,7 @@ const SCREEN_TITLES: Partial<Record<ActiveScreen, [string, string]>> = {
   tadel: ['Presença no TADEL', 'Registro semanal do líder'],
   member_pool: ['Nossos Membros', 'Gestão geral e vínculo de membros'],
   rankings: ['Conquistas', 'Fiel no Pouco e Guardiões da Constância'],
-  church_indicators: ['Indicadores da Igreja', 'Trilho de liderança em gráficos'],
+  church_indicators: ['Indicadores da Igreja', 'Acompanhe o avanço da sua igreja'],
   hierarchy_units: ['Níveis Organizacionais', 'Cadastro por nível'],
   church_overview: ['Visão Geral da Igreja', 'Organograma e árvore hierárquica'],
   permissions_manage: ['Gestão de Permissões', 'Permissões especiais por membro'],

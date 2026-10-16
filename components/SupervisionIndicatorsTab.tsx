@@ -204,7 +204,7 @@ export const SupervisionIndicatorsTab: React.FC<SupervisionIndicatorsTabProps> =
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-10 flex items-center justify-center text-slate-400">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-10 flex items-center justify-center text-slate-400">
         <Loader2 size={20} className="animate-spin" />
       </div>
     );
@@ -220,7 +220,7 @@ export const SupervisionIndicatorsTab: React.FC<SupervisionIndicatorsTabProps> =
 
   if (data.cells.length === 0) {
     return (
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-10 text-center text-sm text-slate-400">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-10 text-center text-sm text-slate-400">
         Nenhuma célula sob a sua cobertura ainda.
       </div>
     );
@@ -242,7 +242,7 @@ export const SupervisionIndicatorsTab: React.FC<SupervisionIndicatorsTabProps> =
   return (
     <>
       {/* Filtros */}
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4 flex flex-col lg:flex-row lg:items-center gap-3 lg:justify-between">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4 flex flex-col lg:flex-row lg:items-center gap-3 lg:justify-between">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-9 h-9 rounded-lg bg-[#052447] text-white flex items-center justify-center shrink-0">
             <ClipboardCheck size={18} />
