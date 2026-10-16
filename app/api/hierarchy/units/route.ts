@@ -227,7 +227,7 @@ export async function GET(req: NextRequest) {
           }
           const legRes = await fallbackQuery;
           if (!legRes.error && legRes.data) {
-            unitsRes = legRes;
+            unitsRes = legRes as any; // tabela legada "units" não tem categoria_id
           }
         }
         if (unitsRes.error) {
@@ -454,7 +454,7 @@ export async function GET(req: NextRequest) {
 
         const legRes = await fallbackUnitsQuery;
         if (!legRes.error && legRes.data) {
-          unitsData = legRes.data;
+          unitsData = legRes.data as any;
           unitsError = null;
         }
       }
