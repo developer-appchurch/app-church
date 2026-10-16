@@ -269,7 +269,7 @@ export const CultoIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
 
   if (query.isLoading) {
     return (
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-10 flex items-center justify-center text-slate-400">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-10 flex items-center justify-center text-slate-400">
         <Loader2 size={20} className="animate-spin" />
       </div>
     );
@@ -283,7 +283,7 @@ export const CultoIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
   }
   if (data.monthly.length === 0) {
     return (
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-8 text-center space-y-2">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-8 text-center space-y-2">
         <Church size={28} className="mx-auto text-slate-300" />
         <p className="text-sm font-bold text-slate-800">Ainda não há contagens de culto lançadas.</p>
         <p className="text-xs text-slate-500">
@@ -300,7 +300,7 @@ export const CultoIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
   return (
     <div className="space-y-3">
       {/* Filtros */}
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4 flex flex-wrap items-center gap-2">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4 flex flex-wrap items-center gap-2">
         {data.campuses.length > 1 && (
           <select
             value={campusId}
@@ -384,7 +384,7 @@ export const CultoIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
       </div>
 
       {/* Linha: tendência semanal */}
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4">
         <div className="flex items-center justify-between gap-2 mb-2">
           <h3 className="text-sm font-black text-slate-900">Tendência semanal</h3>
           <select value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} className={selectClass} aria-label="Período">
@@ -420,7 +420,7 @@ export const CultoIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
       </div>
 
       {/* Barras: ano x ano anterior */}
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4">
         <h3 className="text-sm font-black text-slate-900">
           {year} x {year - 1}
         </h3>
@@ -441,7 +441,7 @@ export const CultoIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
       </div>
 
       {/* Histórico mensal */}
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4 overflow-x-auto">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4 overflow-x-auto">
         <h3 className="text-sm font-black text-slate-900 mb-2">Histórico mensal · {year}</h3>
         <table className="w-full text-xs">
           <thead>
@@ -474,7 +474,7 @@ export const CultoIndicatorsTab: React.FC<Props> = ({ currentUser }) => {
       </div>
 
       {/* Resumo por ano */}
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4 overflow-x-auto">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4 overflow-x-auto">
         <h3 className="text-sm font-black text-slate-900 mb-2">Resumo por ano · {metricLabel}</h3>
         <table className="w-full text-xs">
           <thead>
@@ -507,7 +507,7 @@ const StatCard: React.FC<{
   hint?: string;
   tone?: 'neutral' | 'up' | 'down';
 }> = ({ label, value, hint, tone = 'neutral' }) => (
-  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-4">
+  <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-4">
     <p className="text-[11px] font-bold text-slate-500 leading-tight">{label}</p>
     <p
       className={`mt-1 text-2xl font-black tabular-nums flex items-center gap-1.5 ${

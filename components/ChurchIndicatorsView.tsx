@@ -255,7 +255,7 @@ export const ChurchIndicatorsView: React.FC<ChurchIndicatorsViewProps> = ({ curr
               Indicadores da Igreja
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 mt-0.5 truncate">
-              Acompanhe o avanço do discipulado por toda a igreja, Área ou Setor.
+              Acompanhe o avanço da sua igreja
             </p>
           </div>
         </div>

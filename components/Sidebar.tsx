@@ -676,7 +676,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {
                   id: 'church_indicators' as ActiveScreen,
                   label: 'Indicadores da Igreja',
-                  sublabel: 'Trilho de Liderança em gráficos',
+                  sublabel: 'Acompanhe o avanço da sua igreja',
                   icon: BarChart3,
                 },
                 {

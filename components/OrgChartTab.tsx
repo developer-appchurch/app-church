@@ -404,7 +404,7 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
 
   if (isLoading) {
     return (
-      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-10 flex items-center justify-center text-slate-400">
+      <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-10 flex items-center justify-center text-slate-400">
         <Loader2 size={20} className="animate-spin" />
       </div>
     );
@@ -421,7 +421,7 @@ export const OrgChartTab: React.FC<OrgChartTabProps> = ({ currentUser }) => {
   const selected = selectedId ? findNode(tree, selectedId) : null;
 
   return (
-    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-200/80 shadow-xs p-3 sm:p-5">
+    <div className="bg-white rounded-xl sm:rounded-2xl border border-slate-300 shadow-sm p-3 sm:p-5">
       {/* Barra: resumo + ações */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap gap-1.5">
