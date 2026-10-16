@@ -478,7 +478,7 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   // Mostra o campo Categoria só se a igreja tem categorias (ou, sem permissão de editar, se a célula tem uma)
   const showCategoryField = isEditable
     ? editableCategories.length > 0
-    : Boolean(selectedCell.categoryId && categoryNameById.get(selectedCell.categoryId));
+    : Boolean(selectedCell?.categoryId && categoryNameById.get(selectedCell.categoryId));
   // Desativar: Líder de Setor ou acima, somente células sob a sua cobertura (o servidor confere de novo)
   const canDeactivate = isEditable && userHierarchyLevel >= 3;
 
