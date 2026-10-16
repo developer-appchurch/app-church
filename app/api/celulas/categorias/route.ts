@@ -4,7 +4,9 @@ import { requireSession, resolveChurchId, forbiddenChurch, requireAnyPermission 
 
 /**
  * Categorias de célula da igreja (Crianças, Adolescentes, Jovens, Adultos, Casais...).
- * GET    ?churchId=...            -> { categories: [{ id, name, order, active, usageCount }] }
+ * GET    ?churchId=...[&usage=1]  -> { categories: [{ id, name, order, active, usageCount }] }
+ *         (usageCount só é calculado com usage=1, usado pela aba Categorias das Configurações;
+ *          nas demais telas a lista vem leve, com usageCount = 0)
  * POST   { churchId, name }       -> cria
  * PATCH  { churchId, id, name?, active? } -> renomeia / ativa / desativa
  * DELETE ?churchId=...&id=...     -> exclui (só se nenhuma célula usar; senão, desative)
@@ -42,6 +44,7 @@ export async function GET(req: NextRequest) {
     if ('error' in ctx) return ctx.error;
     const { supabase, churchId } = ctx;
 
+    const withUsage = req.nextUrl.searchParams.get('usage') === '1';
     const [catRes, useRes] = await Promise.all([
       supabase
         .from('celula_categorias')
@@ -49,7 +52,9 @@ export async function GET(req: NextRequest) {
         .eq('igreja_id', churchId)
         .order('ordem')
         .order('nome'),
-      supabase.from('unidades').select('categoria_id').eq('igreja_id', churchId).not('categoria_id', 'is', null),
+      withUsage
+        ? supabase.from('unidades').select('categoria_id').eq('igreja_id', churchId).not('categoria_id', 'is', null)
+        : Promise.resolve({ data: [] as any[], error: null }),
     ]);
     if (catRes.error) throw catRes.error;
     if (useRes.error) throw useRes.error;

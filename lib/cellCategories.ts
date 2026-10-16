@@ -21,18 +21,20 @@ async function request<T = any>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export async function fetchCellCategories(churchId: string): Promise<CellCategory[]> {
+export async function fetchCellCategories(churchId: string, withUsage = false): Promise<CellCategory[]> {
   const data = await request<{ categories: CellCategory[] }>(
-    `/api/celulas/categorias?churchId=${encodeURIComponent(churchId)}`
+    `/api/celulas/categorias?churchId=${encodeURIComponent(churchId)}${withUsage ? '&usage=1' : ''}`
   );
   return data.categories || [];
 }
 
 /** Lista de categorias da igreja (uma busca, reaproveitada por todas as telas por 10 min). */
-export function useCellCategories(churchId?: string | null) {
+export function useCellCategories(churchId?: string | null, options?: { withUsage?: boolean }) {
+  const withUsage = Boolean(options?.withUsage);
   return useQuery({
-    queryKey: cellCategoriesKey(churchId || ''),
-    queryFn: () => fetchCellCategories(churchId as string),
+    // A versão com contagem de uso (só na aba Categorias) tem chave própria; ambas são invalidadas juntas.
+    queryKey: withUsage ? [...cellCategoriesKey(churchId || ''), 'usage'] : cellCategoriesKey(churchId || ''),
+    queryFn: () => fetchCellCategories(churchId as string, withUsage),
     enabled: Boolean(churchId),
     staleTime: 10 * 60 * 1000,
   });

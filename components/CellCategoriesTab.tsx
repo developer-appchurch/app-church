@@ -12,7 +12,7 @@ import { CellCategory, useCellCategories, useCellCategoryMutations } from '@/lib
  */
 export const CellCategoriesTab: React.FC<{ currentUser: UserProfile }> = ({ currentUser }) => {
   const churchId = currentUser.churchId || '';
-  const query = useCellCategories(churchId);
+  const query = useCellCategories(churchId, { withUsage: true });
   const actions = useCellCategoryMutations(churchId);
 
   const [newName, setNewName] = useState('');

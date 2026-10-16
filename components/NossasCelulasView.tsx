@@ -154,11 +154,11 @@ export const NossasCelulasView: React.FC<NossasCelulasViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('todas');
   const { data: categoryList = [] } = useCellCategories(currentUser?.churchId || churchId);
   const categoryNameById = useMemo(() => new Map(categoryList.map((c) => [c.id, c.name])), [categoryList]);
-  // Filtro mostra categorias ativas e as desativadas que ainda têm células
-  const filterCategories = useMemo(
-    () => categoryList.filter((c) => c.active || c.usageCount > 0).map((c) => ({ id: c.id, name: c.name })),
-    [categoryList]
-  );
+  // Filtro mostra categorias ativas e as desativadas que ainda têm células na lista
+  const filterCategories = useMemo(() => {
+    const usedIds = new Set(allCelulas.map((c) => c.categoryId).filter(Boolean) as string[]);
+    return categoryList.filter((c) => c.active || usedIds.has(c.id)).map((c) => ({ id: c.id, name: c.name }));
+  }, [categoryList, allCelulas]);
   const [isPending, startTransition] = useTransition();
 
   // Filtragem 100% em memória (0ms latency, sem consultas adicionais ao banco ao trocar o dia)
