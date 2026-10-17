@@ -11,7 +11,7 @@ import {
 
 /**
  * Contagens de culto (uma por horário e data).
- * POST   -> { scheduleId, date, adults, children, volunteers, conversions, reconciliations, guests, note? }
+ * POST   -> { scheduleId, date, adults, children, volunteers, conversions, reconciliations, guests, cars, motorcycles, note? }
  * PATCH  -> { id, adults?, children?, ... , note? }   (horário e data não mudam: exclua e lance de novo)
  * DELETE -> ?id=...
  * (A leitura é feita por GET /api/culto/overview.)

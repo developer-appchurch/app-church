@@ -29,6 +29,8 @@ export const COUNT_FIELDS = [
   ['conversions', 'conversoes', 'Conversões'],
   ['reconciliations', 'reconciliacoes', 'Reconciliações'],
   ['guests', 'convidados', 'Convidados'],
+  ['cars', 'carros', 'Carros'],
+  ['motorcycles', 'motos', 'Motos'],
 ] as const;
 
 export interface CultoAuthorized {
@@ -76,7 +78,7 @@ export function isValidUuid(value: unknown): value is string {
 }
 
 /**
- * Lê os seis números do corpo. Em `partial` só valida os que vieram; senão ausentes valem 0.
+ * Lê os números do corpo. Em `partial` só valida os que vieram; senão ausentes valem 0.
  * Devolve as colunas do banco ou uma mensagem de erro.
  */
 export function parseCounts(body: any, partial: boolean): Record<string, number> | string {
@@ -129,6 +131,8 @@ export function mapCount(row: any, scheduleById: Map<string, { name: string; cam
     conversions: Number(row.conversoes),
     reconciliations: Number(row.reconciliacoes),
     guests: Number(row.convidados),
+    cars: Number(row.carros ?? 0),
+    motorcycles: Number(row.motos ?? 0),
     total: Number(row.total),
     note: (row.observacao as string | null) ?? '',
     updatedAt: row.atualizado_em as string,

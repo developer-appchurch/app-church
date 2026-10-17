@@ -29,6 +29,8 @@ export interface CultoCount {
   conversions: number;
   reconciliations: number;
   guests: number;
+  cars: number;
+  motorcycles: number;
   total: number;
   note: string;
   updatedAt: string;
@@ -41,6 +43,8 @@ export interface CultoCountInput {
   conversions: number;
   reconciliations: number;
   guests: number;
+  cars: number;
+  motorcycles: number;
   note?: string;
 }
 
