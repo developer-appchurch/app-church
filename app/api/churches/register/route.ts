@@ -450,6 +450,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 5. Ativa o Domingo em Dia (tela Conquistas) para a nova igreja; começa na próxima segunda
+    if (insertedLevels.length > 0) {
+      const admin = getSupabaseAdminClient();
+      const { error: dedErr } = admin
+        ? await admin.rpc('domingo_em_dia_ativar_igreja', { p_igreja_id: churchId })
+        : { error: { message: 'cliente admin indisponível' } };
+      if (dedErr) {
+        console.warn('Aviso ao ativar o Domingo em Dia para a nova igreja:', dedErr.message);
+      }
+    }
+
     const result: RegisterChurchResult = {
       church: churchObj,
       pastor: pastorProfile,
