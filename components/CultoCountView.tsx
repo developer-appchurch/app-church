@@ -40,6 +40,8 @@ interface FormState {
   conversions: string;
   reconciliations: string;
   guests: string;
+  cars: string;
+  motorcycles: string;
   note: string;
 }
 
@@ -50,6 +52,8 @@ const EMPTY_FORM: FormState = {
   conversions: '',
   reconciliations: '',
   guests: '',
+  cars: '',
+  motorcycles: '',
   note: '',
 };
 
@@ -60,6 +64,8 @@ const NUMBER_FIELDS: { key: keyof Omit<FormState, 'note'>; label: string; hint?:
   { key: 'conversions', label: 'Conversões' },
   { key: 'reconciliations', label: 'Reconciliações' },
   { key: 'guests', label: 'Convidados' },
+  { key: 'cars', label: 'Carros' },
+  { key: 'motorcycles', label: 'Motos' },
 ];
 
 const num = (v: string) => (v.trim() === '' ? 0 : Number(v));
@@ -262,6 +268,8 @@ const LaunchForm: React.FC<{
         conversions: String(existing.conversions),
         reconciliations: String(existing.reconciliations),
         guests: String(existing.guests),
+        cars: String(existing.cars),
+        motorcycles: String(existing.motorcycles),
         note: existing.note || '',
       });
     } else {
@@ -294,6 +302,8 @@ const LaunchForm: React.FC<{
       conversions: num(form.conversions),
       reconciliations: num(form.reconciliations),
       guests: num(form.guests),
+      cars: num(form.cars),
+      motorcycles: num(form.motorcycles),
       note: form.note.trim(),
     };
     try {
@@ -507,7 +517,8 @@ const HistoryList: React.FC<{
           </div>
           <p className="text-[11px] text-slate-600 mt-2">
             Adultos {c.adults} · Crianças {c.children} · Voluntários {c.volunteers} · Conversões {c.conversions} ·
-            Reconciliações {c.reconciliations} · Convidados {c.guests}
+            Reconciliações {c.reconciliations} · Convidados {c.guests} ·
+            Carros {c.cars} · Motos {c.motorcycles}
           </p>
           {c.note && <p className="text-[11px] text-slate-500 italic mt-1">{c.note}</p>}
           <div className="flex items-center justify-end gap-2 mt-2">

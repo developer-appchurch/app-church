@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
       supabase
         .from('culto_contagens')
         .select(
-          'id, horario_id, data_culto, adultos, criancas, voluntarios, conversoes, reconciliacoes, convidados, total, observacao, atualizado_em'
+          'id, horario_id, data_culto, adultos, criancas, voluntarios, conversoes, reconciliacoes, convidados, carros, motos, total, observacao, atualizado_em'
         )
         .eq('igreja_id', churchId)
         .gte('data_culto', isoDaysAgo(WINDOW_DAYS))
